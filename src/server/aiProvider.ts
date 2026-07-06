@@ -127,7 +127,7 @@ export class FoundryAiProvider implements AiProvider {
   }
 
   private async getAccessToken(): Promise<AccessToken> {
-    const token = await this.credential.getToken("https://cognitiveservices.azure.com/.default");
+    const token = await this.credential.getToken("https://ai.azure.com/.default");
     if (!token) {
       throw new Error("Could not acquire Azure credential token for Foundry.");
     }
