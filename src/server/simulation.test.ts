@@ -22,7 +22,7 @@ const actor: AgentProfile = {
   id: "agent_a",
   simulationId: "default",
   name: "Ada",
-  model: "gpt-5.5",
+  model: "gpt-5-mini",
   active: true,
   position: { x: 1, y: 1 },
   corePrinciples: [],
@@ -41,7 +41,7 @@ const agents: AgentProfile[] = [
     ...actor,
     id: "agent_b",
     name: "Turing",
-    model: "claude-sonnet-5",
+    model: "grok-4.3",
     position: { x: 2, y: 1 }
   }
 ];

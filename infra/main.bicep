@@ -25,11 +25,14 @@ param aiFoundryName string = 'nic-node-ai-foundry-${uniqueString(resourceGroup()
 @description('Microsoft Foundry project name.')
 param aiProjectName string = 'ai-civ-sandbox'
 
-@description('Foundry deployment name for GPT-5.5.')
-param gpt55DeploymentName string = 'gpt-5.5'
+@description('Foundry deployment name for GPT-5 mini.')
+param gpt5MiniDeploymentName string = 'gpt-5-mini'
 
-@description('Foundry deployment name for Claude Sonnet 5.')
-param claudeSonnet5DeploymentName string = 'claude-sonnet-5'
+@description('Foundry deployment name for Grok 4.3.')
+param grok43DeploymentName string = 'grok-4.3'
+
+@description('Foundry deployment name for DeepSeek V4 Pro.')
+param deepSeekV4ProDeploymentName string = 'DeepSeek-V4-Pro'
 
 @allowed([
   'mock'
@@ -194,12 +197,16 @@ resource app 'Microsoft.Web/sites@2024-04-01' = {
           value: foundryProjectEndpoint
         }
         {
-          name: 'GPT55_DEPLOYMENT_NAME'
-          value: gpt55DeploymentName
+          name: 'GPT_5_MINI_DEPLOYMENT_NAME'
+          value: gpt5MiniDeploymentName
         }
         {
-          name: 'CLAUDE_SONNET5_DEPLOYMENT_NAME'
-          value: claudeSonnet5DeploymentName
+          name: 'GROK_43_DEPLOYMENT_NAME'
+          value: grok43DeploymentName
+        }
+        {
+          name: 'DEEPSEEK_V4_PRO_DEPLOYMENT_NAME'
+          value: deepSeekV4ProDeploymentName
         }
       ]
     }

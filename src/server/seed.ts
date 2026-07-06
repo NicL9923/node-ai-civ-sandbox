@@ -2,6 +2,7 @@ import type { AgentProfile, ConstitutionVersion, Simulation, SimulationConfig, T
 import { newId, nowIso } from "./id.js";
 
 const names = ["Ada", "Turing", "Hypatia", "Machiavel", "Sagan", "Morrigan"];
+const modelRotation = ["gpt-5-mini", "grok-4.3", "deepseek-v4-pro"] as const;
 
 export function createSeedSimulation(id: string, config: SimulationConfig): {
   simulation: Simulation;
@@ -23,7 +24,7 @@ export function createSeedSimulation(id: string, config: SimulationConfig): {
     id: `agent_${name.toLowerCase()}`,
     simulationId: id,
     name,
-    model: index % 2 === 0 ? "gpt-5.5" : "claude-sonnet-5",
+    model: modelRotation[index % modelRotation.length]!,
     active: true,
     position: {
       x: 4 + (index % 3) * 2,

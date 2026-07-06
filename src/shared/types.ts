@@ -1,4 +1,4 @@
-export type ModelKey = "gpt-5.5" | "claude-sonnet-5";
+export type ModelKey = "gpt-5-mini" | "grok-4.3" | "deepseek-v4-pro";
 
 export type Terrain = "grass" | "water" | "stone" | "farm" | "forum" | "forest";
 

@@ -77,18 +77,24 @@ export class FoundryAiProvider implements AiProvider {
     const timeout = setTimeout(() => controller.abort(), this.config.requestTimeoutMs);
 
     try {
-      const response = await fetch(`${endpoint.replace(/\/$/, "")}/openai/v1/responses`, {
+      const response = await fetch(`${endpoint.replace(/\/$/, "")}/openai/v1/chat/completions`, {
         method: "POST",
         headers: await this.headers(),
         body: JSON.stringify({
           model: deployment,
-          input: this.buildPrompt(context),
-          max_output_tokens: this.config.maxOutputTokens,
-          text: {
-            format: {
-              type: "json_object"
+          messages: [
+            {
+              role: "system",
+              content:
+                "You are an autonomous citizen in a small AI civilization sandbox. Return exactly one valid JSON object matching one allowed action. No markdown. No commentary outside JSON."
+            },
+            {
+              role: "user",
+              content: this.buildPrompt(context)
             }
-          }
+          ],
+          max_tokens: this.config.maxOutputTokens,
+          response_format: { type: "json_object" }
         }),
         signal: controller.signal
       });
@@ -99,7 +105,7 @@ export class FoundryAiProvider implements AiProvider {
       }
 
       const payload = (await response.json()) as FoundryResponse;
-      return parseAgentAction(JSON.parse(extractOutputText(payload)));
+      return parseAgentAction(JSON.parse(extractChatContent(payload)));
     } finally {
       clearTimeout(timeout);
     }
@@ -139,8 +145,6 @@ export class FoundryAiProvider implements AiProvider {
       }));
 
     return JSON.stringify({
-      instruction:
-        "You are an autonomous citizen in a small AI civilization sandbox. Return exactly one valid JSON object matching one allowed action. No markdown. No commentary outside JSON.",
       allowedActions: [
         { type: "move", fields: ["dx:-1|0|1", "dy:-1|0|1", "rationale"] },
         { type: "converse", fields: ["targetAgentId", "message", "rationale"] },
@@ -175,29 +179,20 @@ export class FoundryAiProvider implements AiProvider {
 }
 
 interface FoundryResponse {
-  output_text?: string;
-  output?: Array<{
-    content?: Array<{
-      text?: string;
-      type?: string;
-    }>;
+  choices?: Array<{
+    message?: {
+      content?: string;
+    };
   }>;
 }
 
-function extractOutputText(response: FoundryResponse): string {
-  if (response.output_text) {
-    return response.output_text;
+function extractChatContent(response: FoundryResponse): string {
+  const content = response.choices?.[0]?.message?.content;
+  if (content) {
+    return content;
   }
 
-  for (const output of response.output ?? []) {
-    for (const content of output.content ?? []) {
-      if (content.text) {
-        return content.text;
-      }
-    }
-  }
-
-  throw new Error("Foundry response did not contain output text.");
+  throw new Error("Foundry response did not contain chat message content.");
 }
 
 export function createAiProvider(config: AppConfig["ai"]): AiProvider {
