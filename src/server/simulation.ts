@@ -374,6 +374,19 @@ function selectActors(agents: AgentProfile[], turn: number, count: number): Agen
     return [];
   }
 
+  if (count === 1) {
+    const lastActor = agents
+      .filter((agent) => agent.lastActedTurn !== undefined)
+      .sort((a, b) => (b.lastActedTurn ?? -1) - (a.lastActedTurn ?? -1))[0];
+
+    for (let offset = 0; offset < agents.length; offset += 1) {
+      const actor = agents[(turn + offset) % agents.length];
+      if (actor && (!lastActor || actor.model !== lastActor.model)) {
+        return [actor];
+      }
+    }
+  }
+
   const actors: AgentProfile[] = [];
   for (let i = 0; i < Math.min(count, agents.length); i += 1) {
     const actor = agents[(turn * count + i) % agents.length];
