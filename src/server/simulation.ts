@@ -29,6 +29,11 @@ export class SimulationEngine {
   async ensureSeeded(): Promise<void> {
     const existing = await this.store.getSimulation(this.config.simulationId);
     if (existing) {
+      if (JSON.stringify(existing.config) !== JSON.stringify(this.config.simulation)) {
+        existing.config = this.config.simulation;
+        existing.updatedAt = nowIso();
+        await this.store.upsertSimulation(existing);
+      }
       return;
     }
 
