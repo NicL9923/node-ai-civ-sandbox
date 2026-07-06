@@ -75,27 +75,33 @@ export class FoundryAiProvider implements AiProvider {
     const deployment = this.config.deployments[context.agent.model];
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.config.requestTimeoutMs);
+    const requestBody: Record<string, unknown> = {
+      model: deployment,
+      messages: [
+        {
+          role: "system",
+          content:
+            "You are an autonomous citizen in a small AI civilization sandbox. Return exactly one valid JSON object matching one allowed action. No markdown. No commentary outside JSON."
+        },
+        {
+          role: "user",
+          content: this.buildPrompt(context)
+        }
+      ],
+      response_format: { type: "json_object" }
+    };
+
+    if (context.agent.model === "gpt-5-mini") {
+      requestBody.max_completion_tokens = this.config.maxOutputTokens;
+    } else {
+      requestBody.max_tokens = this.config.maxOutputTokens;
+    }
 
     try {
       const response = await fetch(`${endpoint.replace(/\/$/, "")}/openai/v1/chat/completions`, {
         method: "POST",
         headers: await this.headers(),
-        body: JSON.stringify({
-          model: deployment,
-          messages: [
-            {
-              role: "system",
-              content:
-                "You are an autonomous citizen in a small AI civilization sandbox. Return exactly one valid JSON object matching one allowed action. No markdown. No commentary outside JSON."
-            },
-            {
-              role: "user",
-              content: this.buildPrompt(context)
-            }
-          ],
-          max_tokens: this.config.maxOutputTokens,
-          response_format: { type: "json_object" }
-        }),
+        body: JSON.stringify(requestBody),
         signal: controller.signal
       });
 
