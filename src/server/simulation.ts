@@ -124,15 +124,15 @@ export class SimulationEngine {
       const openProposals = proposals.filter((proposal) => proposal.status === "open");
 
       for (const actor of actors) {
-        const action = await this.aiProvider.decideAction({
+        const action = await this.decideActionWithFallback(
           simulation,
-          agent: actor,
-          agents: activeAgents,
+          actor,
+          activeAgents,
           tiles,
           currentConstitution,
           openProposals,
-          recentEvents: recentEvents.map((event) => `${event.turn}: ${event.message}`)
-        });
+          recentEvents.map((event) => `${event.turn}: ${event.message}`)
+        );
 
         await this.applyAction(simulation, actor, action, activeAgents, tiles, openProposals, currentConstitution);
       }
@@ -145,6 +145,41 @@ export class SimulationEngine {
       await this.recordEvent(simulation.id, simulation.turn, "turnAdvanced", `Turn ${simulation.turn} advanced.`);
     } finally {
       this.advancing = false;
+    }
+  }
+
+  private async decideActionWithFallback(
+    simulation: Simulation,
+    actor: AgentProfile,
+    activeAgents: AgentProfile[],
+    tiles: Tile[],
+    currentConstitution: ConstitutionVersion,
+    openProposals: AmendmentProposal[],
+    recentEvents: string[]
+  ): Promise<AgentAction> {
+    try {
+      return await withTimeout(
+        this.aiProvider.decideAction({
+          simulation,
+          agent: actor,
+          agents: activeAgents,
+          tiles,
+          currentConstitution,
+          openProposals,
+          recentEvents
+        }),
+        25_000,
+        `Timed out waiting for ${actor.name} (${actor.model}) to choose an action.`
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown AI decision failure.";
+      await this.recordEvent(simulation.id, simulation.turn, "actionRejected", `${actor.name} could not decide: ${message}`, actor.id, undefined, undefined, {
+        model: actor.model
+      });
+      return {
+        type: "noop",
+        rationale: `AI decision failed for ${actor.model}; preserving turn progress.`
+      };
     }
   }
 
@@ -421,4 +456,20 @@ function distance(a: { x: number; y: number }, b: { x: number; y: number }): num
 
 function capList<T>(items: T[], limit: number): T[] {
   return items.slice(Math.max(0, items.length - limit));
+}
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error(message)), timeoutMs);
+    promise.then(
+      (value) => {
+        clearTimeout(timeout);
+        resolve(value);
+      },
+      (error: unknown) => {
+        clearTimeout(timeout);
+        reject(error);
+      }
+    );
+  });
 }
