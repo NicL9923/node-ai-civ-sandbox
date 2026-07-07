@@ -91,7 +91,7 @@ export class FoundryAiProvider implements AiProvider {
       response_format: { type: "json_object" }
     };
 
-    if (context.agent.model === "gpt-5-mini") {
+    if (context.agent.model.startsWith("gpt-5")) {
       requestBody.max_completion_tokens = this.config.maxOutputTokens;
     } else {
       requestBody.max_tokens = this.config.maxOutputTokens;

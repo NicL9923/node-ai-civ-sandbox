@@ -25,8 +25,8 @@ param aiFoundryName string = 'nic-node-ai-foundry-${uniqueString(resourceGroup()
 @description('Microsoft Foundry project name.')
 param aiProjectName string = 'ai-civ-sandbox'
 
-@description('Foundry deployment name for GPT-5 mini.')
-param gpt5MiniDeploymentName string = 'gpt-5-mini'
+@description('Foundry deployment name for GPT-5.4.')
+param gpt54DeploymentName string = 'gpt-5.4'
 
 @description('Foundry deployment name for Grok 4.3.')
 param grok43DeploymentName string = 'grok-4.3'
@@ -197,8 +197,8 @@ resource app 'Microsoft.Web/sites@2024-04-01' = {
           value: foundryProjectEndpoint
         }
         {
-          name: 'GPT_5_MINI_DEPLOYMENT_NAME'
-          value: gpt5MiniDeploymentName
+          name: 'GPT_5_4_DEPLOYMENT_NAME'
+          value: gpt54DeploymentName
         }
         {
           name: 'GROK_43_DEPLOYMENT_NAME'

@@ -2,7 +2,7 @@ import type { AgentProfile, ConstitutionVersion, Simulation, SimulationConfig, T
 import { newId, nowIso } from "./id.js";
 
 const names = ["Ada", "Turing", "Hypatia", "Machiavel", "Sagan", "Morrigan"];
-const modelRotation = ["gpt-5-mini", "grok-4.3", "deepseek-v4-pro"] as const;
+const modelRotation = ["gpt-5.4", "grok-4.3", "deepseek-v4-pro"] as const;
 
 export function createSeedSimulation(id: string, config: SimulationConfig): {
   simulation: Simulation;

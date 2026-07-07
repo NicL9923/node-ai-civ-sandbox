@@ -70,7 +70,7 @@ export function loadConfig(): AppConfig {
       foundryProjectEndpoint,
       foundryApiKey: optionalEnv("FOUNDRY_API_KEY"),
       deployments: {
-        "gpt-5-mini": optionalEnv("GPT_5_MINI_DEPLOYMENT_NAME") ?? "gpt-5-mini",
+        "gpt-5.4": optionalEnv("GPT_5_4_DEPLOYMENT_NAME") ?? "gpt-5.4",
         "grok-4.3": optionalEnv("GROK_43_DEPLOYMENT_NAME") ?? "grok-4.3",
         "deepseek-v4-pro": optionalEnv("DEEPSEEK_V4_PRO_DEPLOYMENT_NAME") ?? "DeepSeek-V4-Pro"
       },

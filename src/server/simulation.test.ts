@@ -22,7 +22,7 @@ const actor: AgentProfile = {
   id: "agent_a",
   simulationId: "default",
   name: "Ada",
-  model: "gpt-5-mini",
+  model: "gpt-5.4",
   active: true,
   position: { x: 1, y: 1 },
   corePrinciples: [],
