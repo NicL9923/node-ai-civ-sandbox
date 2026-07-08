@@ -279,6 +279,12 @@ function ProposalCard({
         <h3>{proposal.title}</h3>
         <span className={`statusPill status-${proposal.status}`}>{proposal.status}</span>
       </div>
+      {proposal.changeType && proposal.changeType !== "add" ? (
+        <p className="muted">
+          {proposal.changeType === "repeal" ? "Repeals" : "Revises"}
+          {proposal.targetReference ? ` ${proposal.targetReference}` : " a prior provision"}
+        </p>
+      ) : null}
       <p>{proposal.proposedText}</p>
       <p className="muted">Proposer rationale: {proposal.rationale}</p>
       <VoteSummary

@@ -66,7 +66,9 @@ export function loadConfig(): AppConfig {
       turnIntervalMs: numberFromEnv("TURN_INTERVAL_MS", 30_000),
       proposalVotingWindowTurns: numberFromEnv("PROPOSAL_VOTING_WINDOW_TURNS", 20),
       quorumRatio: numberFromEnv("PROPOSAL_QUORUM_RATIO", 0.5),
-      supermajorityRatio: numberFromEnv("PROPOSAL_SUPERMAJORITY_RATIO", 2 / 3)
+      supermajorityRatio: numberFromEnv("PROPOSAL_SUPERMAJORITY_RATIO", 2 / 3),
+      maxConsecutiveConverses: numberFromEnv("MAX_CONSECUTIVE_CONVERSES", 3),
+      conversationSilenceThreshold: numberFromEnv("CONVERSATION_SILENCE_THRESHOLD", 8)
     },
     ai: {
       provider: aiProvider,

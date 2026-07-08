@@ -307,7 +307,9 @@ export class SimulationEngine {
           tiles,
           currentConstitution,
           openProposals,
-          recentEvents
+          recentEvents,
+          turnsSinceConversation:
+            simulation.lastConversationTurn === undefined ? simulation.turn : simulation.turn - simulation.lastConversationTurn
         }),
         25_000,
         `Timed out waiting for ${actor.name} (${actor.model}) to choose an action.`
@@ -356,6 +358,7 @@ export class SimulationEngine {
     if (action.type === "converse") {
       actor.consecutiveConverses = (actor.consecutiveConverses ?? 0) + 1;
       actor.lastConversedWith = action.targetAgentId;
+      simulation.lastConversationTurn = simulation.turn;
     } else {
       actor.consecutiveConverses = 0;
       actor.lastConversedWith = undefined;
@@ -399,6 +402,8 @@ export class SimulationEngine {
           rationale: action.rationale,
           proposerAgentId: actor.id,
           status: "open",
+          changeType: action.changeType ?? "add",
+          targetReference: action.targetReference,
           openedTurn: simulation.turn,
           closesTurn: simulation.turn + simulation.config.proposalVotingWindowTurns,
           votes: [],
@@ -406,7 +411,8 @@ export class SimulationEngine {
         };
         await this.store.upsertProposal(proposal);
         openProposals.push(proposal);
-        await this.recordEvent(simulation.id, simulation.turn, "proposalOpened", `${actor.name} proposed: ${proposal.title}`, actor.id, undefined, proposal.id);
+        const kindLabel = (action.changeType ?? "add") === "add" ? "proposed" : `proposed to ${action.changeType}${action.targetReference ? ` ${action.targetReference}` : ""} via`;
+        await this.recordEvent(simulation.id, simulation.turn, "proposalOpened", `${actor.name} ${kindLabel}: ${proposal.title}`, actor.id, undefined, proposal.id);
         break;
       }
       case "vote": {
@@ -504,7 +510,7 @@ export class SimulationEngine {
           simulationId: simulation.id,
           version: currentConstitution.version + 1,
           amendmentProposalId: proposal.id,
-          text: `${currentConstitution.text}\n\nAmendment ${currentConstitution.version}: ${proposal.proposedText}`,
+          text: `${currentConstitution.text}\n\n${formatAmendmentEntry(currentConstitution.version, proposal)}`,
           createdAtTurn: simulation.turn,
           createdAt: nowIso()
         };
@@ -555,11 +561,22 @@ export class SimulationEngine {
   }
 }
 
+function formatAmendmentEntry(priorVersion: number, proposal: AmendmentProposal): string {
+  const changeType = proposal.changeType ?? "add";
+  const target = proposal.targetReference ? ` ${proposal.targetReference}` : "";
+  if (changeType === "repeal") {
+    return `Amendment ${priorVersion} (repeal of${target || " a prior provision"}): ${proposal.proposedText}`;
+  }
+  if (changeType === "revise") {
+    return `Amendment ${priorVersion} (revision of${target || " a prior provision"}): ${proposal.proposedText}`;
+  }
+  return `Amendment ${priorVersion}: ${proposal.proposedText}`;
+}
+
 function selectActors(agents: AgentProfile[], turn: number, count: number): AgentProfile[] {
   if (agents.length === 0) {
     return [];
   }
-
   if (count === 1) {
     const lastActor = agents
       .filter((agent) => agent.lastActedTurn !== undefined)
@@ -617,7 +634,7 @@ export function validateAction(
       if (actor.lastActionType === "converse" && actor.lastConversedWith === action.targetAgentId) {
         return "cannot converse with the same agent on consecutive actions";
       }
-      if ((actor.consecutiveConverses ?? 0) >= 2) {
+      if ((actor.consecutiveConverses ?? 0) >= simulation.config.maxConsecutiveConverses) {
         return "must take a non-conversation action after repeated talking";
       }
       return undefined;

@@ -43,6 +43,8 @@ export const agentActionSchema: z.ZodType<AgentAction> = z.discriminatedUnion("t
     type: z.literal("proposeAmendment"),
     title: z.string().min(1).max(120),
     proposedText: z.string().min(20).max(2000),
+    changeType: z.enum(["add", "revise", "repeal"]).optional(),
+    targetReference: z.string().trim().min(1).max(120).optional(),
     rationale,
     selfRevision
   }),

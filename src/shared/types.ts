@@ -14,6 +14,8 @@ export interface SimulationConfig {
   proposalVotingWindowTurns: number;
   quorumRatio: number;
   supermajorityRatio: number;
+  maxConsecutiveConverses: number;
+  conversationSilenceThreshold: number;
 }
 
 export interface Simulation {
@@ -21,6 +23,7 @@ export interface Simulation {
   turn: number;
   running: boolean;
   config: SimulationConfig;
+  lastConversationTurn?: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -83,6 +86,8 @@ export interface Vote {
   turn: number;
 }
 
+export type AmendmentChangeType = "add" | "revise" | "repeal";
+
 export interface AmendmentProposal {
   id: string;
   simulationId: string;
@@ -91,6 +96,8 @@ export interface AmendmentProposal {
   rationale: string;
   proposerAgentId: string;
   status: "open" | "passed" | "failed";
+  changeType?: AmendmentChangeType;
+  targetReference?: string;
   openedTurn: number;
   closesTurn: number;
   votes: Vote[];
@@ -120,7 +127,7 @@ export type AgentAction =
     | { type: "move"; dx: -1 | 0 | 1; dy: -1 | 0 | 1; rationale: string }
     | { type: "converse"; targetAgentId: string; message: string; rationale: string }
     | { type: "reflect"; memory: string; rationale: string }
-    | { type: "proposeAmendment"; title: string; proposedText: string; rationale: string }
+    | { type: "proposeAmendment"; title: string; proposedText: string; rationale: string; changeType?: AmendmentChangeType; targetReference?: string }
     | { type: "vote"; proposalId: string; choice: VoteChoice; rationale: string }
     | { type: "changeTile"; x: number; y: number; terrain: Terrain; label?: string; rationale: string }
     | { type: "noop"; rationale: string }

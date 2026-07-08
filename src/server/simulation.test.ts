@@ -14,7 +14,9 @@ const simulation: Simulation = {
     turnIntervalMs: 30_000,
     proposalVotingWindowTurns: 20,
     quorumRatio: 0.5,
-    supermajorityRatio: 2 / 3
+    supermajorityRatio: 2 / 3,
+    maxConsecutiveConverses: 3,
+    conversationSilenceThreshold: 8
   }
 };
 

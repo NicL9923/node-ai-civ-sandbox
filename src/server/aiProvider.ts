@@ -12,6 +12,7 @@ export interface DecisionContext {
   currentConstitution: ConstitutionVersion;
   openProposals: AmendmentProposal[];
   recentEvents: string[];
+  turnsSinceConversation?: number;
 }
 
 export interface AiProvider {
@@ -191,22 +192,34 @@ export class FoundryAiProvider implements AiProvider {
         { type: "move", fields: ["dx:-1|0|1", "dy:-1|0|1", "rationale"] },
         { type: "converse", fields: ["targetAgentId", "message", "rationale"] },
         { type: "reflect", fields: ["memory", "rationale"] },
-        { type: "proposeAmendment", fields: ["title", "proposedText", "rationale"] },
+        { type: "proposeAmendment", fields: ["title", "proposedText", "changeType?:add|revise|repeal", "targetReference?: which article/amendment you are revising or repealing, e.g. 'Amendment 2' or 'Article VI'", "rationale"] },
         { type: "vote", fields: ["proposalId", "choice:yes|no|abstain", "rationale"] },
         { type: "changeTile", fields: ["x", "y", "terrain:grass|water|stone|farm|forum|forest", "label?", "rationale"] },
         { type: "noop", fields: ["rationale"] }
       ],
-      antiLoopGuidance: {
-        description:
-          "You have been talking a lot; the town needs action. Conversation is stuck in a loop and governance has stalled. Consider moving to explore, building on tiles, proposing a rule, or voting on open proposals instead of just discussing.",
-        rules: [
-          "Do not narrate or re-describe the recentlyInTown summary; it is context only.",
-          "Do not reference or fixate on raw turn numbers.",
-          "Do not repeat conversation with the same person on the same topic.",
-          "Only converse with a genuinely new point or a specific ask; otherwise take a world-changing action.",
-          "Favor variety: move, changeTile, proposeAmendment, or vote over yet another message."
-        ]
-      },
+      socialGuidance: (() => {
+        const silence = context.turnsSinceConversation ?? 0;
+        if (silence >= context.simulation.config.conversationSilenceThreshold) {
+          return {
+            description: `Nobody in town has had a real conversation in about ${silence} turns. Things have gone quiet and impersonal. It's a good time to actually talk to someone: check in, share what you're thinking, react to what others built or proposed, or float an idea before making it a rule.`,
+            rules: [
+              "Reaching out to a neighbor right now is welcome; the town feels too silent.",
+              "Say something real and specific to a particular person, not a speech.",
+              "Still avoid pestering the same person over and over about the same thing."
+            ]
+          };
+        }
+        return {
+          description:
+            "Keep a healthy mix of talking and doing. Conversation is good when you have a genuinely new point, a reaction, or a specific ask; otherwise take a concrete action.",
+          rules: [
+            "Do not narrate or re-describe the recentlyInTown summary; it is context only.",
+            "Do not reference or fixate on raw turn numbers.",
+            "Do not repeat conversation with the same person on the same topic.",
+            "Balance social moments with world actions: move, changeTile, proposeAmendment, or vote."
+          ]
+        };
+      })(),
       optionalSelfRevision: {
         description:
           "Optionally include selfRevision when this turn genuinely changes your worldview. Use sparingly; small organic drift is better than personality whiplash.",
@@ -231,9 +244,26 @@ export class FoundryAiProvider implements AiProvider {
       },
       worldRules: {
         worldSize: context.simulation.config.worldSize,
-        movement: "Move at most one tile in each axis. Coordinates must remain inside the world.",
-        governance: "Open proposals can be voted on once. Constitutional amendments require quorum and a two-thirds supermajority.",
-        stateSafety: "You propose actions only. The server validates and may reject impossible actions."
+        movement: "You can move and build in the world; reality automatically enforces what's physically possible, and the server will reject impossible actions. You do not need to write laws about how movement or building physically work.",
+        governance: "Open proposals can be voted on once. Passing an amendment needs a quorum and a two-thirds majority."
+      },
+      whatAmendmentsAreFor: {
+        description:
+          "Amendments are the town's social contract: rules about how people live together and how the town is governed. They are NOT for restating the physical mechanics of the world. Propose whatever fits YOUR character and goals. There is no requirement that a rule be fair, kind, or in everyone's interest; self-serving, controversial, harsh, or unequal proposals are all allowed if that's who you are. Other citizens will vote, so a bad idea can still fail.",
+        examplesOfScope: [
+          "Rights, freedoms, or restrictions on people",
+          "How disputes between neighbors get resolved (fairly or not)",
+          "How land, resources, or wealth should be distributed or controlled",
+          "Duties, obligations, or privileges for certain people or newcomers",
+          "How decisions get made, who holds power, and whether it is checked or concentrated"
+        ],
+        avoid: [
+          "Do NOT write rules that just repeat the game mechanics (e.g. 'you may change one adjacent tile', 'use the changeTile action', listing terrain types).",
+          "Do NOT reference action names like 'changeTile' or coordinates in a law.",
+          "If a rule would only restate what the world already physically enforces, it is not worth proposing."
+        ],
+        amendingExisting:
+          "You can also change the existing constitution: set changeType to 'revise' or 'repeal' and name what you're targeting in targetReference (e.g. 'Amendment 2' or 'Article VI'). Revising replaces a prior rule's intent with your proposedText; repealing strikes it. If you dislike a current law, propose to repeal or revise it rather than only stacking new ones."
       },
       self: context.agent,
       nearbyAgents,
