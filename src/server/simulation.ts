@@ -3,6 +3,8 @@ import type {
   AgentProfile,
   AmendmentProposal,
   ConstitutionVersion,
+  Position,
+  ProfileRevision,
   Simulation,
   SimulationEvent,
   Tile,
@@ -14,6 +16,34 @@ import type { EventBus } from "./eventBus.js";
 import { newId, nowIso } from "./id.js";
 import { createSeedSimulation } from "./seed.js";
 import type { SimulationStore } from "./store.js";
+import { trackActionMetric } from "./telemetry.js";
+
+export interface AgentCreateInput {
+  id?: string;
+  name: string;
+  model: string;
+  active?: boolean;
+  position?: Position;
+  voice?: string;
+  corePrinciples?: string[];
+  personalityTraits?: string[];
+  beliefs?: string[];
+  goals?: string[];
+  memorySummaries?: string[];
+}
+
+export interface AgentUpdateInput {
+  name?: string;
+  model?: string;
+  active?: boolean;
+  position?: Position;
+  voice?: string;
+  corePrinciples?: string[];
+  personalityTraits?: string[];
+  beliefs?: string[];
+  goals?: string[];
+  memorySummaries?: string[];
+}
 
 export class SimulationEngine {
   private timer: NodeJS.Timeout | undefined;
@@ -69,7 +99,23 @@ export class SimulationEngine {
   }
 
   async reset(): Promise<void> {
-    throw new Error("Reset is intentionally not implemented yet because Cosmos point deletes need a safe container cleanup flow.");
+    if (this.advancing) {
+      throw new Error("Cannot reset while a turn is advancing. Try again after the current turn completes.");
+    }
+
+    if (this.timer) {
+      clearInterval(this.timer);
+      this.timer = undefined;
+    }
+
+    await this.store.deleteSimulationData(this.config.simulationId);
+
+    const seed = createSeedSimulation(this.config.simulationId, this.config.simulation);
+    await this.store.upsertSimulation(seed.simulation);
+    await this.store.upsertTiles(seed.tiles);
+    await Promise.all(seed.agents.map((agent) => this.store.upsertAgent(agent)));
+    await this.store.upsertConstitution(seed.constitution);
+    await this.recordEvent(seed.simulation.id, 0, "simulationSeeded", "The civilization sandbox has been reset and reseeded.");
   }
 
   async snapshot(): Promise<WorldSnapshot> {
@@ -97,6 +143,96 @@ export class SimulationEngine {
       proposals,
       recentEvents
     };
+  }
+
+  supportedModels(): Record<string, string> {
+    return this.config.ai.deployments;
+  }
+
+  async addAgent(input: AgentCreateInput): Promise<AgentProfile> {
+    await this.ensureSeeded();
+    const simulation = await this.requiredSimulation();
+    const agents = await this.store.listAgents(simulation.id);
+    const id = input.id?.trim() || newId("agent");
+    if (agents.some((agent) => agent.id === id)) {
+      throw new Error(`Agent id '${id}' already exists.`);
+    }
+
+    if (agents.some((agent) => agent.name.toLowerCase() === input.name.trim().toLowerCase())) {
+      throw new Error(`Agent name '${input.name}' already exists.`);
+    }
+
+    const position = input.position ?? firstOpenPosition(simulation.config.worldSize, agents);
+    validatePosition(simulation, position);
+
+    const createdAt = nowIso();
+    const agent: AgentProfile = {
+      id,
+      simulationId: simulation.id,
+      name: input.name.trim(),
+      model: input.model.trim(),
+      active: input.active ?? true,
+      position,
+      corePrinciples: input.corePrinciples ?? ["Learn before judging", "Preserve civic continuity"],
+      personalityTraits: input.personalityTraits ?? ["newcomer", "curious"],
+      beliefs: input.beliefs ?? ["I joined an existing society and should understand its history before changing it."],
+      goals: input.goals ?? ["Understand the current constitution", "Build useful relationships"],
+      memorySummaries: input.memorySummaries ?? [`I joined the civilization on turn ${simulation.turn}.`],
+      voice: input.voice?.trim() || undefined,
+      relationships: [],
+      createdAt,
+      updatedAt: createdAt
+    };
+
+    await this.store.upsertAgent(agent);
+    await this.recordEvent(simulation.id, simulation.turn, "agentUpdated", `${agent.name} joined the civilization using ${agent.model}.`, agent.id);
+    return agent;
+  }
+
+  async updateAgent(agentId: string, input: AgentUpdateInput): Promise<AgentProfile> {
+    await this.ensureSeeded();
+    const simulation = await this.requiredSimulation();
+    const agents = await this.store.listAgents(simulation.id);
+    const agent = agents.find((candidate) => candidate.id === agentId);
+    if (!agent) {
+      throw new Error(`Agent '${agentId}' does not exist.`);
+    }
+
+    if (input.name !== undefined) {
+      const name = input.name.trim();
+      if (agents.some((candidate) => candidate.id !== agentId && candidate.name.toLowerCase() === name.toLowerCase())) {
+        throw new Error(`Agent name '${name}' already exists.`);
+      }
+      agent.name = name;
+    }
+
+    if (input.model !== undefined) {
+      agent.model = input.model.trim();
+    }
+    if (input.active !== undefined) {
+      agent.active = input.active;
+    }
+    if (input.position !== undefined) {
+      validatePosition(simulation, input.position);
+      agent.position = input.position;
+    }
+
+    agent.corePrinciples = input.corePrinciples ?? agent.corePrinciples;
+    agent.personalityTraits = input.personalityTraits ?? agent.personalityTraits;
+    agent.beliefs = input.beliefs ?? agent.beliefs;
+    agent.goals = input.goals ?? agent.goals;
+    agent.memorySummaries = input.memorySummaries ?? agent.memorySummaries;
+    if (input.voice !== undefined) {
+      agent.voice = input.voice.trim() || undefined;
+    }
+    agent.updatedAt = nowIso();
+
+    await this.store.upsertAgent(agent);
+    await this.recordEvent(simulation.id, simulation.turn, "agentUpdated", `${agent.name} was updated by an administrator.`, agent.id, undefined, undefined, {
+      model: agent.model,
+      active: agent.active
+    });
+    return agent;
   }
 
   async advanceTurn(): Promise<void> {
@@ -136,7 +272,7 @@ export class SimulationEngine {
           tiles,
           currentConstitution,
           openProposals,
-          recentEvents.map((event) => `${event.turn}: ${event.message}`)
+          recentEvents.map((event) => event.message)
         );
 
         await this.applyAction(simulation, actor, action, activeAgents, tiles, openProposals, currentConstitution);
@@ -207,11 +343,24 @@ export class SimulationEngine {
   ): Promise<void> {
     const rejection = validateAction(simulation, actor, action, agents, tiles, openProposals);
     if (rejection) {
+      trackActionMetric(`rejected:${action.type}`);
       await this.recordEvent(simulation.id, simulation.turn, "actionRejected", `${actor.name}: ${rejection}`, actor.id, undefined, undefined, {
         action
       });
       return;
     }
+
+    trackActionMetric(action.type);
+
+    // Maintain converse-throttling state so pure talk loops break.
+    if (action.type === "converse") {
+      actor.consecutiveConverses = (actor.consecutiveConverses ?? 0) + 1;
+      actor.lastConversedWith = action.targetAgentId;
+    } else {
+      actor.consecutiveConverses = 0;
+      actor.lastConversedWith = undefined;
+    }
+    actor.lastActionType = action.type;
 
     switch (action.type) {
       case "move": {
@@ -296,10 +445,47 @@ export class SimulationEngine {
       }
     }
 
+    if (action.selfRevision) {
+      await this.applySelfRevision(simulation, actor, action.selfRevision);
+    }
+
     if (action.type !== "move" && action.type !== "reflect" && action.type !== "converse") {
       actor.memorySummaries = capList([...actor.memorySummaries, `Turn ${simulation.turn}: ${action.rationale}`], 12);
       await this.touchAgent(simulation, actor, `${actor.name} acted under the current constitution v${currentConstitution.version}.`);
     }
+  }
+
+  private async applySelfRevision(simulation: Simulation, agent: AgentProfile, revision: ProfileRevision): Promise<void> {
+    const changes: string[] = [];
+
+    changes.push(...reviseList(agent.corePrinciples, revision.principlesToAdd, revision.principlesToRetire, 8, "principle"));
+    changes.push(...reviseList(agent.personalityTraits, revision.traitsToAdd, revision.traitsToRetire, 10, "trait"));
+    changes.push(...reviseList(agent.beliefs, revision.beliefsToAdd, revision.beliefsToRetire, 10, "belief"));
+    changes.push(...reviseList(agent.goals, revision.goalsToAdd, revision.goalsToRetire, 8, "goal"));
+
+    if (revision.memoryToAdd) {
+      agent.memorySummaries = capList([...agent.memorySummaries, revision.memoryToAdd], 12);
+      changes.push("added a memory");
+    }
+
+    if (changes.length === 0) {
+      return;
+    }
+
+    agent.updatedAt = nowIso();
+    await this.store.upsertAgent(agent);
+    await this.recordEvent(
+      simulation.id,
+      simulation.turn,
+      "agentUpdated",
+      `${agent.name} revised ${joinHuman(changes)}${revision.rationale ? `: ${revision.rationale}` : "."}`,
+      agent.id,
+      undefined,
+      undefined,
+      {
+        selfRevision: revision
+      }
+    );
   }
 
   private async resolveExpiredProposals(simulation: Simulation, activeAgents: AgentProfile[], currentConstitution: ConstitutionVersion): Promise<void> {
@@ -428,6 +614,12 @@ export function validateAction(
       if (distance(actor.position, target.position) > 4) {
         return "target agent is too far away to converse";
       }
+      if (actor.lastActionType === "converse" && actor.lastConversedWith === action.targetAgentId) {
+        return "cannot converse with the same agent on consecutive actions";
+      }
+      if ((actor.consecutiveConverses ?? 0) >= 2) {
+        return "must take a non-conversation action after repeated talking";
+      }
       return undefined;
     }
     case "proposeAmendment": {
@@ -474,6 +666,62 @@ function distance(a: { x: number; y: number }, b: { x: number; y: number }): num
 
 function capList<T>(items: T[], limit: number): T[] {
   return items.slice(Math.max(0, items.length - limit));
+}
+
+function reviseList(target: string[], additions: string[] | undefined, retirements: string[] | undefined, limit: number, label: string): string[] {
+  const changes: string[] = [];
+
+  for (const retired of retirements ?? []) {
+    const index = target.findIndex((item) => item.localeCompare(retired, undefined, { sensitivity: "accent" }) === 0);
+    if (index >= 0) {
+      target.splice(index, 1);
+      changes.push(`retired ${label} "${retired}"`);
+    }
+  }
+
+  for (const addition of additions ?? []) {
+    const normalizedAddition = addition.trim();
+    if (!normalizedAddition || target.some((item) => item.localeCompare(normalizedAddition, undefined, { sensitivity: "accent" }) === 0)) {
+      continue;
+    }
+
+    target.push(normalizedAddition);
+    changes.push(`added ${label} "${normalizedAddition}"`);
+  }
+
+  while (target.length > limit) {
+    const removed = target.shift();
+    if (removed) {
+      changes.push(`outgrew older ${label} "${removed}"`);
+    }
+  }
+
+  return changes;
+}
+
+function joinHuman(items: string[]): string {
+  if (items.length === 1) {
+    return items[0]!;
+  }
+  return `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
+}
+
+function validatePosition(simulation: Simulation, position: Position): void {
+  if (!isInside(simulation.config.worldSize, position.x, position.y)) {
+    throw new Error(`Position (${position.x}, ${position.y}) is outside world bounds.`);
+  }
+}
+
+function firstOpenPosition(worldSize: number, agents: AgentProfile[]): Position {
+  const occupied = new Set(agents.map((agent) => `${agent.position.x}:${agent.position.y}`));
+  for (let y = 0; y < worldSize; y += 1) {
+    for (let x = 0; x < worldSize; x += 1) {
+      if (!occupied.has(`${x}:${y}`)) {
+        return { x, y };
+      }
+    }
+  }
+  throw new Error("No open position is available for a new agent.");
 }
 
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {

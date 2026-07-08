@@ -4,8 +4,10 @@ import { EventBus } from "./eventBus.js";
 import { createApp } from "./routes.js";
 import { SimulationEngine } from "./simulation.js";
 import { createStore } from "./store.js";
+import { initTelemetry } from "./telemetry.js";
 
 const config = loadConfig();
+initTelemetry(config.telemetry.connectionString);
 const store = createStore(config);
 const eventBus = new EventBus();
 const aiProvider = createAiProvider(config.ai);

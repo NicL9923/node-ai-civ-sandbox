@@ -1,4 +1,4 @@
-export type ModelKey = "gpt-5.4" | "grok-4.3" | "deepseek-v4-pro";
+export type ModelKey = string;
 
 export type Terrain = "grass" | "water" | "stone" | "farm" | "forum" | "forest";
 
@@ -54,8 +54,12 @@ export interface AgentProfile {
   beliefs: string[];
   goals: string[];
   memorySummaries: string[];
+  voice?: string;
   relationships: AgentRelationship[];
   lastActedTurn?: number;
+  lastConversedWith?: string;
+  consecutiveConverses?: number;
+  lastActionType?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -94,14 +98,33 @@ export interface AmendmentProposal {
   resolvedAt?: string;
 }
 
+export interface ProfileRevision {
+  principlesToAdd?: string[];
+  principlesToRetire?: string[];
+  traitsToAdd?: string[];
+  traitsToRetire?: string[];
+  beliefsToAdd?: string[];
+  beliefsToRetire?: string[];
+  goalsToAdd?: string[];
+  goalsToRetire?: string[];
+  memoryToAdd?: string;
+  rationale?: string;
+}
+
+interface AgentSelfRevision {
+  selfRevision?: ProfileRevision;
+}
+
 export type AgentAction =
-  | { type: "move"; dx: -1 | 0 | 1; dy: -1 | 0 | 1; rationale: string }
-  | { type: "converse"; targetAgentId: string; message: string; rationale: string }
-  | { type: "reflect"; memory: string; rationale: string }
-  | { type: "proposeAmendment"; title: string; proposedText: string; rationale: string }
-  | { type: "vote"; proposalId: string; choice: VoteChoice; rationale: string }
-  | { type: "changeTile"; x: number; y: number; terrain: Terrain; label?: string; rationale: string }
-  | { type: "noop"; rationale: string };
+  AgentSelfRevision & (
+    | { type: "move"; dx: -1 | 0 | 1; dy: -1 | 0 | 1; rationale: string }
+    | { type: "converse"; targetAgentId: string; message: string; rationale: string }
+    | { type: "reflect"; memory: string; rationale: string }
+    | { type: "proposeAmendment"; title: string; proposedText: string; rationale: string }
+    | { type: "vote"; proposalId: string; choice: VoteChoice; rationale: string }
+    | { type: "changeTile"; x: number; y: number; terrain: Terrain; label?: string; rationale: string }
+    | { type: "noop"; rationale: string }
+  );
 
 export type SimulationEventType =
   | "simulationSeeded"

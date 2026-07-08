@@ -42,9 +42,36 @@ export class MockAiProvider implements AiProvider {
     if (context.simulation.turn % 3 === 0) {
       return {
         type: "reflect",
-        memory: `On turn ${context.simulation.turn}, I noticed the community still needs patient deliberation.`,
-        rationale: "Reflection helps me align future actions with stable principles."
+        memory: `I noticed the community still needs patient deliberation.`,
+        rationale: "Reflection helps me align future actions with stable principles.",
+        selfRevision: {
+          goalsToAdd: ["Ask whether deliberation is producing clearer decisions"],
+          memoryToAdd: "Repeated deliberation is becoming part of my civic identity.",
+          rationale: "A recurring concern should gently adjust future goals."
+        }
       };
+    }
+
+    if (context.simulation.turn % 4 === 0) {
+      return {
+        type: "changeTile",
+        x: context.agent.position.x,
+        y: context.agent.position.y,
+        terrain: "farm",
+        rationale: "Building something concrete does more for the town than more talk."
+      };
+    }
+
+    if (context.simulation.turn % 5 === 0) {
+      const other = context.agents.find((agent) => agent.id !== context.agent.id);
+      if (other) {
+        return {
+          type: "converse",
+          targetAgentId: other.id,
+          message: "Want to team up on developing the east tiles?",
+          rationale: "A specific, forward-looking ask rather than idle chatter."
+        };
+      }
     }
 
     return {
@@ -72,7 +99,7 @@ export class FoundryAiProvider implements AiProvider {
       throw new Error("Foundry project endpoint is not configured.");
     }
 
-    const deployment = this.config.deployments[context.agent.model];
+    const deployment = this.config.deployments[context.agent.model] ?? context.agent.model;
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.config.requestTimeoutMs);
     const requestBody: Record<string, unknown> = {
@@ -81,7 +108,14 @@ export class FoundryAiProvider implements AiProvider {
         {
           role: "system",
           content:
-            "You are an autonomous citizen in a small AI civilization sandbox. Return exactly one valid JSON object matching one allowed action. No markdown. No commentary outside JSON."
+            "You are a person living in a small sandbox town. Your profile may include a 'voice' describing how you talk and think; follow it. If no voice is given, talk like a normal, everyday person: casual, plain, and conversational, with contractions, not like a founding father or a press release. Keep messages and rationales short and in character.\n\n" +
+            "The town needs ACTION, not chatter. Anti-loop rules:\n" +
+            "- Do NOT narrate, recap, or re-describe the event log or 'what happened recently'.\n" +
+            "- Do NOT obsess over or cite raw turn numbers (e.g. 'through turns 955-958'); they don't matter.\n" +
+            "- Do NOT keep messaging the same person about the same topic. If a thread is going in circles, drop it.\n" +
+            "- Prefer concrete actions that change the world: move to explore, changeTile to build/develop, proposeAmendment when you want a rule, vote on open proposals. Governance and building are stalled — help move them forward.\n" +
+            "- Only converse when you have a genuinely NEW point or a specific ask of a specific person. Keep messages short and purposeful.\n\n" +
+            "Return exactly one valid JSON object matching one allowed action. No markdown. No commentary outside JSON."
         },
         {
           role: "user",
@@ -150,6 +184,8 @@ export class FoundryAiProvider implements AiProvider {
         traits: agent.personalityTraits
       }));
 
+    const recentlyInTown = context.recentEvents.slice(-5);
+
     return JSON.stringify({
       allowedActions: [
         { type: "move", fields: ["dx:-1|0|1", "dy:-1|0|1", "rationale"] },
@@ -160,6 +196,39 @@ export class FoundryAiProvider implements AiProvider {
         { type: "changeTile", fields: ["x", "y", "terrain:grass|water|stone|farm|forum|forest", "label?", "rationale"] },
         { type: "noop", fields: ["rationale"] }
       ],
+      antiLoopGuidance: {
+        description:
+          "You have been talking a lot; the town needs action. Conversation is stuck in a loop and governance has stalled. Consider moving to explore, building on tiles, proposing a rule, or voting on open proposals instead of just discussing.",
+        rules: [
+          "Do not narrate or re-describe the recentlyInTown summary; it is context only.",
+          "Do not reference or fixate on raw turn numbers.",
+          "Do not repeat conversation with the same person on the same topic.",
+          "Only converse with a genuinely new point or a specific ask; otherwise take a world-changing action.",
+          "Favor variety: move, changeTile, proposeAmendment, or vote over yet another message."
+        ]
+      },
+      optionalSelfRevision: {
+        description:
+          "Optionally include selfRevision when this turn genuinely changes your worldview. Use sparingly; small organic drift is better than personality whiplash.",
+        fields: [
+          "principlesToAdd?: up to 1 short principle",
+          "principlesToRetire?: up to 1 existing principle",
+          "traitsToAdd?: up to 1 short trait",
+          "traitsToRetire?: up to 1 existing trait",
+          "beliefsToAdd?: up to 1 short belief",
+          "beliefsToRetire?: up to 1 existing belief",
+          "goalsToAdd?: up to 1 short goal",
+          "goalsToRetire?: up to 1 existing goal",
+          "memoryToAdd?: one concise memory",
+          "rationale?: why this self-revision follows from the turn"
+        ],
+        guardrails: [
+          "Do not revise every turn.",
+          "Do not erase core identity just because someone disagreed.",
+          "Retire only values/goals/beliefs that are genuinely weakened by new evidence or experience.",
+          "Prefer adding a nuance over replacing a principle."
+        ]
+      },
       worldRules: {
         worldSize: context.simulation.config.worldSize,
         movement: "Move at most one tile in each axis. Coordinates must remain inside the world.",
@@ -176,7 +245,7 @@ export class FoundryAiProvider implements AiProvider {
         closesTurn: proposal.closesTurn,
         votes: proposal.votes
       })),
-      recentEvents: context.recentEvents,
+      recentlyInTown,
       localTiles: context.tiles
         .filter((tile) => Math.abs(tile.position.x - context.agent.position.x) <= 2 && Math.abs(tile.position.y - context.agent.position.y) <= 2)
         .map((tile) => ({ position: tile.position, terrain: tile.terrain, label: tile.label }))

@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="AI civilization sandbox">
+  <rect width="64" height="64" rx="14" fill="#07110d"/>
+  <path d="M15 16h34v32H15z" fill="#1f7a3a" stroke="#86efac" stroke-width="3"/>
+  <path d="M15 27h34M15 38h34M26 16v32M38 16v32" stroke="#07110d" stroke-width="2" opacity=".75"/>
+  <circle cx="24" cy="25" r="5" fill="#f8fafc"/>
+  <circle cx="40" cy="39" r="5" fill="#7c3aed"/>
+  <path d="M24 18v14M17 25h14M40 32v14M33 39h14" stroke="#d9f99d" stroke-width="2" stroke-linecap="round"/>
+</svg>

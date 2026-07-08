@@ -20,6 +20,9 @@ export interface AppConfig {
     endpoint: string;
     databaseId: string;
   };
+  telemetry: {
+    connectionString?: string;
+  };
 }
 
 function numberFromEnv(name: string, fallback: number): number {
@@ -82,6 +85,9 @@ export function loadConfig(): AppConfig {
           endpoint: cosmosEndpoint,
           databaseId: cosmosDatabaseId
         }
-      : undefined
+      : undefined,
+    telemetry: {
+      connectionString: optionalEnv("APPLICATIONINSIGHTS_CONNECTION_STRING")
+    }
   };
 }

@@ -46,6 +46,8 @@ param aiProvider string = 'mock'
 param adminApiKey string
 
 var appServicePlanName = '${appName}-plan'
+var logAnalyticsWorkspaceName = '${appName}-logs'
+var appInsightsName = '${appName}-insights'
 var foundryProjectEndpoint = 'https://${aiFoundryName}.services.ai.azure.com/api/projects/${aiProjectName}'
 var containers = [
   'simulations'
@@ -55,6 +57,27 @@ var containers = [
   'proposals'
   'constitutions'
 ]
+
+resource logAnalytics 'Microsoft.OperationalInsights/workspaces@2023-09-01' = {
+  name: logAnalyticsWorkspaceName
+  location: location
+  properties: {
+    sku: {
+      name: 'PerGB2018'
+    }
+    retentionInDays: 30
+  }
+}
+
+resource appInsights 'Microsoft.Insights/components@2020-02-02' = {
+  name: appInsightsName
+  location: location
+  kind: 'web'
+  properties: {
+    Application_Type: 'web'
+    WorkspaceResourceId: logAnalytics.id
+  }
+}
 
 resource plan 'Microsoft.Web/serverfarms@2024-04-01' = if (empty(existingAppServicePlanId)) {
   name: appServicePlanName
@@ -208,6 +231,10 @@ resource app 'Microsoft.Web/sites@2024-04-01' = {
           name: 'DEEPSEEK_V4_PRO_DEPLOYMENT_NAME'
           value: deepSeekV4ProDeploymentName
         }
+        {
+          name: 'APPLICATIONINSIGHTS_CONNECTION_STRING'
+          value: appInsights.properties.ConnectionString
+        }
       ]
     }
   }
@@ -238,3 +265,5 @@ output appUrl string = 'https://${app.properties.defaultHostName}'
 output cosmosEndpoint string = cosmos.properties.documentEndpoint
 output foundryAccountResourceId string = aiFoundry.id
 output foundryProjectEndpoint string = foundryProjectEndpoint
+output appInsightsName string = appInsights.name
+output appInsightsConnectionString string = appInsights.properties.ConnectionString

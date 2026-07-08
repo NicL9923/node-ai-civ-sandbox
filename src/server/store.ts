@@ -13,6 +13,7 @@ import type { AppConfig } from "./config.js";
 export interface SimulationStore {
   getSimulation(id: string): Promise<Simulation | undefined>;
   upsertSimulation(simulation: Simulation): Promise<void>;
+  deleteSimulationData(simulationId: string): Promise<void>;
   listTiles(simulationId: string): Promise<Tile[]>;
   upsertTiles(tiles: Tile[]): Promise<void>;
   listAgents(simulationId: string): Promise<AgentProfile[]>;
@@ -39,6 +40,15 @@ export class MemorySimulationStore implements SimulationStore {
 
   async upsertSimulation(simulation: Simulation): Promise<void> {
     this.simulations.set(simulation.id, simulation);
+  }
+
+  async deleteSimulationData(simulationId: string): Promise<void> {
+    this.simulations.delete(simulationId);
+    deleteWhere(this.tiles, (tile) => tile.simulationId === simulationId);
+    deleteWhere(this.agents, (agent) => agent.simulationId === simulationId);
+    deleteWhere(this.constitutions, (constitution) => constitution.simulationId === simulationId);
+    deleteWhere(this.proposals, (proposal) => proposal.simulationId === simulationId);
+    deleteWhere(this.events, (event) => event.simulationId === simulationId);
   }
 
   async listTiles(simulationId: string): Promise<Tile[]> {
@@ -103,6 +113,10 @@ class CosmosContainerStore<T extends CosmosDocument> {
     await this.container.items.upsert(item);
   }
 
+  async delete(id: string, partitionKey: string): Promise<void> {
+    await this.container.item(id, partitionKey).delete();
+  }
+
   async queryBySimulation(simulationId: string): Promise<T[]> {
     const { resources } = await this.container.items
       .query<T>({
@@ -155,6 +169,29 @@ export class CosmosSimulationStore implements SimulationStore {
 
   async upsertSimulation(simulation: Simulation): Promise<void> {
     await this.simulations.upsert(simulation);
+  }
+
+  async deleteSimulationData(simulationId: string): Promise<void> {
+    const [tiles, agents, constitutions, proposals, events] = await Promise.all([
+      this.listTiles(simulationId),
+      this.listAgents(simulationId),
+      this.listConstitutions(simulationId),
+      this.listProposals(simulationId),
+      this.events.queryBySimulation(simulationId)
+    ]);
+
+    await Promise.all([
+      ...tiles.map((tile) => this.tiles.delete(tile.id, simulationId)),
+      ...agents.map((agent) => this.agents.delete(agent.id, simulationId)),
+      ...constitutions.map((constitution) => this.constitutions.delete(constitution.id, simulationId)),
+      ...proposals.map((proposal) => this.proposals.delete(proposal.id, simulationId)),
+      ...events.map((event) => this.events.delete(event.id, simulationId))
+    ]);
+
+    const simulation = await this.getSimulation(simulationId);
+    if (simulation) {
+      await this.simulations.delete(simulation.id, simulation.id);
+    }
   }
 
   async listTiles(simulationId: string): Promise<Tile[]> {
@@ -217,4 +254,12 @@ export function createStore(config: AppConfig): SimulationStore {
   });
 
   return new CosmosSimulationStore(client, config.cosmos.databaseId);
+}
+
+function deleteWhere<T>(map: Map<string, T>, predicate: (value: T) => boolean): void {
+  for (const [key, value] of map.entries()) {
+    if (predicate(value)) {
+      map.delete(key);
+    }
+  }
 }
