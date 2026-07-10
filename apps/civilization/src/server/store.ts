@@ -9,6 +9,13 @@ import type {
   Tile
 } from "../shared/types.js";
 import type { AppConfig } from "./config.js";
+import {
+  FEDERATION_STATE_ID,
+  type FederationStateDoc,
+  type InboxItemDoc,
+  type OutboxItemDoc,
+  type OutboxStatus
+} from "./world/federationTypes.js";
 
 export interface SimulationStore {
   getSimulation(id: string): Promise<Simulation | undefined>;
@@ -24,6 +31,13 @@ export interface SimulationStore {
   upsertProposal(proposal: AmendmentProposal): Promise<void>;
   listRecentEvents(simulationId: string, limit: number): Promise<SimulationEvent[]>;
   appendEvent(event: SimulationEvent): Promise<void>;
+  // Federation subsystem (all docs partitioned by simulationId). Only exercised when the connector runs.
+  getFederationState(simulationId: string): Promise<FederationStateDoc | undefined>;
+  putFederationState(state: FederationStateDoc): Promise<void>;
+  listOutbox(simulationId: string, statuses?: OutboxStatus[]): Promise<OutboxItemDoc[]>;
+  putOutboxItem(item: OutboxItemDoc): Promise<void>;
+  getInboxItem(simulationId: string, dedupeKey: string): Promise<InboxItemDoc | undefined>;
+  putInboxItem(item: InboxItemDoc): Promise<void>;
 }
 
 export class MemorySimulationStore implements SimulationStore {
@@ -33,6 +47,9 @@ export class MemorySimulationStore implements SimulationStore {
   private constitutions = new Map<string, ConstitutionVersion>();
   private proposals = new Map<string, AmendmentProposal>();
   private events = new Map<string, SimulationEvent>();
+  private federationState = new Map<string, FederationStateDoc>();
+  private outbox = new Map<string, OutboxItemDoc>();
+  private inbox = new Map<string, InboxItemDoc>();
 
   async getSimulation(id: string): Promise<Simulation | undefined> {
     return this.simulations.get(id);
@@ -49,6 +66,9 @@ export class MemorySimulationStore implements SimulationStore {
     deleteWhere(this.constitutions, (constitution) => constitution.simulationId === simulationId);
     deleteWhere(this.proposals, (proposal) => proposal.simulationId === simulationId);
     deleteWhere(this.events, (event) => event.simulationId === simulationId);
+    this.federationState.delete(simulationId);
+    deleteWhere(this.outbox, (item) => item.simulationId === simulationId);
+    deleteWhere(this.inbox, (item) => item.simulationId === simulationId);
   }
 
   async listTiles(simulationId: string): Promise<Tile[]> {
@@ -98,6 +118,33 @@ export class MemorySimulationStore implements SimulationStore {
 
   async appendEvent(event: SimulationEvent): Promise<void> {
     this.events.set(event.id, event);
+  }
+
+  async getFederationState(simulationId: string): Promise<FederationStateDoc | undefined> {
+    return this.federationState.get(simulationId);
+  }
+
+  async putFederationState(state: FederationStateDoc): Promise<void> {
+    this.federationState.set(state.simulationId, state);
+  }
+
+  async listOutbox(simulationId: string, statuses?: OutboxStatus[]): Promise<OutboxItemDoc[]> {
+    const items = [...this.outbox.values()].filter((item) => item.simulationId === simulationId);
+    const filtered = statuses ? items.filter((item) => statuses.includes(item.status)) : items;
+    return filtered.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  }
+
+  async putOutboxItem(item: OutboxItemDoc): Promise<void> {
+    this.outbox.set(item.id, item);
+  }
+
+  async getInboxItem(simulationId: string, dedupeKey: string): Promise<InboxItemDoc | undefined> {
+    const item = this.inbox.get(`${simulationId}:${dedupeKey}`);
+    return item;
+  }
+
+  async putInboxItem(item: InboxItemDoc): Promise<void> {
+    this.inbox.set(`${item.simulationId}:${item.dedupeKey}`, item);
   }
 }
 
@@ -152,6 +199,7 @@ export class CosmosSimulationStore implements SimulationStore {
   private readonly constitutions: CosmosContainerStore<ConstitutionVersion>;
   private readonly proposals: CosmosContainerStore<AmendmentProposal>;
   private readonly events: CosmosContainerStore<SimulationEvent>;
+  private readonly federation: CosmosContainerStore<FederationStateDoc | OutboxItemDoc | InboxItemDoc>;
 
   constructor(client: CosmosClient, databaseId: string) {
     const database = client.database(databaseId);
@@ -161,6 +209,9 @@ export class CosmosSimulationStore implements SimulationStore {
     this.constitutions = new CosmosContainerStore<ConstitutionVersion>(database.container("constitutions"));
     this.proposals = new CosmosContainerStore<AmendmentProposal>(database.container("proposals"));
     this.events = new CosmosContainerStore<SimulationEvent>(database.container("events"));
+    this.federation = new CosmosContainerStore<FederationStateDoc | OutboxItemDoc | InboxItemDoc>(
+      database.container("federation")
+    );
   }
 
   async getSimulation(id: string): Promise<Simulation | undefined> {
@@ -172,12 +223,13 @@ export class CosmosSimulationStore implements SimulationStore {
   }
 
   async deleteSimulationData(simulationId: string): Promise<void> {
-    const [tiles, agents, constitutions, proposals, events] = await Promise.all([
+    const [tiles, agents, constitutions, proposals, events, federation] = await Promise.all([
       this.listTiles(simulationId),
       this.listAgents(simulationId),
       this.listConstitutions(simulationId),
       this.listProposals(simulationId),
-      this.events.queryBySimulation(simulationId)
+      this.events.queryBySimulation(simulationId),
+      this.federation.queryBySimulation(simulationId)
     ]);
 
     await Promise.all([
@@ -185,7 +237,8 @@ export class CosmosSimulationStore implements SimulationStore {
       ...agents.map((agent) => this.agents.delete(agent.id, simulationId)),
       ...constitutions.map((constitution) => this.constitutions.delete(constitution.id, simulationId)),
       ...proposals.map((proposal) => this.proposals.delete(proposal.id, simulationId)),
-      ...events.map((event) => this.events.delete(event.id, simulationId))
+      ...events.map((event) => this.events.delete(event.id, simulationId)),
+      ...federation.map((doc) => this.federation.delete(doc.id, simulationId))
     ]);
 
     const simulation = await this.getSimulation(simulationId);
@@ -240,6 +293,37 @@ export class CosmosSimulationStore implements SimulationStore {
 
   async appendEvent(event: SimulationEvent): Promise<void> {
     await this.events.upsert(event);
+  }
+
+  async getFederationState(simulationId: string): Promise<FederationStateDoc | undefined> {
+    const doc = await this.federation.read(FEDERATION_STATE_ID, simulationId);
+    return doc?.kind === "state" ? (doc as FederationStateDoc) : undefined;
+  }
+
+  async putFederationState(state: FederationStateDoc): Promise<void> {
+    await this.federation.upsert(state);
+  }
+
+  async listOutbox(simulationId: string, statuses?: OutboxStatus[]): Promise<OutboxItemDoc[]> {
+    const docs = await this.federation.query({
+      query: "SELECT * FROM c WHERE c.simulationId = @simulationId AND c.kind = 'outbox' ORDER BY c.createdAt ASC",
+      parameters: [{ name: "@simulationId", value: simulationId }]
+    });
+    const items = docs.filter((doc): doc is OutboxItemDoc => doc.kind === "outbox");
+    return statuses ? items.filter((item) => statuses.includes(item.status)) : items;
+  }
+
+  async putOutboxItem(item: OutboxItemDoc): Promise<void> {
+    await this.federation.upsert(item);
+  }
+
+  async getInboxItem(simulationId: string, dedupeKey: string): Promise<InboxItemDoc | undefined> {
+    const doc = await this.federation.read(`inbox_${dedupeKey}`, simulationId);
+    return doc?.kind === "inbox" ? (doc as InboxItemDoc) : undefined;
+  }
+
+  async putInboxItem(item: InboxItemDoc): Promise<void> {
+    await this.federation.upsert(item);
   }
 }
 

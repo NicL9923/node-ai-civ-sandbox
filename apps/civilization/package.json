@@ -18,6 +18,7 @@
     "node": ">=22 <25"
   },
   "dependencies": {
+    "@ai-civ/federation-contracts": "*",
     "@azure/ai-projects": "^2.2.0",
     "@azure/cosmos": "^4.9.3",
     "@azure/identity": "^4.13.1",
@@ -25,6 +26,7 @@
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
     "openai": "^6.45.0",
+    "openapi-fetch": "0.13.8",
     "zod": "^4.4.3"
   },
   "devDependencies": {

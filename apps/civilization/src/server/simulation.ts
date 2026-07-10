@@ -4,6 +4,7 @@ import type {
   AmendmentProposal,
   ConstitutionVersion,
   Election,
+  ForeignAffairsSnapshot,
   Governance,
   GovernanceParamKey,
   GovernanceParams,
@@ -25,6 +26,14 @@ import { newId, nowIso } from "./id.js";
 import { createInitialGovernance, createSeedSimulation, isProductiveTerrain } from "./seed.js";
 import type { SimulationStore } from "./store.js";
 import { trackActionMetric } from "./telemetry.js";
+import type { FederationPort } from "./world/federationTypes.js";
+
+/** Synchronous foreign-affairs context threaded through a turn so validateAction stays pure. */
+export interface ForeignValidationContext {
+  enabled: boolean;
+  ownCivId?: string;
+  knownCivIds: Set<string>;
+}
 
 export interface AgentCreateInput {
   id?: string;
@@ -61,7 +70,9 @@ export class SimulationEngine {
     private readonly config: AppConfig,
     private readonly store: SimulationStore,
     private readonly aiProvider: AiProvider,
-    private readonly eventBus: EventBus
+    private readonly eventBus: EventBus,
+    /** Optional World federation port. When absent the engine behaves as a standalone civilization. */
+    private readonly federation?: FederationPort
   ) {}
 
   async ensureSeeded(): Promise<void> {
@@ -115,6 +126,17 @@ export class SimulationEngine {
     await this.store.upsertSimulation(simulation);
   }
 
+  /**
+   * Stop the turn timer WITHOUT persisting `running = false`. Used on process shutdown so a restart
+   * resumes the prior running state instead of coming back paused.
+   */
+  shutdown(): void {
+    if (this.timer) {
+      clearInterval(this.timer);
+      this.timer = undefined;
+    }
+  }
+
   async reset(): Promise<void> {
     if (this.advancing) {
       throw new Error("Cannot reset while a turn is advancing. Try again after the current turn completes.");
@@ -158,7 +180,8 @@ export class SimulationEngine {
       currentConstitution,
       constitutionHistory: constitutions,
       proposals,
-      recentEvents
+      recentEvents,
+      foreignAffairs: this.federation ? await this.federation.getSnapshot() : undefined
     };
   }
 
@@ -288,6 +311,17 @@ export class SimulationEngine {
       const actors = selectActors(activeAgents, simulation.turn, simulation.config.actorsPerTurn);
       const openProposals = proposals.filter((proposal) => proposal.status === "open");
 
+      // Fetch the compact foreign-affairs snapshot once per turn: it feeds every agent's briefing and
+      // gates the President's cross-civ actions. Never blocks on the network (store read only).
+      const foreignSnapshot = this.federation ? await this.federation.getSnapshot() : undefined;
+      const foreignCtx: ForeignValidationContext | undefined = foreignSnapshot
+        ? {
+            enabled: true,
+            ownCivId: foreignSnapshot.civId,
+            knownCivIds: new Set(foreignSnapshot.knownCivilizations.map((civ) => civ.civId))
+          }
+        : undefined;
+
       for (const actor of actors) {
         await this.applyUpkeep(simulation, actor);
 
@@ -298,10 +332,11 @@ export class SimulationEngine {
           tiles,
           currentConstitution,
           openProposals,
-          recentEvents.map((event) => event.message)
+          recentEvents.map((event) => event.message),
+          foreignSnapshot
         );
 
-        await this.applyAction(simulation, actor, action, activeAgents, tiles, openProposals, currentConstitution);
+        await this.applyAction(simulation, actor, action, activeAgents, tiles, openProposals, currentConstitution, foreignCtx);
       }
 
       await this.resolveExpiredProposals(simulation, activeAgents, currentConstitution);
@@ -322,7 +357,8 @@ export class SimulationEngine {
     tiles: Tile[],
     currentConstitution: ConstitutionVersion,
     openProposals: AmendmentProposal[],
-    recentEvents: string[]
+    recentEvents: string[],
+    foreignAffairs?: ForeignAffairsSnapshot
   ): Promise<AgentAction> {
     try {
       return await withTimeout(
@@ -335,7 +371,8 @@ export class SimulationEngine {
           openProposals,
           recentEvents,
           turnsSinceConversation:
-            simulation.lastConversationTurn === undefined ? simulation.turn : simulation.turn - simulation.lastConversationTurn
+            simulation.lastConversationTurn === undefined ? simulation.turn : simulation.turn - simulation.lastConversationTurn,
+          foreignAffairs
         }),
         25_000,
         `Timed out waiting for ${actor.name} (${actor.model}) to choose an action.`
@@ -367,9 +404,10 @@ export class SimulationEngine {
     agents: AgentProfile[],
     tiles: Tile[],
     openProposals: AmendmentProposal[],
-    currentConstitution: ConstitutionVersion
+    currentConstitution: ConstitutionVersion,
+    foreign?: ForeignValidationContext
   ): Promise<void> {
-    const rejection = validateAction(simulation, actor, action, agents, tiles, openProposals);
+    const rejection = validateAction(simulation, actor, action, agents, tiles, openProposals, foreign);
     if (rejection) {
       trackActionMetric(`rejected:${action.type}`);
       await this.recordEvent(simulation.id, simulation.turn, "actionRejected", `${actor.name}: ${rejection}`, actor.id, undefined, undefined, {
@@ -623,6 +661,11 @@ export class SimulationEngine {
         await this.recordEvent(simulation.id, simulation.turn, "decreeIssued", `President ${actor.name} decreed "${law.title}": ${law.description}`, actor.id);
         break;
       }
+      case "contactCivilization":
+      case "messageCivilization": {
+        await this.submitForeignInteraction(simulation, actor, action, foreign);
+        break;
+      }
       case "noop": {
         await this.recordEvent(simulation.id, simulation.turn, "agentActed", `${actor.name} waited: ${action.rationale}`, actor.id);
         break;
@@ -872,6 +915,68 @@ export class SimulationEngine {
     };
   }
 
+  private async submitForeignInteraction(
+    simulation: Simulation,
+    actor: AgentProfile,
+    action: AgentAction,
+    foreign?: ForeignValidationContext
+  ): Promise<void> {
+    if (action.type !== "contactCivilization" && action.type !== "messageCivilization") {
+      return;
+    }
+    if (!this.federation || !foreign?.enabled || !foreign.ownCivId) {
+      await this.recordEvent(
+        simulation.id,
+        simulation.turn,
+        "foreignInteractionFailed",
+        `${actor.name} could not act abroad: the World connector is unavailable.`,
+        actor.id
+      );
+      return;
+    }
+
+    const kind = action.type === "contactCivilization" ? "contact" : "message";
+    // Deterministic idempotency key: stable across retries for the same President action on the same turn.
+    const idempotencyKey = `intent:${simulation.id}:${actor.id}:${kind}:${action.targetCivId}:${simulation.turn}`;
+    const authorityDecision = {
+      mode: "president",
+      ref: `term-${simulation.governance.president?.termNumber ?? 0}`,
+      authorizedAt: nowIso()
+    };
+
+    if (action.type === "contactCivilization") {
+      const publicNarrative = `President ${actor.name} opened diplomatic contact with ${action.targetCivId}.`;
+      await this.federation.submitInteraction({
+        idempotencyKey,
+        kind: "contact",
+        source: foreign.ownCivId,
+        target: action.targetCivId,
+        authorityDecision,
+        publicNarrative,
+        payload: { greeting: action.greeting, purpose: action.purpose }
+      });
+      await this.recordEvent(simulation.id, simulation.turn, "foreignContactSent", publicNarrative, actor.id, undefined, undefined, {
+        targetCivId: action.targetCivId,
+        idempotencyKey
+      });
+    } else {
+      const publicNarrative = `President ${actor.name} sent a public message to ${action.targetCivId}.`;
+      await this.federation.submitInteraction({
+        idempotencyKey,
+        kind: "message",
+        source: foreign.ownCivId,
+        target: action.targetCivId,
+        authorityDecision,
+        publicNarrative,
+        payload: { body: action.body, subject: action.subject, inReplyTo: action.inReplyTo ?? null }
+      });
+      await this.recordEvent(simulation.id, simulation.turn, "foreignMessageSent", publicNarrative, actor.id, undefined, undefined, {
+        targetCivId: action.targetCivId,
+        idempotencyKey
+      });
+    }
+  }
+
   private async touchAgent(simulation: Simulation, agent: AgentProfile, message: string): Promise<void> {
     agent.lastActedTurn = simulation.turn;
     agent.updatedAt = nowIso();
@@ -904,6 +1009,14 @@ export class SimulationEngine {
     };
     await this.store.appendEvent(event);
     this.eventBus.publish(event);
+    if (this.federation) {
+      // Best-effort CloudEvents export (allowlist-gated inside the service). Never blocks/fails a turn.
+      try {
+        await this.federation.exportLocalEvent(event);
+      } catch (error) {
+        console.error("Federation event export failed", error);
+      }
+    }
   }
 }
 
@@ -952,7 +1065,8 @@ export function validateAction(
   action: AgentAction,
   agents: AgentProfile[],
   tiles: Tile[],
-  openProposals: AmendmentProposal[]
+  openProposals: AmendmentProposal[],
+  foreign?: ForeignValidationContext
 ): string | undefined {
   switch (action.type) {
     case "move": {
@@ -1108,6 +1222,22 @@ export function validateAction(
       }
       if (action.law.lawType === "prohibition" && !action.law.forbiddenAction) {
         return "a prohibition decree must name a forbiddenAction";
+      }
+      return undefined;
+    }
+    case "contactCivilization":
+    case "messageCivilization": {
+      if (!foreign?.enabled) {
+        return "federation is not enabled";
+      }
+      if (simulation.governance.president?.agentId !== actor.id) {
+        return "only the President may conduct foreign affairs";
+      }
+      if (foreign.ownCivId && action.targetCivId === foreign.ownCivId) {
+        return "cannot direct a foreign action at your own civilization";
+      }
+      if (!foreign.knownCivIds.has(action.targetCivId)) {
+        return "target civilization is not known";
       }
       return undefined;
     }

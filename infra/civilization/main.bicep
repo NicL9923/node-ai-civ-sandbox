@@ -56,6 +56,9 @@ var containers = [
   'events'
   'proposals'
   'constitutions'
+  // Durable state for the optional World federation connector (outbox / inbox / cursor / directory),
+  // partitioned by '/simulationId' like the other per-entity containers.
+  'federation'
 ]
 
 resource logAnalytics 'Microsoft.OperationalInsights/workspaces@2023-09-01' = {

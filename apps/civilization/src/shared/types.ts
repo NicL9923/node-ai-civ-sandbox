@@ -262,6 +262,21 @@ export type AgentAction =
     | { type: "fine"; targetAgentId: string; amount: number; reason: string; violationId?: string; rationale: string }
     | { type: "pardon"; violationId: string; rationale: string }
     | { type: "decree"; law: LawSpecInput; rationale: string }
+    | {
+        type: "contactCivilization";
+        targetCivId: string;
+        greeting: string;
+        purpose?: string;
+        rationale: string;
+      }
+    | {
+        type: "messageCivilization";
+        targetCivId: string;
+        body: string;
+        subject?: string;
+        inReplyTo?: string;
+        rationale: string;
+      }
     | { type: "noop"; rationale: string }
   );
 
@@ -290,7 +305,15 @@ export type SimulationEventType =
   | "violationRecorded"
   | "fineIssued"
   | "pardonIssued"
-  | "policyChanged";
+  | "policyChanged"
+  // Federation / foreign-affairs (only ever recorded when the connector is enabled).
+  | "foreignContactSent"
+  | "foreignMessageSent"
+  | "foreignContactReceived"
+  | "foreignMessageReceived"
+  | "foreignInteractionAcked"
+  | "foreignInteractionFailed"
+  | "foreignRegistered";
 
 export interface SimulationEvent {
   id: string;
@@ -313,4 +336,35 @@ export interface WorldSnapshot {
   constitutionHistory: ConstitutionVersion[];
   proposals: AmendmentProposal[];
   recentEvents: SimulationEvent[];
+  /** Present only when the World federation connector is enabled. Citizen-safe; never carries secrets. */
+  foreignAffairs?: ForeignAffairsSnapshot;
+}
+
+/** A known foreign civilization as a citizen-safe reference for prompts and the observer UI. */
+export interface KnownCivilization {
+  civId: string;
+  displayName: string;
+  stance?: string;
+  lastSeenTurn?: number;
+}
+
+/**
+ * Citizen-safe view of federation status and recent world happenings. This is the ONLY foreign-affairs
+ * data exposed to prompts and the public snapshot: it MUST NOT include the HMAC secret, key material,
+ * onboarding token, or any private agent data.
+ */
+export interface ForeignAffairsSnapshot {
+  enabled: boolean;
+  /** Whether the civ has usable World credentials (registered or pre-provisioned). */
+  registered: boolean;
+  /** True when the last successful World contact is recent; false when the World looks unreachable/stale. */
+  connected: boolean;
+  civId?: string;
+  displayName?: string;
+  lastHeartbeatAt?: string;
+  /** Compact, shared, length-bounded briefing lines included in every agent prompt. */
+  briefing: string[];
+  knownCivilizations: KnownCivilization[];
+  pendingOutbox: number;
+  failedOutbox: number;
 }
