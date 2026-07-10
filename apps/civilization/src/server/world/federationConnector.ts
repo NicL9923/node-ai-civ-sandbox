@@ -4,7 +4,7 @@
 // stable across attempts. The command cursor is advanced ONLY after every command on a page is acked.
 import type { FederationConfig } from "../config.js";
 import type { FederationService, AckDecision } from "./federationService.js";
-import type { CloudEvent, Command, InteractionRequest, OutboxItemDoc } from "./federationTypes.js";
+import type { CloudEvent, Command, InteractionRequest, OutboxItemDoc, PublicProjection } from "./federationTypes.js";
 import { createWorldClient, type WorldClient, type WorldSigner } from "./worldClient.js";
 
 const BACKOFF_BASE_MS = 2_000;
@@ -19,6 +19,10 @@ interface ClassifiedError extends Error {
 }
 
 export class FederationConnector {
+  private static readonly DIR_PAGE_LIMIT = 100;
+  private static readonly DIR_MAX_PAGES = 50;
+  private static readonly DIR_MAX_ITEMS = 5_000;
+
   private client: WorldClient;
   private readonly timers: NodeJS.Timeout[] = [];
   private readonly inFlight: Record<LoopName, boolean> = { heartbeat: false, poll: false, flush: false };
@@ -117,15 +121,52 @@ export class FederationConnector {
       throw this.httpError(response, error);
     }
     await this.service.markConnection(true);
-    await this.refreshDirectory();
+    // A directory refresh failure must not undo a successful heartbeat's connectivity or block the
+    // loop: keep the last-known directory and carry on.
+    try {
+      await this.refreshDirectory();
+    } catch (error) {
+      this.log("directory refresh failed; keeping last-known directory", error);
+    }
   }
 
-  /** Refresh the cached civ directory from the public (unauthenticated) projection feed. */
+  /**
+   * Refresh the cached civ directory from the public projection feed, following `nextCursor` until it
+   * is null. Bounded by MAX pages/items with repeated-cursor cycle detection. The cache is replaced
+   * only after EVERY page succeeds; any page failure or cycle throws/aborts and preserves the last-known
+   * directory (never a partial overwrite).
+   */
   async refreshDirectory(): Promise<void> {
-    const { data } = await this.client.GET("/civilizations", { params: { query: { limit: 100 } } });
-    if (data?.items) {
-      await this.service.refreshDirectory(data.items);
+    const all: PublicProjection[] = [];
+    const seenCursors = new Set<string>();
+    let after: string | undefined;
+
+    for (let page = 0; page < FederationConnector.DIR_MAX_PAGES; page += 1) {
+      const { data, error, response } = await this.client.GET("/civilizations", {
+        params: { query: { after, limit: FederationConnector.DIR_PAGE_LIMIT } }
+      });
+      if (error || !data) {
+        throw this.httpError(response, error);
+      }
+      all.push(...data.items);
+      if (all.length > FederationConnector.DIR_MAX_ITEMS) {
+        this.log(`directory refresh exceeded ${FederationConnector.DIR_MAX_ITEMS} items; preserving cache`);
+        return;
+      }
+      const next = data.nextCursor ?? undefined;
+      if (!next) {
+        // Caught up: every page succeeded, so it is safe to replace the cache.
+        await this.service.refreshDirectory(all);
+        return;
+      }
+      if (seenCursors.has(next)) {
+        this.log("directory cursor cycle detected; preserving cache");
+        return;
+      }
+      seenCursors.add(next);
+      after = next;
     }
+    this.log(`directory refresh hit the ${FederationConnector.DIR_MAX_PAGES}-page cap; preserving cache`);
   }
 
   async pollAndAck(): Promise<void> {
@@ -154,11 +195,9 @@ export class FederationConnector {
 
     // Advance the cursor ONLY to a real next cursor. A null nextCursor means "caught up" — keep the
     // current position rather than resetting to the beginning (Cursor has minLength 1, so a truthy
-    // check cleanly excludes both null and undefined).
+    // check cleanly excludes both null and undefined). The advance is serialized in the service.
     if (data.nextCursor) {
-      const latest = await this.service.getState();
-      latest.commandCursor = data.nextCursor;
-      await this.service.saveState(latest);
+      await this.service.advanceCursor(data.nextCursor);
     }
   }
 

@@ -104,11 +104,11 @@ describe("FederationService", () => {
     const second = await service.applyInboundCommand(contactCommand());
     expect(second.status).toBe("duplicate");
 
-    // Exactly one local event with the deterministic id (re-apply upserts, never duplicates).
+    // Exactly one local event with a deterministic, Cosmos-safe id (re-apply upserts, never duplicates).
     const events = await store.listRecentEvents(SIM_ID, 50);
     const foreign = events.filter((event) => event.type === "foreignContactReceived");
     expect(foreign).toHaveLength(1);
-    expect(foreign[0]?.id).toBe("event_fed_idem-1");
+    expect(foreign[0]?.id).toMatch(/^event_fed_[0-9a-f]{64}$/);
 
     const known = await service.isKnownCiv("civ_b");
     expect(known).toBe(true);

@@ -25,6 +25,13 @@ class MockWorld {
   registrations: unknown[] = [];
   private commandsServed = false;
   commandsPage: Command[] = [];
+  /**
+   * Optional scripted responses for GET /civilizations, keyed by the `after` cursor ("" for the first
+   * page). When set, the mock serves these instead of the default single page. A value of `"__fail__"`
+   * makes that page respond 500. `dirCalls` records the cursors requested, in order.
+   */
+  directoryPages?: Record<string, { items: unknown[]; nextCursor: string | null } | "__fail__">;
+  dirCalls: string[] = [];
 
   async start(): Promise<void> {
     this.server = http.createServer((req, res) => this.handle(req, res));
@@ -80,6 +87,21 @@ class MockWorld {
         return;
       }
       if (method === "GET" && p.endsWith("/civilizations")) {
+        if (this.directoryPages) {
+          const after = url.searchParams.get("after") ?? "";
+          this.dirCalls.push(after);
+          const page = this.directoryPages[after];
+          if (page === "__fail__") {
+            json(500, { type: "about:blank", title: "Internal Error", code: "boom", retryable: true });
+            return;
+          }
+          if (!page) {
+            json(200, { items: [], nextCursor: null });
+            return;
+          }
+          json(200, page);
+          return;
+        }
         json(200, { items: [{ civId: "civ_b", displayName: "Civ B", protocolVersion: "1.0.0", turn: 3, running: true, population: 2, updatedAt: new Date().toISOString() }], nextCursor: null });
         return;
       }
@@ -204,6 +226,43 @@ describe("FederationConnector against a mock World", () => {
     await connector.heartbeat();
     expect(world.heartbeats).toHaveLength(1);
     expect(await service.isKnownCiv("civ_b")).toBe(true);
+  });
+
+  it("refreshes the directory across multiple pages, filtering self", async () => {
+    const proj = (civId: string) => ({ civId, displayName: civId.toUpperCase(), protocolVersion: "1.0.0", turn: 1, running: true, population: 1, updatedAt: new Date().toISOString() });
+    world.directoryPages = {
+      "": { items: [proj("civ_a"), proj("civ_b")], nextCursor: "p2" },
+      p2: { items: [proj("civ_c")], nextCursor: "p3" },
+      p3: { items: [proj("civ_d")], nextCursor: null }
+    };
+    const { service, connector } = await newServiceAndConnector(federationConfig({ apiBaseUrl: world.baseUrl() }));
+    await connector.refreshDirectory();
+    const snapshot = await service.getSnapshot();
+    const ids = snapshot.knownCivilizations.map((c) => c.civId).sort();
+    expect(ids).toEqual(["civ_b", "civ_c", "civ_d"]); // civ_a (self) filtered out
+    expect(world.dirCalls).toEqual(["", "p2", "p3"]);
+  });
+
+  it("preserves the last-known directory when a later page fails (no partial overwrite)", async () => {
+    const proj = (civId: string) => ({ civId, displayName: civId.toUpperCase(), protocolVersion: "1.0.0", turn: 1, running: true, population: 1, updatedAt: new Date().toISOString() });
+    const { service, connector } = await newServiceAndConnector(federationConfig({ apiBaseUrl: world.baseUrl() }));
+    // First refresh succeeds and caches civ_b.
+    world.directoryPages = { "": { items: [proj("civ_b")], nextCursor: null } };
+    await connector.refreshDirectory();
+    expect((await service.getSnapshot()).knownCivilizations.map((c) => c.civId)).toEqual(["civ_b"]);
+    // Second refresh: page 2 fails. Cache must be preserved (not partially overwritten with civ_x).
+    world.directoryPages = { "": { items: [proj("civ_x")], nextCursor: "p2" }, p2: "__fail__" };
+    await expect(connector.refreshDirectory()).rejects.toThrow();
+    expect((await service.getSnapshot()).knownCivilizations.map((c) => c.civId)).toEqual(["civ_b"]);
+  });
+
+  it("aborts and preserves cache when the directory cursor cycles", async () => {
+    const proj = (civId: string) => ({ civId, displayName: civId.toUpperCase(), protocolVersion: "1.0.0", turn: 1, running: true, population: 1, updatedAt: new Date().toISOString() });
+    const { service, connector } = await newServiceAndConnector(federationConfig({ apiBaseUrl: world.baseUrl() }));
+    // Page 2 points back to itself -> cycle. Nothing should be committed.
+    world.directoryPages = { "": { items: [proj("civ_b")], nextCursor: "loop" }, loop: { items: [proj("civ_c")], nextCursor: "loop" } };
+    await connector.refreshDirectory();
+    expect((await service.getSnapshot()).knownCivilizations).toHaveLength(0);
   });
 
   it("flushes outbox events and interactions with stable idempotency keys", async () => {

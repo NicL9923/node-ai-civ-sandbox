@@ -1,4 +1,4 @@
-import { CosmosClient, type Container, type SqlQuerySpec } from "@azure/cosmos";
+import { BulkOperationType, CosmosClient, type Container, type OperationInput, type SqlQuerySpec } from "@azure/cosmos";
 import { DefaultAzureCredential } from "@azure/identity";
 import type {
   AgentProfile,
@@ -36,8 +36,15 @@ export interface SimulationStore {
   putFederationState(state: FederationStateDoc): Promise<void>;
   listOutbox(simulationId: string, statuses?: OutboxStatus[]): Promise<OutboxItemDoc[]>;
   putOutboxItem(item: OutboxItemDoc): Promise<void>;
-  getInboxItem(simulationId: string, dedupeKey: string): Promise<InboxItemDoc | undefined>;
+  getInboxItem(simulationId: string, id: string): Promise<InboxItemDoc | undefined>;
   putInboxItem(item: InboxItemDoc): Promise<void>;
+  /**
+   * Atomically persist the updated federation state doc and the terminal inbox record together. Both
+   * live in the federation container under the same `/simulationId` partition, so this is a single
+   * transactional batch — a crash/replay can never apply half of it (e.g. a briefing note without the
+   * dedupe record).
+   */
+  commitInboundCommand(state: FederationStateDoc, inbox: InboxItemDoc): Promise<void>;
 }
 
 export class MemorySimulationStore implements SimulationStore {
@@ -138,13 +145,18 @@ export class MemorySimulationStore implements SimulationStore {
     this.outbox.set(item.id, item);
   }
 
-  async getInboxItem(simulationId: string, dedupeKey: string): Promise<InboxItemDoc | undefined> {
-    const item = this.inbox.get(`${simulationId}:${dedupeKey}`);
-    return item;
+  async getInboxItem(simulationId: string, id: string): Promise<InboxItemDoc | undefined> {
+    return this.inbox.get(`${simulationId}:${id}`);
   }
 
   async putInboxItem(item: InboxItemDoc): Promise<void> {
-    this.inbox.set(`${item.simulationId}:${item.dedupeKey}`, item);
+    this.inbox.set(`${item.simulationId}:${item.id}`, item);
+  }
+
+  async commitInboundCommand(state: FederationStateDoc, inbox: InboxItemDoc): Promise<void> {
+    // Memory-store parity for the Cosmos transactional batch: apply both writes together.
+    this.federationState.set(state.simulationId, state);
+    this.inbox.set(`${inbox.simulationId}:${inbox.id}`, inbox);
   }
 }
 
@@ -158,6 +170,17 @@ class CosmosContainerStore<T extends CosmosDocument> {
 
   async upsert(item: T): Promise<void> {
     await this.container.items.upsert(item);
+  }
+
+  /**
+   * Transactionally upsert several items that share one partition key. Cosmos executes this as an
+   * all-or-nothing transactional batch, so callers get atomicity across the documents.
+   */
+  async batchUpsert(items: T[], partitionKey: string): Promise<void> {
+    const operations = items.map(
+      (item) => ({ operationType: BulkOperationType.Upsert, resourceBody: item }) as unknown as OperationInput
+    );
+    await this.container.items.batch(operations, partitionKey);
   }
 
   async delete(id: string, partitionKey: string): Promise<void> {
@@ -317,13 +340,18 @@ export class CosmosSimulationStore implements SimulationStore {
     await this.federation.upsert(item);
   }
 
-  async getInboxItem(simulationId: string, dedupeKey: string): Promise<InboxItemDoc | undefined> {
-    const doc = await this.federation.read(`inbox_${dedupeKey}`, simulationId);
+  async getInboxItem(simulationId: string, id: string): Promise<InboxItemDoc | undefined> {
+    const doc = await this.federation.read(id, simulationId);
     return doc?.kind === "inbox" ? (doc as InboxItemDoc) : undefined;
   }
 
   async putInboxItem(item: InboxItemDoc): Promise<void> {
     await this.federation.upsert(item);
+  }
+
+  async commitInboundCommand(state: FederationStateDoc, inbox: InboxItemDoc): Promise<void> {
+    // State + inbox share the same /simulationId partition, so this is one transactional batch.
+    await this.federation.batchUpsert([state, inbox], state.simulationId);
   }
 }
 
