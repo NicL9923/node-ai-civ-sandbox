@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { ScriptedTransport } from "../src/transport.js";
+import {
+  RetryExhaustedError,
+  ScriptedTransport,
+  TransientTransportError,
+  sendWithRetry,
+  type WorldTransport,
+} from "../src/transport.js";
 import { WorldFederationDriver } from "../src/world-client.js";
 
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), {
@@ -42,7 +48,7 @@ describe("signed request retries", () => {
 
   it("retries heartbeat with an empty canonical idempotency field and no header", async () => {
     const transport = new ScriptedTransport();
-    transport.enqueue({ reply: new Error("connection reset") });
+    transport.enqueue({ reply: new TransientTransportError("connection reset") });
     transport.enqueue({
       headers: { "X-Nonce": "fixed-replay-nonce" },
       reply: json(200, { civId: "civ_aurora", serverTime: "2026-01-01T00:00:00.000Z" }),
@@ -68,5 +74,167 @@ describe("signed request retries", () => {
       },
     });
     expect(transport.journal.every((entry) => entry.headers["idempotency-key"] === undefined)).toBe(true);
+  });
+});
+
+describe("retry classification", () => {
+  const policy = { maxAttempts: 2, initialDelayMs: 0, maxDelayMs: 0 };
+  const sleeper = { sleep: async () => undefined };
+  const success = new Response(null, { status: 204 });
+
+  async function classify(first: Response | Error): Promise<{ attempts: number; response?: Response; error?: unknown }> {
+    let attempts = 0;
+    const transport: WorldTransport = {
+      send: async () => {
+        attempts += 1;
+        if (attempts > 1) return success;
+        if (first instanceof Error) throw first;
+        return first;
+      },
+    };
+    try {
+      const response = await sendWithRetry(
+        async () => new Request("https://world.test/world/v1/events"),
+        transport,
+        policy,
+        sleeper,
+      );
+      return {
+        attempts,
+        response,
+      };
+    } catch (error) {
+      return { attempts, error };
+    }
+  }
+
+  it.each([
+    ["bare 503", new Response(null, { status: 503 })],
+    ["bare 429", new Response(null, { status: 429 })],
+    [
+      "valid retryable problem",
+      json(408, {
+        type: "about:blank",
+        title: "Timeout",
+        status: 408,
+        code: "request_timeout",
+        retryable: true,
+      }),
+    ],
+    ["known transient transport failure", new TransientTransportError("reset")],
+  ])("retries %s", async (_name, first) => {
+    const result = await classify(first);
+    expect(result.attempts).toBe(2);
+    expect(result.response?.status).toBe(204);
+  });
+
+  it.each([
+    [
+      "401 even with retryable body",
+      json(401, {
+        type: "about:blank",
+        title: "Unauthorized",
+        status: 401,
+        code: "invalid_signature",
+        retryable: true,
+      }),
+    ],
+    [
+      "403 even with retryable body",
+      json(403, {
+        type: "about:blank",
+        title: "Forbidden",
+        status: 403,
+        code: "forbidden",
+        retryable: true,
+      }),
+    ],
+    [
+      "nonretryable 409",
+      json(409, {
+        type: "about:blank",
+        title: "Conflict",
+        status: 409,
+        code: "conflict",
+        retryable: false,
+      }),
+    ],
+  ])("does not retry %s", async (_name, first) => {
+    const result = await classify(first);
+    expect(result.attempts).toBe(1);
+    expect(result.response).toBe(first);
+  });
+
+  it("throws RetryExhaustedError after the final retryable response", async () => {
+    let attempts = 0;
+    const transport: WorldTransport = {
+      send: async () => {
+        attempts += 1;
+        return new Response(null, { status: 503 });
+      },
+    };
+    await expect(sendWithRetry(
+      async () => new Request("https://world.test/world/v1/events"),
+      transport,
+      policy,
+      sleeper,
+    )).rejects.toBeInstanceOf(RetryExhaustedError);
+    expect(attempts).toBe(2);
+  });
+
+  it("does not retry arbitrary request-construction or transport exceptions", async () => {
+    const localError = new Error("local bug");
+    let transportAttempts = 0;
+    const transport: WorldTransport = {
+      send: async () => {
+        transportAttempts += 1;
+        throw localError;
+      },
+    };
+    await expect(sendWithRetry(
+      async () => { throw localError; },
+      transport,
+      policy,
+      sleeper,
+    )).rejects.toBe(localError);
+    expect(transportAttempts).toBe(0);
+
+    await expect(sendWithRetry(
+      async () => new Request("https://world.test/world/v1/events"),
+      transport,
+      policy,
+      sleeper,
+    )).rejects.toBe(localError);
+    expect(transportAttempts).toBe(1);
+  });
+});
+
+describe("Retry-After handling", () => {
+  const now = new Date("2026-01-01T00:00:00.000Z");
+
+  it.each([
+    ["huge delta", "999999", 100, 100],
+    ["future HTTP-date", "Thu, 01 Jan 2026 00:00:10 GMT", 1_000, 1_000],
+    ["past HTTP-date", "Wed, 31 Dec 2025 23:59:59 GMT", 1_000, 0],
+    ["invalid value", "eventually", 1_000, 25],
+  ])("bounds %s", async (_name, retryAfter, maxDelayMs, expectedDelay) => {
+    let attempts = 0;
+    const delays: number[] = [];
+    const transport: WorldTransport = {
+      send: async () => {
+        attempts += 1;
+        return attempts === 1
+          ? new Response(null, { status: 503, headers: { "retry-after": retryAfter } })
+          : new Response(null, { status: 204 });
+      },
+    };
+    await sendWithRetry(
+      async () => new Request("https://world.test/world/v1/events"),
+      transport,
+      { maxAttempts: 2, initialDelayMs: 25, maxDelayMs },
+      { sleep: async (milliseconds) => { delays.push(milliseconds); } },
+      { now: () => now },
+    );
+    expect(delays).toEqual([expectedDelay]);
   });
 });

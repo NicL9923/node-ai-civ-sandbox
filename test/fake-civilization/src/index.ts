@@ -43,17 +43,19 @@ export {
 export {
   HttpWorldTransport,
   RetryExhaustedError,
+  TransientTransportError,
   ScriptedTransport,
   TimerSleeper,
   WorldHttpError,
   defaultRetryPolicy,
   type RequestJournalEntry,
   type RetryPolicy,
+  type RetryClock,
   type Sleeper,
   type WorldTransport,
 } from "./transport.js";
 export { WorldFederationDriver, type SigningMutationHooks, type WorldFederationDriverOptions } from "./world-client.js";
-export { loadScenario } from "./scenario/loader.js";
+export { loadScenario, validateScenario } from "./scenario/loader.js";
 export { runScenario } from "./scenario/runner.js";
 export {
   ScenarioAssertionError,

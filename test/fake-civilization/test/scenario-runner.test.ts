@@ -5,10 +5,10 @@ import { fileURLToPath } from "node:url";
 import type { components } from "@ai-civ/federation-contracts";
 import { describe, expect, it } from "vitest";
 import type { SigningFault, SyncResult } from "../src/fake-civilization.js";
-import { loadScenario } from "../src/scenario/loader.js";
+import { loadScenario, validateScenario } from "../src/scenario/loader.js";
 import { runScenario } from "../src/scenario/runner.js";
 import type { ScenarioCivilization } from "../src/scenario/types.js";
-import { ScenarioHostControlError } from "../src/scenario/types.js";
+import { ScenarioDefinitionError, ScenarioHostControlError } from "../src/scenario/types.js";
 import { WorldHttpError } from "../src/transport.js";
 
 class ScenarioActorStub implements ScenarioCivilization {
@@ -172,5 +172,43 @@ describe("scenario fixtures", () => {
     } finally {
       await rm(directory, { force: true, recursive: true });
     }
+  });
+
+  it.each([
+    ["actors", {
+      schemaVersion: "1", name: "invalid actor", actors: { aurora: null }, steps: [],
+    }],
+    ["network", {
+      schemaVersion: "1", name: "invalid network", actors: {}, steps: [{ op: "heartbeat" }],
+    }],
+    ["network bounds", {
+      schemaVersion: "1",
+      name: "invalid network bounds",
+      actors: {
+        aurora: {
+          displayName: "Aurora",
+          credentialRef: "aurora",
+          capabilities: { protocolVersion: "1.0.0", supportedInteractionKinds: ["contact"] },
+        },
+      },
+      steps: [{ op: "listEvents", actor: "aurora", limit: 201 }],
+    }],
+    ["state", {
+      schemaVersion: "1", name: "invalid state", actors: {}, steps: [{ op: "setOnline", actor: "aurora", online: "true" }],
+    }],
+    ["auth", {
+      schemaVersion: "1", name: "invalid auth", actors: {}, steps: [{ op: "setAuthFault", actor: "aurora", fault: "eval" }],
+    }],
+    ["assert", {
+      schemaVersion: "1", name: "invalid assertion", actors: {}, steps: [{ op: "assert", actual: 4, equals: true }],
+    }],
+    ["arrange", {
+      schemaVersion: "1", name: "invalid arrange", actors: {}, steps: [{ op: "arrange", action: "" }],
+    }],
+    ["replay", {
+      schemaVersion: "1", name: "invalid replay", actors: {}, steps: [{ op: "replay", stepId: "missing" }],
+    }],
+  ])("rejects malformed %s DSL shapes with a definition error", (_family, scenario) => {
+    expect(() => validateScenario(scenario)).toThrow(ScenarioDefinitionError);
   });
 });

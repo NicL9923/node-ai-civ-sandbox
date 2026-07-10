@@ -275,6 +275,7 @@ export class WorldFederationDriver {
       this.transport,
       this.retry,
       this.sleeper,
+      this.clock,
     );
   }
 }

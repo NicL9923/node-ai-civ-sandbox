@@ -34,6 +34,48 @@ function fake(transport: ScriptedTransport) {
 }
 
 describe("command sync", () => {
+  it("updates the command cursor from a successful heartbeat without an idempotency key", async () => {
+    const transport = new ScriptedTransport();
+    transport.enqueue({
+      method: "POST",
+      path: "/world/v1/civilizations/civ_aurora/heartbeat",
+      reply: response(200, {
+        civId: "civ_aurora",
+        serverTime: "2026-01-01T00:00:00.000Z",
+        commandsCursor: "cursor-new",
+      }),
+    });
+    const civilization = fake(transport);
+    civilization.state.lastProcessedCommandCursor = "cursor-stale";
+
+    await civilization.heartbeat();
+
+    expect(civilization.state.lastProcessedCommandCursor).toBe("cursor-new");
+    expect(transport.journal[0]?.headers).not.toHaveProperty("idempotency-key");
+  });
+
+  it.each([
+    ["null", { commandsCursor: null }],
+    ["omitted", {}],
+  ])("preserves the command cursor when a heartbeat cursor is %s", async (_kind, cursor) => {
+    const transport = new ScriptedTransport();
+    transport.enqueue({
+      method: "POST",
+      path: "/world/v1/civilizations/civ_aurora/heartbeat",
+      reply: response(200, {
+        civId: "civ_aurora",
+        serverTime: "2026-01-01T00:00:00.000Z",
+        ...cursor,
+      }),
+    });
+    const civilization = fake(transport);
+    civilization.state.lastProcessedCommandCursor = "cursor-current";
+
+    await civilization.heartbeat();
+
+    expect(civilization.state.lastProcessedCommandCursor).toBe("cursor-current");
+  });
+
   it("rejects unknown commands then commits the page cursor", async () => {
     const transport = new ScriptedTransport();
     transport.enqueue({

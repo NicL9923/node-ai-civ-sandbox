@@ -8,6 +8,10 @@ export interface Sleeper {
   sleep(milliseconds: number): Promise<void>;
 }
 
+export interface RetryClock {
+  now(): Date;
+}
+
 export class TimerSleeper implements Sleeper {
   sleep(milliseconds: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, milliseconds));
@@ -55,11 +59,28 @@ export class RetryExhaustedError extends Error {
   }
 }
 
+export class TransientTransportError extends Error {
+  constructor(message: string, cause?: unknown) {
+    super(message, { cause });
+    this.name = "TransientTransportError";
+  }
+}
+
 export class HttpWorldTransport implements WorldTransport {
   constructor(private readonly fetchImplementation: typeof fetch = globalThis.fetch) {}
 
-  send(request: Request): Promise<Response> {
-    return this.fetchImplementation(request);
+  async send(request: Request): Promise<Response> {
+    try {
+      return await this.fetchImplementation(request);
+    } catch (error) {
+      if (
+        error instanceof TypeError ||
+        (error instanceof DOMException && ["AbortError", "NetworkError"].includes(error.name))
+      ) {
+        throw new TransientTransportError("Transient World transport failure", error);
+      }
+      throw error;
+    }
   }
 }
 
@@ -143,8 +164,14 @@ export async function readProblem(response: Response): Promise<ProblemDetails | 
     if (
       typeof parsed === "object" &&
       parsed !== null &&
-      "code" in parsed &&
-      typeof (parsed as { code?: unknown }).code === "string"
+      typeof (parsed as { type?: unknown }).type === "string" &&
+      typeof (parsed as { title?: unknown }).title === "string" &&
+      (parsed as { status?: unknown }).status === response.status &&
+      typeof (parsed as { code?: unknown }).code === "string" &&
+      (
+        (parsed as { retryable?: unknown }).retryable === undefined ||
+        typeof (parsed as { retryable?: unknown }).retryable === "boolean"
+      )
     ) {
       return parsed as ProblemDetails;
     }
@@ -154,11 +181,29 @@ export async function readProblem(response: Response): Promise<ProblemDetails | 
   return undefined;
 }
 
-function retryAfterMilliseconds(response: Response): number | undefined {
+function retryAfterMilliseconds(
+  response: Response,
+  clock: RetryClock,
+  fallbackDelay: number,
+  maxDelay: number,
+): number {
   const value = response.headers.get("retry-after");
-  if (!value) return undefined;
-  const seconds = Number(value);
-  return Number.isFinite(seconds) && seconds >= 0 ? seconds * 1_000 : undefined;
+  if (!value) return fallbackDelay;
+  if (/^\d+$/u.test(value.trim())) {
+    return Math.min(maxDelay, Number(value.trim()) * 1_000);
+  }
+  const date = Date.parse(value);
+  if (Number.isNaN(date)) return fallbackDelay;
+  return Math.min(maxDelay, Math.max(0, date - clock.now().getTime()));
+}
+
+function isRetryableResponse(response: Response, problem: ProblemDetails | undefined): boolean {
+  if (response.status === 401 || response.status === 403) return false;
+  return (
+    response.status === 429 ||
+    response.status >= 500 ||
+    problem?.retryable === true
+  );
 }
 
 export async function sendWithRetry(
@@ -166,22 +211,25 @@ export async function sendWithRetry(
   transport: WorldTransport,
   policy: RetryPolicy,
   sleeper: Sleeper,
+  clock: RetryClock = { now: () => new Date() },
 ): Promise<Response> {
   let lastError: unknown;
   for (let attempt = 1; attempt <= policy.maxAttempts; attempt += 1) {
+    const request = await createRequest();
     try {
-      const response = await transport.send(await createRequest());
+      const response = await transport.send(request);
       if (response.ok) return response;
       const problem = await readProblem(response);
-      if (!problem?.retryable) return response;
+      if (!isRetryableResponse(response, problem)) return response;
       lastError = new WorldHttpError(response.status, problem);
       if (attempt === policy.maxAttempts) break;
       const fallbackDelay = Math.min(
         policy.maxDelayMs,
         policy.initialDelayMs * 2 ** (attempt - 1),
       );
-      await sleeper.sleep(retryAfterMilliseconds(response) ?? fallbackDelay);
+      await sleeper.sleep(retryAfterMilliseconds(response, clock, fallbackDelay, policy.maxDelayMs));
     } catch (error) {
+      if (!(error instanceof TransientTransportError)) throw error;
       lastError = error;
       if (attempt === policy.maxAttempts) break;
       const delay = Math.min(policy.maxDelayMs, policy.initialDelayMs * 2 ** (attempt - 1));

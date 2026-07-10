@@ -103,11 +103,15 @@ export class FakeCivilization {
     this.state.projection.civId = civId;
     this.state.projection.updatedAt = this.clock.now().toISOString();
     const projection = this.state.projection as components["schemas"]["PublicProjection"];
-    return this.driver.heartbeat(civId, {
+    const acknowledgement = await this.driver.heartbeat(civId, {
       projection,
       capabilities: this.config.capabilities,
       lastProcessedWorldCursor: this.state.lastProcessedCommandCursor,
     });
+    if (acknowledgement.commandsCursor != null) {
+      this.state.lastProcessedCommandCursor = acknowledgement.commandsCursor;
+    }
+    return acknowledgement;
   }
 
   async pushEvents(

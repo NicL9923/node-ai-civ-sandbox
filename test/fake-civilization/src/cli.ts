@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 import { existsSync } from "node:fs";
+import { resolve } from "node:path";
 import { parseArgs } from "node:util";
+import { fileURLToPath } from "node:url";
 import {
   environmentConfig,
   ConfigurationError,
@@ -33,18 +35,21 @@ function cliInput(values: Record<string, string | boolean | undefined>): ConfigI
   };
 }
 
-function errorCode(error: unknown): number {
+export function errorCode(error: unknown): number {
   if (
     error instanceof UsageError ||
     error instanceof ConfigurationError ||
-    error instanceof ScenarioDefinitionError ||
     (error instanceof TypeError &&
       "code" in error &&
       String((error as { code?: unknown }).code).startsWith("ERR_PARSE_ARGS"))
   ) return 2;
-  if (error instanceof WorldHttpError && [401, 403].includes(error.status)) return 3;
+  if (error instanceof WorldHttpError && error.status >= 400 && error.status < 500) return 3;
   if (error instanceof RetryExhaustedError) return 4;
-  if (error instanceof ScenarioAssertionError || error instanceof ScenarioHostControlError) return 5;
+  if (
+    error instanceof ScenarioAssertionError
+    || error instanceof ScenarioDefinitionError
+    || error instanceof ScenarioHostControlError
+  ) return 5;
   return 1;
 }
 
@@ -114,14 +119,16 @@ async function run(): Promise<unknown> {
   }
 }
 
-void run().then(
-  (result) => {
-    process.stdout.write(`${JSON.stringify(result)}\n`);
-  },
-  (error: unknown) => {
-    const code = errorCode(error);
-    process.stdout.write(`${JSON.stringify({ error: diagnostic(error), exitCode: code })}\n`);
-    process.stderr.write(`${diagnostic(error)}\n`);
-    process.exitCode = code;
-  },
-);
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  void run().then(
+    (result) => {
+      process.stdout.write(`${JSON.stringify(result)}\n`);
+    },
+    (error: unknown) => {
+      const code = errorCode(error);
+      process.stdout.write(`${JSON.stringify({ error: diagnostic(error), exitCode: code })}\n`);
+      process.stderr.write(`${diagnostic(error)}\n`);
+      process.exitCode = code;
+    },
+  );
+}
