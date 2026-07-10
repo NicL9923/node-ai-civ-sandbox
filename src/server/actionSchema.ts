@@ -18,6 +18,32 @@ const selfRevision = z.object({
   rationale: z.string().trim().min(1).max(500).optional()
 }).optional();
 
+const governanceParamKey = z.enum([
+  "presidentTermTurns",
+  "presidentCanTax",
+  "presidentCanSpend",
+  "presidentCanFine",
+  "presidentCanPardon",
+  "presidentCanDecree",
+  "taxCapPerAction",
+  "fineMax",
+  "proposalCost",
+  "changeTileCost"
+]);
+
+const policyChange = z.object({
+  param: governanceParamKey,
+  value: z.union([z.number(), z.boolean()])
+});
+
+const lawSpec = z.object({
+  lawType: z.enum(["prohibition", "mandate", "tax"]),
+  title: z.string().trim().min(1).max(120),
+  description: z.string().trim().min(1).max(600),
+  forbiddenAction: z.string().trim().min(1).max(40).optional(),
+  amount: z.number().int().min(0).max(50).optional()
+});
+
 export const agentActionSchema: z.ZodType<AgentAction> = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("move"),
@@ -45,6 +71,8 @@ export const agentActionSchema: z.ZodType<AgentAction> = z.discriminatedUnion("t
     proposedText: z.string().min(20).max(2000),
     changeType: z.enum(["add", "revise", "repeal"]).optional(),
     targetReference: z.string().trim().min(1).max(120).optional(),
+    policyChange: policyChange.optional(),
+    enactLaw: lawSpec.optional(),
     rationale,
     selfRevision
   }),
@@ -61,6 +89,66 @@ export const agentActionSchema: z.ZodType<AgentAction> = z.discriminatedUnion("t
     y: z.number().int().min(0),
     terrain,
     label: z.string().min(1).max(80).optional(),
+    rationale,
+    selfRevision
+  }),
+  z.object({
+    type: z.literal("gather"),
+    rationale,
+    selfRevision
+  }),
+  z.object({
+    type: z.literal("transfer"),
+    targetAgentId: z.string().min(1),
+    amount: z.number().int().min(1).max(1000),
+    rationale,
+    selfRevision
+  }),
+  z.object({
+    type: z.literal("runForOffice"),
+    platform: z.string().trim().min(1).max(400),
+    rationale,
+    selfRevision
+  }),
+  z.object({
+    type: z.literal("voteForPresident"),
+    candidateAgentId: z.string().min(1),
+    rationale,
+    selfRevision
+  }),
+  z.object({
+    type: z.literal("tax"),
+    amount: z.number().int().min(1).max(1000),
+    rationale,
+    selfRevision
+  }),
+  z.object({
+    type: z.literal("spend"),
+    targetAgentId: z.string().min(1).optional(),
+    x: z.number().int().min(0).optional(),
+    y: z.number().int().min(0).optional(),
+    amount: z.number().int().min(1).max(1000),
+    rationale,
+    selfRevision
+  }),
+  z.object({
+    type: z.literal("fine"),
+    targetAgentId: z.string().min(1),
+    amount: z.number().int().min(1).max(1000),
+    reason: z.string().trim().min(1).max(400),
+    violationId: z.string().min(1).optional(),
+    rationale,
+    selfRevision
+  }),
+  z.object({
+    type: z.literal("pardon"),
+    violationId: z.string().min(1),
+    rationale,
+    selfRevision
+  }),
+  z.object({
+    type: z.literal("decree"),
+    law: lawSpec,
     rationale,
     selfRevision
   }),

@@ -393,6 +393,371 @@ pre {
   margin-bottom: 8px;
 }
 
+/* Resources + president identity */
+.agentCard {
+  align-items: center;
+}
+
+.agentCardMain {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.agentCardMain strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agentCardMeta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 3px;
+  flex-shrink: 0;
+}
+
+.agentCardMeta .muted {
+  font-size: 0.82rem;
+}
+
+.resourceChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border-radius: 999px;
+  padding: 2px 9px;
+  background: rgba(250, 204, 21, 0.12);
+  color: #fde68a;
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.resourceChip.lg {
+  padding: 5px 12px;
+  font-size: 0.9rem;
+}
+
+.presidentBadge {
+  color: #fbbf24;
+  font-size: 0.95rem;
+  line-height: 1;
+}
+
+.presidentPill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border-radius: 999px;
+  padding: 5px 12px;
+  background: rgba(251, 191, 36, 0.16);
+  color: #fde68a;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.agentStatRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin: 10px 0 4px;
+}
+
+.platformNote {
+  font-style: italic;
+  color: #c7dccd;
+}
+
+/* Productive tiles */
+.tile.productive {
+  position: relative;
+}
+
+.tile.productive::after {
+  content: "";
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #d9f99d;
+  box-shadow: 0 0 4px rgba(217, 249, 157, 0.8);
+}
+
+/* Government panel */
+.government {
+  margin-top: 20px;
+}
+
+.govHeader {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.govHeader h2 {
+  margin: 0;
+}
+
+.treasuryChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 999px;
+  padding: 6px 14px;
+  background: rgba(250, 204, 21, 0.12);
+  color: #fde68a;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.govGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 14px;
+  align-items: start;
+}
+
+.govBlock {
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  padding: 14px;
+}
+
+.govBlock h4 {
+  margin: 0 0 10px;
+  color: #bbf7d0;
+}
+
+.govLead {
+  margin: 0 0 2px;
+  font-size: 1.05rem;
+  font-weight: 700;
+}
+
+.govLead span[aria-hidden="true"] {
+  color: #fbbf24;
+}
+
+.govLead.vacant {
+  color: #9db5a7;
+  font-weight: 600;
+}
+
+.powerPills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 12px;
+}
+
+.powerPill {
+  border-radius: 999px;
+  padding: 3px 10px;
+  font-size: 0.78rem;
+  letter-spacing: 0.02em;
+}
+
+.powerPill.on {
+  background: rgba(134, 239, 172, 0.18);
+  color: #bbf7d0;
+  border: 1px solid rgba(134, 239, 172, 0.28);
+}
+
+.powerPill.off {
+  background: rgba(255, 255, 255, 0.04);
+  color: #7f978a;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  text-decoration: line-through;
+}
+
+.statList {
+  margin: 0;
+  display: grid;
+  gap: 7px;
+}
+
+.statRow {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.statRow dt {
+  margin: 0;
+  font-size: 0.85rem;
+}
+
+.statRow dd {
+  margin: 0;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.electionBlock {
+  border-color: rgba(134, 239, 172, 0.4);
+  background: rgba(134, 239, 172, 0.08);
+  box-shadow: 0 0 0 1px rgba(134, 239, 172, 0.12), 0 12px 30px -18px rgba(134, 239, 172, 0.6);
+}
+
+.electionHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.electionHeader h4 {
+  margin: 0;
+}
+
+.closesPill {
+  border-radius: 999px;
+  padding: 3px 10px;
+  font-size: 0.76rem;
+  background: rgba(134, 239, 172, 0.16);
+  color: #bbf7d0;
+  white-space: nowrap;
+}
+
+.closesPill.subtle {
+  background: rgba(255, 255, 255, 0.08);
+  color: #cbd5e1;
+}
+
+.candidateList,
+.lawList,
+.violationList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+}
+
+.candidate,
+.lawItem,
+.violationItem {
+  border-radius: 12px;
+  padding: 10px;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.candidateTop,
+.lawTop {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.tallyCount {
+  font-size: 0.8rem;
+  color: #bbf7d0;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.tallyBar {
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+  margin: 8px 0 6px;
+}
+
+.tallyBar span {
+  display: block;
+  block-size: 100%;
+  background: #22c55e;
+  border-radius: 999px;
+}
+
+.candidate p,
+.lawItem p,
+.violationItem p {
+  margin: 6px 0 0;
+  line-height: 1.4;
+}
+
+.lawType {
+  border-radius: 999px;
+  padding: 3px 9px;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+.law-prohibition {
+  background: rgba(248, 113, 113, 0.16);
+  color: #fecaca;
+}
+
+.law-mandate {
+  background: rgba(96, 165, 250, 0.16);
+  color: #bfdbfe;
+}
+
+.law-tax {
+  background: rgba(250, 204, 21, 0.14);
+  color: #fde68a;
+}
+
+.law-violation {
+  background: rgba(255, 255, 255, 0.08);
+  color: #cbd5e1;
+}
+
+.lawItem code {
+  font-family: "Cascadia Code", "SFMono-Regular", Consolas, monospace;
+  font-size: 0.82rem;
+  color: #fecaca;
+}
+
+.resolvedNote {
+  margin: 10px 0 0;
+  font-size: 0.82rem;
+}
+
+/* Event tone markers */
+.events li {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.eventDot {
+  flex-shrink: 0;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  margin-top: 6px;
+  background: rgba(255, 255, 255, 0.3);
+}
+
+.eventDot.tone-gov {
+  background: #86efac;
+}
+
+.eventDot.tone-econ {
+  background: #60a5fa;
+}
+
+.eventDot.tone-warn {
+  background: #f87171;
+}
+
 .warning {
   border: 1px solid rgba(251, 191, 36, 0.5);
   background: rgba(251, 191, 36, 0.12);

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import type { AgentProfile, AmendmentProposal, SimulationEvent, Tile, Vote, VoteChoice, WorldSnapshot } from "../shared/types.js";
+import type { AgentProfile, AmendmentProposal, PresidentTerm, SimulationEvent, SimulationEventType, Tile, Vote, VoteChoice, WorldSnapshot } from "../shared/types.js";
 
 const terrainIcons: Record<string, string> = {
   grass: "",
@@ -41,7 +41,21 @@ export function App() {
       "proposalFailed",
       "tileChanged",
       "conversation",
-      "actionRejected"
+      "actionRejected",
+      "resourcesGathered",
+      "resourcesTransferred",
+      "electionOpened",
+      "candidacyDeclared",
+      "ballotCast",
+      "presidentElected",
+      "taxCollected",
+      "treasurySpent",
+      "lawEnacted",
+      "decreeIssued",
+      "violationRecorded",
+      "fineIssued",
+      "pardonIssued",
+      "policyChanged"
     ];
 
     for (const eventName of refreshEvents) {
@@ -58,6 +72,8 @@ export function App() {
     () => snapshot?.agents.find((agent) => agent.id === selectedAgentId) ?? snapshot?.agents[0],
     [selectedAgentId, snapshot?.agents]
   );
+
+  const president = snapshot?.simulation.governance?.president;
 
   if (!snapshot) {
     return <main className="shell"><p>{error ?? "Waking the tiny republic..."}</p></main>;
@@ -83,22 +99,35 @@ export function App() {
         <aside className="panel">
           <h2>Citizens</h2>
           <div className="agentList">
-            {snapshot.agents.map((agent) => (
-              <button
-                type="button"
-                className={agent.id === selectedAgent?.id ? "agentCard selected" : "agentCard"}
-                key={agent.id}
-                onClick={() => setSelectedAgentId(agent.id)}
-              >
-                <strong>{agent.name}</strong>
-                <span>{agent.model}</span>
-              </button>
-            ))}
+            {snapshot.agents.map((agent) => {
+              const isPresident = agent.id === president?.agentId;
+              return (
+                <button
+                  type="button"
+                  className={agent.id === selectedAgent?.id ? "agentCard selected" : "agentCard"}
+                  key={agent.id}
+                  onClick={() => setSelectedAgentId(agent.id)}
+                >
+                  <span className="agentCardMain">
+                    <strong>{agent.name}</strong>
+                    {isPresident ? <span className="presidentBadge" title="President" aria-label="President">★</span> : null}
+                  </span>
+                  <span className="agentCardMeta">
+                    <span className="muted">{agent.model}</span>
+                    <span className="resourceChip" title={`${agent.resources} resources`}>
+                      <span aria-hidden="true">◈</span> {agent.resources}
+                    </span>
+                  </span>
+                </button>
+              );
+            })}
           </div>
 
-          {selectedAgent ? <AgentDetails agent={selectedAgent} /> : null}
+          {selectedAgent ? <AgentDetails agent={selectedAgent} president={president} /> : null}
         </aside>
       </section>
+
+      <Government snapshot={snapshot} />
 
       <section className="bottom">
         <Constitution snapshot={snapshot} showHistory={showHistory} />
@@ -130,12 +159,17 @@ function WorldGrid({
         const y = Math.floor(index / worldSize);
         const tile = tileMap.get(`${x}:${y}`);
         const agent = agentMap.get(`${x}:${y}`);
+        const productivity = tile?.productivity;
+        const isProductive = typeof productivity === "number" && productivity > 0;
+        const productivityNote = isProductive
+          ? ` - yield ${productivity}${typeof tile?.maxProductivity === "number" ? `/${tile.maxProductivity}` : ""}`
+          : "";
         return (
           <button
             type="button"
             key={`${x}:${y}`}
-            className={`tile terrain-${tile?.terrain ?? "grass"}`}
-            title={`${tile?.terrain ?? "grass"} (${x}, ${y})${agent ? ` - ${agent.name}` : ""}`}
+            className={`tile terrain-${tile?.terrain ?? "grass"}${isProductive ? " productive" : ""}`}
+            title={`${tile?.terrain ?? "grass"} (${x}, ${y})${productivityNote}${agent ? ` - ${agent.name}` : ""}`}
             onClick={() => agent ? onSelectAgent(agent.id) : undefined}
           >
             {agent ? <span className="agentToken">{agent.name.slice(0, 1)}</span> : terrainIcons[tile?.terrain ?? "grass"]}
@@ -146,11 +180,23 @@ function WorldGrid({
   );
 }
 
-function AgentDetails({ agent }: { agent: AgentProfile }) {
+function AgentDetails({ agent, president }: { agent: AgentProfile; president?: PresidentTerm }) {
+  const isPresident = agent.id === president?.agentId;
   return (
     <section className="agentDetails">
       <h3>{agent.name}</h3>
       <p className="muted">Position ({agent.position.x}, {agent.position.y})</p>
+      <div className="agentStatRow">
+        <span className="resourceChip lg" title="Resource wallet">
+          <span aria-hidden="true">◈</span> {agent.resources} resources
+        </span>
+        {isPresident ? (
+          <span className="presidentPill" title="Head of state">
+            <span aria-hidden="true">★</span> President · Term {president?.termNumber}
+          </span>
+        ) : null}
+      </div>
+      {isPresident && president?.platform ? <p className="muted platformNote">“{president.platform}”</p> : null}
       <TagList title="Principles" items={agent.corePrinciples} />
       <TagList title="Traits" items={agent.personalityTraits} />
       <TagList title="Goals" items={agent.goals} />
@@ -377,6 +423,206 @@ function countVotes(votes: Vote[]): Record<VoteChoice, number> {
   );
 }
 
+function Government({ snapshot }: { snapshot: WorldSnapshot }) {
+  const { agents } = snapshot;
+  const governance = snapshot.simulation.governance;
+  const nameById = useMemo(() => new Map(agents.map((agent) => [agent.id, agent.name])), [agents]);
+  const nameOf = (id?: string) => (id ? nameById.get(id) ?? id : "Unknown");
+
+  if (!governance) {
+    return null;
+  }
+
+  const president = governance.president;
+  const election = governance.election;
+  const activeLaws = governance.laws.filter((law) => law.active);
+  const pendingViolations = governance.violations.filter((violation) => violation.status === "pending");
+  const finedCount = governance.violations.filter((violation) => violation.status === "fined").length;
+  const pardonedCount = governance.violations.filter((violation) => violation.status === "pardoned").length;
+
+  const powers = [
+    { label: "Tax", on: governance.params.presidentCanTax },
+    { label: "Spend", on: governance.params.presidentCanSpend },
+    { label: "Fine", on: governance.params.presidentCanFine },
+    { label: "Pardon", on: governance.params.presidentCanPardon },
+    { label: "Decree", on: governance.params.presidentCanDecree }
+  ];
+
+  const params = [
+    { label: "President term", value: `${governance.params.presidentTermTurns} turns` },
+    { label: "Proposal cost", value: governance.params.proposalCost },
+    { label: "Change-tile cost", value: governance.params.changeTileCost },
+    { label: "Tax cap / action", value: governance.params.taxCapPerAction },
+    { label: "Fine max", value: governance.params.fineMax }
+  ];
+
+  const tallies = new Map<string, number>();
+  for (const ballot of election?.ballots ?? []) {
+    tallies.set(ballot.candidateId, (tallies.get(ballot.candidateId) ?? 0) + 1);
+  }
+  const electionOpen = election?.status === "open";
+
+  return (
+    <section className="card government">
+      <div className="govHeader">
+        <h2>Government</h2>
+        <span className="treasuryChip" title="Public treasury">
+          <span className="muted">Treasury</span> <span aria-hidden="true">◈</span> {governance.treasury}
+        </span>
+      </div>
+
+      <div className="govGrid">
+        <div className="govBlock">
+          <h4>Executive</h4>
+          {president ? (
+            <>
+              <p className="govLead"><span aria-hidden="true">★</span> {nameOf(president.agentId)}</p>
+              <p className="muted">Term {president.termNumber} · since turn {president.termStartedTurn}</p>
+              {president.platform ? <p className="platformNote">“{president.platform}”</p> : null}
+            </>
+          ) : (
+            <p className="govLead vacant">Vacant</p>
+          )}
+          <div className="powerPills" aria-label="Presidential powers">
+            {powers.map((power) => (
+              <span key={power.label} className={power.on ? "powerPill on" : "powerPill off"}>
+                {power.label}
+              </span>
+            ))}
+          </div>
+        </div>
+
+        <div className="govBlock">
+          <h4>Governable parameters</h4>
+          <dl className="statList">
+            {params.map((param) => (
+              <div className="statRow" key={param.label}>
+                <dt className="muted">{param.label}</dt>
+                <dd>{param.value}</dd>
+              </div>
+            ))}
+          </dl>
+        </div>
+
+        {electionOpen && election ? (
+          <div className="govBlock electionBlock">
+            <div className="electionHeader">
+              <h4>Election open</h4>
+              <span className="closesPill">closes turn {election.closesTurn}</span>
+            </div>
+            {election.candidates.length === 0 ? (
+              <p className="muted">Awaiting candidates.</p>
+            ) : (
+              <ul className="candidateList">
+                {election.candidates.map((candidate) => {
+                  const votes = tallies.get(candidate.agentId) ?? 0;
+                  const share = election.ballots.length > 0 ? votes / election.ballots.length : 0;
+                  return (
+                    <li key={candidate.agentId} className="candidate">
+                      <div className="candidateTop">
+                        <strong>{nameOf(candidate.agentId)}</strong>
+                        <span className="tallyCount">{votes} {votes === 1 ? "vote" : "votes"}</span>
+                      </div>
+                      <div className="tallyBar" aria-hidden="true">
+                        <span style={{ inlineSize: `${Math.round(share * 100)}%` }} />
+                      </div>
+                      <p className="muted">{candidate.platform}</p>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </div>
+        ) : election?.winnerAgentId ? (
+          <div className="govBlock">
+            <h4>Last election</h4>
+            <p className="govLead"><span aria-hidden="true">★</span> {nameOf(election.winnerAgentId)}</p>
+            <p className="muted">Elected · closed turn {election.closesTurn}</p>
+          </div>
+        ) : null}
+
+        <div className="govBlock">
+          <div className="electionHeader">
+            <h4>Active laws</h4>
+            <span className="closesPill subtle">{activeLaws.length}</span>
+          </div>
+          {activeLaws.length === 0 ? (
+            <p className="muted">No laws in force.</p>
+          ) : (
+            <ul className="lawList">
+              {activeLaws.map((law) => (
+                <li key={law.id} className="lawItem">
+                  <div className="lawTop">
+                    <strong>{law.title}</strong>
+                    <span className={`lawType law-${law.type}`}>{law.type}</span>
+                  </div>
+                  <p>{law.description}</p>
+                  {law.type === "prohibition" && law.forbiddenAction ? (
+                    <p className="muted">Forbids: <code>{law.forbiddenAction}</code></p>
+                  ) : null}
+                  {law.type === "tax" && typeof law.amount === "number" ? (
+                    <p className="muted">Amount: {law.amount}</p>
+                  ) : null}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+
+        <div className="govBlock">
+          <div className="electionHeader">
+            <h4>Violations</h4>
+            <span className="closesPill subtle">{pendingViolations.length} pending</span>
+          </div>
+          {pendingViolations.length === 0 ? (
+            <p className="muted">No pending violations.</p>
+          ) : (
+            <ul className="violationList">
+              {pendingViolations.map((violation) => (
+                <li key={violation.id} className="violationItem">
+                  <div className="lawTop">
+                    <strong>{nameOf(violation.agentId)}</strong>
+                    <span className="lawType law-violation">T{violation.turn}</span>
+                  </div>
+                  <p className="muted">{violation.lawTitle}</p>
+                </li>
+              ))}
+            </ul>
+          )}
+          {finedCount + pardonedCount > 0 ? (
+            <p className="muted resolvedNote">{finedCount} fined · {pardonedCount} pardoned</p>
+          ) : null}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function eventTone(type: SimulationEventType): "gov" | "econ" | "warn" | "neutral" {
+  switch (type) {
+    case "presidentElected":
+    case "electionOpened":
+    case "candidacyDeclared":
+    case "lawEnacted":
+    case "decreeIssued":
+    case "policyChanged":
+    case "constitutionAmended":
+      return "gov";
+    case "resourcesGathered":
+    case "resourcesTransferred":
+    case "taxCollected":
+    case "treasurySpent":
+      return "econ";
+    case "violationRecorded":
+    case "fineIssued":
+    case "actionRejected":
+    case "proposalFailed":
+      return "warn";
+    default:
+      return "neutral";
+  }
+}
+
 function Events({ events }: { events: SimulationEvent[] }) {
   return (
     <section className="card">
@@ -384,6 +630,7 @@ function Events({ events }: { events: SimulationEvent[] }) {
       <ul className="events">
         {events.slice(0, 14).map((event) => (
           <li key={event.id}>
+            <span className={`eventDot tone-${eventTone(event.type)}`} aria-hidden="true" />
             <strong>T{event.turn}</strong> {event.message}
           </li>
         ))}

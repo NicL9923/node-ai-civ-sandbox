@@ -7,7 +7,8 @@
   "scripts": {
     "dev": "tsx src/server/index.ts",
     "dev:client": "vite --host 127.0.0.1",
-    "build": "npm run build:client && npm run build:server",
+    "build": "npm run typecheck:client && npm run build:client && npm run build:server",
+    "typecheck:client": "tsc --noEmit -p tsconfig.json",
     "build:client": "vite build",
     "build:server": "tsc -p tsconfig.server.json",
     "start": "node dist/server/server/index.js",

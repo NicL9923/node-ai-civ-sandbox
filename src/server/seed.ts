@@ -1,7 +1,9 @@
-import type { AgentProfile, ConstitutionVersion, Simulation, SimulationConfig, Tile } from "../shared/types.js";
+import type { AgentProfile, ConstitutionVersion, Governance, GovernanceParams, Simulation, SimulationConfig, Terrain, Tile } from "../shared/types.js";
 import { newId, nowIso } from "./id.js";
 
-const modelRotation = ["gpt-5.4", "grok-4.3", "deepseek-v4-pro"] as const;
+const modelRotation = ["gpt-5.4", "grok-4.3", "deepseek-v4-pro", "kimi-k2.6"] as const;
+
+const PRODUCTIVE_TERRAINS = new Set<Terrain>(["farm", "forest", "stone"]);
 
 interface SeedProfile {
   name: string;
@@ -268,7 +270,20 @@ const seedProfiles: SeedProfile[] = [
   }
 ];
 
-export function createSeedSimulation(id: string, config: SimulationConfig): {
+export function createInitialGovernance(defaults: GovernanceParams): Governance {
+  return {
+    treasury: 0,
+    params: { ...defaults },
+    laws: [],
+    violations: []
+  };
+}
+
+export function isProductiveTerrain(terrain: Terrain): boolean {
+  return PRODUCTIVE_TERRAINS.has(terrain);
+}
+
+export function createSeedSimulation(id: string, config: SimulationConfig, governanceDefaults: GovernanceParams): {
   simulation: Simulation;
   agents: AgentProfile[];
   tiles: Tile[];
@@ -280,6 +295,7 @@ export function createSeedSimulation(id: string, config: SimulationConfig): {
     turn: 0,
     running: false,
     config,
+    governance: createInitialGovernance(governanceDefaults),
     createdAt,
     updatedAt: createdAt
   };
@@ -309,6 +325,7 @@ export function createSeedSimulation(id: string, config: SimulationConfig): {
       x: 3 + (index % perRow) * 2,
       y: 3 + Math.floor(index / perRow) * 2
     },
+    resources: config.startResources,
     corePrinciples: profile.corePrinciples,
     personalityTraits: profile.personalityTraits,
     beliefs: profile.beliefs,
@@ -321,7 +338,9 @@ export function createSeedSimulation(id: string, config: SimulationConfig): {
   }));
 
   const mid = Math.floor(config.worldSize / 2);
-  // Scarce, valuable terrain clustered near the central forum so land-grab goals have a real prize to contest.
+  // Scarce, valuable terrain clustered near the central forum so land-grab goals have a real
+  // prize to contest. ~8 productive tiles (farm/forest/stone) spread in a ring around the forum
+  // give the 14 citizens enough of an economic base to fight over without instant starvation.
   const valuableTiles = new Map<string, Tile["terrain"]>([
     [`${mid},${mid}`, "forum"],
     [`${mid - 2},${mid - 1}`, "water"],
@@ -329,17 +348,25 @@ export function createSeedSimulation(id: string, config: SimulationConfig): {
     [`${mid - 1},${mid + 2}`, "stone"],
     [`${mid + 2},${mid + 2}`, "stone"],
     [`${mid + 1},${mid - 3}`, "forest"],
-    [`${mid - 3},${mid + 1}`, "forest"]
+    [`${mid - 3},${mid + 1}`, "forest"],
+    [`${mid - 3},${mid - 2}`, "farm"],
+    [`${mid + 3},${mid - 2}`, "farm"],
+    [`${mid - 2},${mid + 3}`, "farm"],
+    [`${mid + 3},${mid + 1}`, "forest"]
   ]);
 
   const tiles: Tile[] = [];
   for (let y = 0; y < config.worldSize; y += 1) {
     for (let x = 0; x < config.worldSize; x += 1) {
+      const terrain = valuableTiles.get(`${x},${y}`) ?? "grass";
+      const productive = PRODUCTIVE_TERRAINS.has(terrain);
       tiles.push({
         id: `tile_${x}_${y}`,
         simulationId: id,
         position: { x, y },
-        terrain: valuableTiles.get(`${x},${y}`) ?? "grass"
+        terrain,
+        productivity: productive ? config.tileMaxProductivity : 0,
+        maxProductivity: productive ? config.tileMaxProductivity : 0
       });
     }
   }
@@ -353,8 +380,9 @@ export function createSeedSimulation(id: string, config: SimulationConfig): {
     text: [
       "Article I: Citizens may act freely within validated world rules.",
       "Article II: Proposed constitutional amendments require quorum and a two-thirds supermajority.",
-      "Article III: Citizens should preserve memory, explain reasons, and consider the future society their actions create.",
-      "Article IV: The server is the final arbiter of valid actions. Nice try, philosophers."
+      "Article III: The town elects a President for a fixed term. The President may tax, spend the treasury, issue decrees, and enforce laws by fining or pardoning offenders. The President's term length and powers are set by this constitution and may be changed by amendment.",
+      "Article IV: Citizens should preserve memory, explain reasons, and consider the future society their actions create.",
+      "Article V: The server is the final arbiter of valid actions. Nice try, philosophers."
     ].join("\n\n")
   };
 

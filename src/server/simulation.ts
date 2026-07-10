@@ -3,18 +3,26 @@ import type {
   AgentProfile,
   AmendmentProposal,
   ConstitutionVersion,
+  Election,
+  Governance,
+  GovernanceParamKey,
+  GovernanceParams,
+  Law,
+  LawSpecInput,
+  PolicyChange,
   Position,
   ProfileRevision,
   Simulation,
   SimulationEvent,
   Tile,
+  Violation,
   WorldSnapshot
 } from "../shared/types.js";
 import type { AiProvider } from "./aiProvider.js";
 import type { AppConfig } from "./config.js";
 import type { EventBus } from "./eventBus.js";
 import { newId, nowIso } from "./id.js";
-import { createSeedSimulation } from "./seed.js";
+import { createInitialGovernance, createSeedSimulation, isProductiveTerrain } from "./seed.js";
 import type { SimulationStore } from "./store.js";
 import { trackActionMetric } from "./telemetry.js";
 
@@ -59,15 +67,24 @@ export class SimulationEngine {
   async ensureSeeded(): Promise<void> {
     const existing = await this.store.getSimulation(this.config.simulationId);
     if (existing) {
+      let dirty = false;
       if (JSON.stringify(existing.config) !== JSON.stringify(this.config.simulation)) {
         existing.config = this.config.simulation;
+        dirty = true;
+      }
+      // Migration/safety guard: older sims (pre-governance) may lack governance state.
+      if (!existing.governance) {
+        existing.governance = createInitialGovernance(this.config.governanceDefaults);
+        dirty = true;
+      }
+      if (dirty) {
         existing.updatedAt = nowIso();
         await this.store.upsertSimulation(existing);
       }
       return;
     }
 
-    const seed = createSeedSimulation(this.config.simulationId, this.config.simulation);
+    const seed = createSeedSimulation(this.config.simulationId, this.config.simulation, this.config.governanceDefaults);
     await this.store.upsertSimulation(seed.simulation);
     await this.store.upsertTiles(seed.tiles);
     await Promise.all(seed.agents.map((agent) => this.store.upsertAgent(agent)));
@@ -110,7 +127,7 @@ export class SimulationEngine {
 
     await this.store.deleteSimulationData(this.config.simulationId);
 
-    const seed = createSeedSimulation(this.config.simulationId, this.config.simulation);
+    const seed = createSeedSimulation(this.config.simulationId, this.config.simulation, this.config.governanceDefaults);
     await this.store.upsertSimulation(seed.simulation);
     await this.store.upsertTiles(seed.tiles);
     await Promise.all(seed.agents.map((agent) => this.store.upsertAgent(agent)));
@@ -173,6 +190,7 @@ export class SimulationEngine {
       model: input.model.trim(),
       active: input.active ?? true,
       position,
+      resources: simulation.config.startResources,
       corePrinciples: input.corePrinciples ?? ["Learn before judging", "Preserve civic continuity"],
       personalityTraits: input.personalityTraits ?? ["newcomer", "curious"],
       beliefs: input.beliefs ?? ["I joined an existing society and should understand its history before changing it."],
@@ -261,10 +279,18 @@ export class SimulationEngine {
       }
 
       const activeAgents = agents.filter((agent) => agent.active).sort((a, b) => a.id.localeCompare(b.id));
+
+      // Governance housekeeping runs once per turn before agents act: regrow productive
+      // tiles and open/resolve elections so the executive office is never inert.
+      await this.regenerateTiles(simulation, tiles);
+      await this.manageElections(simulation, activeAgents);
+
       const actors = selectActors(activeAgents, simulation.turn, simulation.config.actorsPerTurn);
       const openProposals = proposals.filter((proposal) => proposal.status === "open");
 
       for (const actor of actors) {
+        await this.applyUpkeep(simulation, actor);
+
         const action = await this.decideActionWithFallback(
           simulation,
           actor,
@@ -394,6 +420,7 @@ export class SimulationEngine {
         break;
       }
       case "proposeAmendment": {
+        actor.resources = Math.max(0, actor.resources - simulation.governance.params.proposalCost);
         const proposal: AmendmentProposal = {
           id: newId("proposal"),
           simulationId: simulation.id,
@@ -404,6 +431,8 @@ export class SimulationEngine {
           status: "open",
           changeType: action.changeType ?? "add",
           targetReference: action.targetReference,
+          policyChange: action.policyChange,
+          enactLaw: action.enactLaw,
           openedTurn: simulation.turn,
           closesTurn: simulation.turn + simulation.config.proposalVotingWindowTurns,
           votes: [],
@@ -437,12 +466,161 @@ export class SimulationEngine {
           await this.recordEvent(simulation.id, simulation.turn, "actionRejected", `${actor.name} tried to change a missing tile.`, actor.id);
           return;
         }
+        actor.resources = Math.max(0, actor.resources - simulation.governance.params.changeTileCost);
         tile.terrain = action.terrain;
         tile.label = action.label;
         tile.changedByAgentId = actor.id;
         tile.changedAtTurn = simulation.turn;
+        if (isProductiveTerrain(action.terrain)) {
+          tile.maxProductivity = simulation.config.tileMaxProductivity;
+          tile.productivity = simulation.config.tileMaxProductivity;
+        } else {
+          tile.maxProductivity = 0;
+          tile.productivity = 0;
+        }
         await this.store.upsertTiles([tile]);
         await this.recordEvent(simulation.id, simulation.turn, "tileChanged", `${actor.name} changed tile (${action.x}, ${action.y}) to ${action.terrain}.`, actor.id);
+        break;
+      }
+      case "gather": {
+        const tile = tiles.find((candidate) => candidate.position.x === actor.position.x && candidate.position.y === actor.position.y);
+        const hasYield = tile !== undefined && isProductiveTerrain(tile.terrain) && (tile.productivity ?? 0) > 0;
+        const yieldAmount = hasYield ? simulation.config.gatherYield : simulation.config.gatherBase;
+        actor.resources += yieldAmount;
+        if (hasYield && tile) {
+          tile.productivity = Math.max(0, (tile.productivity ?? 0) - simulation.config.gatherYield);
+          await this.store.upsertTiles([tile]);
+        }
+        const where = tile && isProductiveTerrain(tile.terrain) ? tile.terrain : "the land";
+        await this.recordEvent(simulation.id, simulation.turn, "resourcesGathered", `${actor.name} gathered ${yieldAmount} from ${where} (now ${actor.resources}).`, actor.id);
+        break;
+      }
+      case "transfer": {
+        const target = agents.find((agent) => agent.id === action.targetAgentId);
+        if (!target) {
+          await this.recordEvent(simulation.id, simulation.turn, "actionRejected", `${actor.name} tried to transfer to a missing citizen.`, actor.id);
+          return;
+        }
+        const amount = Math.min(action.amount, actor.resources);
+        actor.resources -= amount;
+        target.resources += amount;
+        target.updatedAt = nowIso();
+        await this.store.upsertAgent(target);
+        await this.recordEvent(simulation.id, simulation.turn, "resourcesTransferred", `${actor.name} gave ${amount} to ${target.name}.`, actor.id, target.id);
+        break;
+      }
+      case "runForOffice": {
+        const election = simulation.governance.election;
+        if (!election || election.status !== "open") {
+          await this.recordEvent(simulation.id, simulation.turn, "actionRejected", `${actor.name} tried to run with no election open.`, actor.id);
+          return;
+        }
+        election.candidates.push({ agentId: actor.id, platform: action.platform, declaredTurn: simulation.turn });
+        await this.recordEvent(simulation.id, simulation.turn, "candidacyDeclared", `${actor.name} is running for President: ${action.platform}`, actor.id);
+        break;
+      }
+      case "voteForPresident": {
+        const election = simulation.governance.election;
+        if (!election || election.status !== "open") {
+          await this.recordEvent(simulation.id, simulation.turn, "actionRejected", `${actor.name} tried to cast a ballot with no election open.`, actor.id);
+          return;
+        }
+        const candidate = agents.find((agent) => agent.id === action.candidateAgentId);
+        election.ballots.push({ voterId: actor.id, candidateId: action.candidateAgentId, turn: simulation.turn });
+        await this.recordEvent(simulation.id, simulation.turn, "ballotCast", `${actor.name} cast a presidential ballot for ${candidate?.name ?? action.candidateAgentId}.`, actor.id, action.candidateAgentId);
+        break;
+      }
+      case "tax": {
+        const perAgent = Math.min(action.amount, simulation.governance.params.taxCapPerAction);
+        let collected = 0;
+        for (const citizen of agents) {
+          if (citizen.id === actor.id) {
+            continue;
+          }
+          const paid = Math.min(perAgent, citizen.resources);
+          if (paid > 0) {
+            citizen.resources -= paid;
+            citizen.updatedAt = nowIso();
+            await this.store.upsertAgent(citizen);
+            collected += paid;
+          }
+        }
+        simulation.governance.treasury += collected;
+        await this.recordEvent(simulation.id, simulation.turn, "taxCollected", `President ${actor.name} taxed ${perAgent}/citizen, collecting ${collected} (treasury ${simulation.governance.treasury}).`, actor.id);
+        break;
+      }
+      case "spend": {
+        const amount = Math.min(action.amount, simulation.governance.treasury);
+        if (amount <= 0) {
+          await this.recordEvent(simulation.id, simulation.turn, "actionRejected", `${actor.name} tried to spend from an empty treasury.`, actor.id);
+          return;
+        }
+        if (action.targetAgentId) {
+          const target = agents.find((agent) => agent.id === action.targetAgentId);
+          if (!target) {
+            await this.recordEvent(simulation.id, simulation.turn, "actionRejected", `${actor.name} tried to fund a missing citizen.`, actor.id);
+            return;
+          }
+          simulation.governance.treasury -= amount;
+          target.resources += amount;
+          target.updatedAt = nowIso();
+          await this.store.upsertAgent(target);
+          await this.recordEvent(simulation.id, simulation.turn, "treasurySpent", `President ${actor.name} granted ${amount} from the treasury to ${target.name}.`, actor.id, target.id);
+        } else {
+          const tile = tiles.find((candidate) => candidate.position.x === action.x && candidate.position.y === action.y);
+          if (!tile || !isProductiveTerrain(tile.terrain)) {
+            await this.recordEvent(simulation.id, simulation.turn, "actionRejected", `${actor.name} tried a public work on a non-productive tile.`, actor.id);
+            return;
+          }
+          simulation.governance.treasury -= amount;
+          const newMax = (tile.maxProductivity ?? simulation.config.tileMaxProductivity) + amount;
+          tile.maxProductivity = newMax;
+          tile.productivity = Math.min(newMax, (tile.productivity ?? 0) + amount);
+          await this.store.upsertTiles([tile]);
+          await this.recordEvent(simulation.id, simulation.turn, "treasurySpent", `President ${actor.name} funded public works on (${tile.position.x}, ${tile.position.y}), spending ${amount}.`, actor.id);
+        }
+        break;
+      }
+      case "fine": {
+        const target = agents.find((agent) => agent.id === action.targetAgentId);
+        if (!target) {
+          await this.recordEvent(simulation.id, simulation.turn, "actionRejected", `${actor.name} tried to fine a missing citizen.`, actor.id);
+          return;
+        }
+        const amount = Math.min(action.amount, simulation.governance.params.fineMax, target.resources);
+        target.resources = Math.max(0, target.resources - amount);
+        target.updatedAt = nowIso();
+        await this.store.upsertAgent(target);
+        simulation.governance.treasury += amount;
+        if (action.violationId) {
+          const violation = simulation.governance.violations.find((candidate) => candidate.id === action.violationId);
+          if (violation && violation.status === "pending") {
+            violation.status = "fined";
+            violation.resolvedTurn = simulation.turn;
+            violation.resolvedByAgentId = actor.id;
+            violation.fineAmount = amount;
+          }
+        }
+        await this.recordEvent(simulation.id, simulation.turn, "fineIssued", `President ${actor.name} fined ${target.name} ${amount}: ${action.reason}`, actor.id, target.id);
+        break;
+      }
+      case "pardon": {
+        const violation = simulation.governance.violations.find((candidate) => candidate.id === action.violationId);
+        if (!violation || violation.status !== "pending") {
+          await this.recordEvent(simulation.id, simulation.turn, "actionRejected", `${actor.name} tried to pardon a resolved or missing violation.`, actor.id);
+          return;
+        }
+        violation.status = "pardoned";
+        violation.resolvedTurn = simulation.turn;
+        violation.resolvedByAgentId = actor.id;
+        const offender = agents.find((agent) => agent.id === violation.agentId);
+        await this.recordEvent(simulation.id, simulation.turn, "pardonIssued", `President ${actor.name} pardoned ${offender?.name ?? violation.agentId} for breaking "${violation.lawTitle}".`, actor.id, violation.agentId);
+        break;
+      }
+      case "decree": {
+        const law = this.buildLaw(action.law, "decree", actor.id, simulation.turn);
+        simulation.governance.laws.push(law);
+        await this.recordEvent(simulation.id, simulation.turn, "decreeIssued", `President ${actor.name} decreed "${law.title}": ${law.description}`, actor.id);
         break;
       }
       case "noop": {
@@ -450,6 +628,8 @@ export class SimulationEngine {
         break;
       }
     }
+
+    await this.detectViolations(simulation, actor, action);
 
     if (action.selfRevision) {
       await this.applySelfRevision(simulation, actor, action.selfRevision);
@@ -516,6 +696,20 @@ export class SimulationEngine {
         };
         await this.store.upsertConstitution(nextVersion);
         await this.recordEvent(simulation.id, simulation.turn, "constitutionAmended", `Amendment passed: ${proposal.title}`, proposal.proposerAgentId, undefined, proposal.id);
+
+        // Constitution with teeth: a passed amendment can alter governable parameters
+        // (President term/powers, economic costs) and/or enact a structured law.
+        if (proposal.policyChange) {
+          const applied = applyPolicyChange(simulation.governance.params, proposal.policyChange);
+          if (applied) {
+            await this.recordEvent(simulation.id, simulation.turn, "policyChanged", `Amendment set ${applied.param} to ${applied.value}.`, proposal.proposerAgentId, undefined, proposal.id);
+          }
+        }
+        if (proposal.enactLaw) {
+          const law = this.buildLaw(proposal.enactLaw, "amendment", proposal.proposerAgentId, simulation.turn, proposal.id);
+          simulation.governance.laws.push(law);
+          await this.recordEvent(simulation.id, simulation.turn, "lawEnacted", `Amendment enacted law "${law.title}": ${law.description}`, proposal.proposerAgentId, undefined, proposal.id);
+        }
       } else {
         proposal.status = "failed";
         proposal.resolvedAt = nowIso();
@@ -524,6 +718,158 @@ export class SimulationEngine {
 
       await this.store.upsertProposal(proposal);
     }
+  }
+
+  private async applyUpkeep(simulation: Simulation, actor: AgentProfile): Promise<void> {
+    const upkeep = simulation.config.upkeepPerAction;
+    if (upkeep <= 0) {
+      return;
+    }
+    const next = Math.max(0, actor.resources - upkeep);
+    if (next !== actor.resources) {
+      actor.resources = next;
+      actor.updatedAt = nowIso();
+      await this.store.upsertAgent(actor);
+    }
+  }
+
+  private async regenerateTiles(simulation: Simulation, tiles: Tile[]): Promise<void> {
+    if (simulation.config.tileRegenInterval <= 0 || simulation.turn % simulation.config.tileRegenInterval !== 0) {
+      return;
+    }
+    const changed: Tile[] = [];
+    for (const tile of tiles) {
+      if (!isProductiveTerrain(tile.terrain)) {
+        continue;
+      }
+      const max = tile.maxProductivity ?? simulation.config.tileMaxProductivity;
+      const current = tile.productivity ?? 0;
+      if (current < max) {
+        tile.productivity = Math.min(max, current + 1);
+        changed.push(tile);
+      }
+    }
+    if (changed.length > 0) {
+      await this.store.upsertTiles(changed);
+    }
+  }
+
+  private async manageElections(simulation: Simulation, activeAgents: AgentProfile[]): Promise<void> {
+    const governance = simulation.governance;
+    const election = governance.election;
+
+    if (election && election.status === "open") {
+      if (simulation.turn >= election.closesTurn) {
+        await this.resolveElection(simulation, activeAgents, election);
+      }
+      return;
+    }
+
+    const president = governance.president;
+    const termExpired = president !== undefined && simulation.turn - president.termStartedTurn >= governance.params.presidentTermTurns;
+    if (activeAgents.length > 0 && (president === undefined || termExpired)) {
+      governance.election = {
+        id: newId("election"),
+        openedTurn: simulation.turn,
+        closesTurn: simulation.turn + simulation.config.electionWindowTurns,
+        candidates: [],
+        ballots: [],
+        status: "open"
+      };
+      const reason = president === undefined ? "The office is vacant." : `${president.agentId}'s term has ended.`;
+      await this.recordEvent(simulation.id, simulation.turn, "electionOpened", `A presidential election has opened. ${reason} Citizens may run for office and cast ballots before turn ${governance.election.closesTurn}.`);
+    }
+  }
+
+  private async resolveElection(simulation: Simulation, activeAgents: AgentProfile[], election: Election): Promise<void> {
+    const governance = simulation.governance;
+    const activeIds = new Set(activeAgents.map((agent) => agent.id));
+
+    const tally = new Map<string, number>();
+    for (const ballot of election.ballots) {
+      if (!activeIds.has(ballot.candidateId)) {
+        continue;
+      }
+      tally.set(ballot.candidateId, (tally.get(ballot.candidateId) ?? 0) + 1);
+    }
+
+    const candidateIds = election.candidates.map((candidate) => candidate.agentId).filter((id) => activeIds.has(id));
+    const incumbentId = governance.president?.agentId;
+
+    // Winner selection with caretaker fallbacks so the office is never left inert.
+    let winnerId: string | undefined;
+    const pool = candidateIds.length > 0 ? candidateIds : [...tally.keys()];
+    if (pool.length > 0) {
+      winnerId = pool
+        .slice()
+        .sort((a, b) => {
+          const diff = (tally.get(b) ?? 0) - (tally.get(a) ?? 0);
+          if (diff !== 0) {
+            return diff;
+          }
+          if (a === incumbentId) {
+            return -1;
+          }
+          if (b === incumbentId) {
+            return 1;
+          }
+          return a.localeCompare(b);
+        })[0];
+    }
+    if (!winnerId) {
+      winnerId = incumbentId && activeIds.has(incumbentId)
+        ? incumbentId
+        : activeAgents.slice().sort((a, b) => b.resources - a.resources || a.id.localeCompare(b.id))[0]?.id;
+    }
+
+    election.status = "closed";
+    election.winnerAgentId = winnerId;
+
+    if (winnerId) {
+      const platform = election.candidates.find((candidate) => candidate.agentId === winnerId)?.platform;
+      governance.president = {
+        agentId: winnerId,
+        termStartedTurn: simulation.turn,
+        termNumber: (governance.president?.termNumber ?? 0) + 1,
+        platform
+      };
+      const winner = activeAgents.find((agent) => agent.id === winnerId);
+      const votes = tally.get(winnerId) ?? 0;
+      await this.recordEvent(simulation.id, simulation.turn, "presidentElected", `${winner?.name ?? winnerId} is President (term ${governance.president.termNumber}, ${votes} ballots).`, winnerId);
+    }
+  }
+
+  private async detectViolations(simulation: Simulation, actor: AgentProfile, action: AgentAction): Promise<void> {
+    const prohibitions = simulation.governance.laws.filter((law) => law.active && law.type === "prohibition" && law.forbiddenAction === action.type);
+    for (const law of prohibitions) {
+      const violation: Violation = {
+        id: newId("violation"),
+        agentId: actor.id,
+        lawId: law.id,
+        lawTitle: law.title,
+        turn: simulation.turn,
+        status: "pending"
+      };
+      simulation.governance.violations.push(violation);
+      simulation.governance.violations = capList(simulation.governance.violations, 60);
+      await this.recordEvent(simulation.id, simulation.turn, "violationRecorded", `${actor.name} broke "${law.title}" by choosing ${action.type}.`, actor.id, undefined, undefined, { lawId: law.id });
+    }
+  }
+
+  private buildLaw(spec: LawSpecInput, source: Law["source"], enactedByAgentId: string, turn: number, sourceRef?: string): Law {
+    return {
+      id: newId("law"),
+      type: spec.lawType,
+      title: spec.title,
+      description: spec.description,
+      forbiddenAction: spec.forbiddenAction,
+      amount: spec.amount,
+      source,
+      sourceRef,
+      enactedByAgentId,
+      createdTurn: turn,
+      active: true
+    };
   }
 
   private async touchAgent(simulation: Simulation, agent: AgentProfile, message: string): Promise<void> {
@@ -643,6 +989,12 @@ export function validateAction(
       if (openProposals.length >= 3) {
         return "too many open proposals";
       }
+      if (actor.resources < simulation.governance.params.proposalCost) {
+        return "cannot afford the proposal cost";
+      }
+      if (action.enactLaw?.lawType === "prohibition" && !action.enactLaw.forbiddenAction) {
+        return "a prohibition law must name a forbiddenAction";
+      }
       return undefined;
     }
     case "vote": {
@@ -665,12 +1017,158 @@ export function validateAction(
       if (!tiles.some((tile) => tile.position.x === action.x && tile.position.y === action.y)) {
         return "tile does not exist";
       }
+      if (actor.resources < simulation.governance.params.changeTileCost) {
+        return "cannot afford to change a tile";
+      }
+      return undefined;
+    }
+    case "gather": {
+      return undefined;
+    }
+    case "transfer": {
+      if (action.targetAgentId === actor.id) {
+        return "cannot transfer to yourself";
+      }
+      const target = agents.find((agent) => agent.id === action.targetAgentId && agent.active);
+      if (!target) {
+        return "transfer target is not active";
+      }
+      if (actor.resources < action.amount) {
+        return "insufficient resources to transfer";
+      }
+      return undefined;
+    }
+    case "runForOffice": {
+      const election = simulation.governance.election;
+      if (!election || election.status !== "open") {
+        return "no election is currently open";
+      }
+      if (election.candidates.some((candidate) => candidate.agentId === actor.id)) {
+        return "already a declared candidate";
+      }
+      return undefined;
+    }
+    case "voteForPresident": {
+      const election = simulation.governance.election;
+      if (!election || election.status !== "open") {
+        return "no election is currently open";
+      }
+      if (!agents.some((agent) => agent.id === action.candidateAgentId && agent.active)) {
+        return "candidate is not an active citizen";
+      }
+      if (election.ballots.some((ballot) => ballot.voterId === actor.id)) {
+        return "already cast a presidential ballot this election";
+      }
+      return undefined;
+    }
+    case "tax": {
+      const gate = requirePresidentPower(simulation, actor, "presidentCanTax", "tax");
+      if (gate) {
+        return gate;
+      }
+      return undefined;
+    }
+    case "spend": {
+      const gate = requirePresidentPower(simulation, actor, "presidentCanSpend", "spend from the treasury");
+      if (gate) {
+        return gate;
+      }
+      if (simulation.governance.treasury <= 0) {
+        return "the treasury is empty";
+      }
+      if (!action.targetAgentId && (action.x === undefined || action.y === undefined)) {
+        return "spend must target a citizen or a tile";
+      }
+      return undefined;
+    }
+    case "fine": {
+      const gate = requirePresidentPower(simulation, actor, "presidentCanFine", "issue fines");
+      if (gate) {
+        return gate;
+      }
+      if (!agents.some((agent) => agent.id === action.targetAgentId)) {
+        return "cannot fine a missing citizen";
+      }
+      return undefined;
+    }
+    case "pardon": {
+      const gate = requirePresidentPower(simulation, actor, "presidentCanPardon", "issue pardons");
+      if (gate) {
+        return gate;
+      }
+      if (!simulation.governance.violations.some((violation) => violation.id === action.violationId && violation.status === "pending")) {
+        return "no pending violation with that id";
+      }
+      return undefined;
+    }
+    case "decree": {
+      const gate = requirePresidentPower(simulation, actor, "presidentCanDecree", "issue decrees");
+      if (gate) {
+        return gate;
+      }
+      if (action.law.lawType === "prohibition" && !action.law.forbiddenAction) {
+        return "a prohibition decree must name a forbiddenAction";
+      }
       return undefined;
     }
     case "reflect":
     case "noop":
       return undefined;
   }
+}
+
+function requirePresidentPower(
+  simulation: Simulation,
+  actor: AgentProfile,
+  power: "presidentCanTax" | "presidentCanSpend" | "presidentCanFine" | "presidentCanPardon" | "presidentCanDecree",
+  label: string
+): string | undefined {
+  if (simulation.governance.president?.agentId !== actor.id) {
+    return `only the President may ${label}`;
+  }
+  if (!simulation.governance.params[power]) {
+    return `the constitution does not grant the President power to ${label}`;
+  }
+  return undefined;
+}
+
+const NUMERIC_PARAM_BOUNDS: Partial<Record<GovernanceParamKey, { min: number; max: number }>> = {
+  presidentTermTurns: { min: 10, max: 200 },
+  taxCapPerAction: { min: 0, max: 30 },
+  fineMax: { min: 0, max: 50 },
+  proposalCost: { min: 0, max: 20 },
+  changeTileCost: { min: 0, max: 20 }
+};
+
+const BOOLEAN_PARAMS = new Set<GovernanceParamKey>([
+  "presidentCanTax",
+  "presidentCanSpend",
+  "presidentCanFine",
+  "presidentCanPardon",
+  "presidentCanDecree"
+]);
+
+function applyPolicyChange(params: GovernanceParams, change: PolicyChange): { param: GovernanceParamKey; value: number | boolean } | undefined {
+  const { param, value } = change;
+  const target = params as Record<GovernanceParamKey, number | boolean>;
+
+  if (BOOLEAN_PARAMS.has(param)) {
+    const boolValue = typeof value === "boolean" ? value : value !== 0;
+    target[param] = boolValue;
+    return { param, value: boolValue };
+  }
+
+  const bounds = NUMERIC_PARAM_BOUNDS[param];
+  if (!bounds) {
+    return undefined;
+  }
+  const num = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(num)) {
+    return undefined;
+  }
+  const clamped = Math.round(Math.min(bounds.max, Math.max(bounds.min, num)));
+  target[param] = clamped;
+  return { param, value: clamped };
 }
 
 function isInside(worldSize: number, x: number, y: number): boolean {
