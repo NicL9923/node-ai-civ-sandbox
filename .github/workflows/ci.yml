@@ -6,8 +6,10 @@ on:
     paths:
       - "apps/civilization/**"
       - "packages/**"
+      - "test/fake-civilization/**"
       - "package.json"
       - "package-lock.json"
+      - "Justfile"
       - ".npmrc"
       - ".config/**"
       - "global.json"
@@ -18,8 +20,10 @@ on:
     paths:
       - "apps/civilization/**"
       - "packages/**"
+      - "test/fake-civilization/**"
       - "package.json"
       - "package-lock.json"
+      - "Justfile"
       - ".npmrc"
       - ".config/**"
       - "global.json"
@@ -76,3 +80,26 @@ jobs:
         run: npm run test:contracts
       - name: Build generated C# client
         run: dotnet build packages/federation-contracts/csharp/FederationContracts.csproj -c Release
+
+  fake-civilization-testkit:
+    name: Fake civilization testkit (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - name: Install (workspace)
+        run: npm ci
+      - name: Build testkit
+        run: npm run build:testkit
+      - name: Test testkit
+        run: npm run test:testkit
+      - name: Smoke test CLI
+        run: npm run fake-civ -- help

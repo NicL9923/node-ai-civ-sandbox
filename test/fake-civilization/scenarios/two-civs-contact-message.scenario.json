@@ -1,0 +1,63 @@
+{
+  "schemaVersion": "1",
+  "name": "two civilizations contact and message",
+  "actors": {
+    "aurora": {
+      "displayName": "Aurora",
+      "credentialRef": "aurora",
+      "capabilities": {
+        "protocolVersion": "1.0.0",
+        "supportedInteractionKinds": ["contact", "message"]
+      }
+    },
+    "borealis": {
+      "displayName": "Borealis",
+      "credentialRef": "borealis",
+      "capabilities": {
+        "protocolVersion": "1.0.0",
+        "supportedInteractionKinds": ["contact", "message"]
+      }
+    }
+  },
+  "steps": [
+    { "id": "register-aurora", "op": "register", "actor": "aurora", "idempotencyKey": "register-aurora-1" },
+    { "id": "register-borealis", "op": "register", "actor": "borealis", "idempotencyKey": "register-borealis-1" },
+    { "op": "heartbeat", "actor": "aurora" },
+    { "op": "heartbeat", "actor": "borealis" },
+    {
+      "op": "submitInteraction",
+      "actor": "aurora",
+      "idempotencyKey": "contact-1",
+      "request": {
+        "kind": "contact",
+        "source": "civ_aurora",
+        "target": "civ_borealis",
+        "authorityDecision": { "mode": "president", "ref": "aurora-turn-10-contact" },
+        "publicNarrative": "Aurora opens diplomatic contact.",
+        "payload": { "greeting": "Hello from Aurora", "purpose": "diplomacy" }
+      }
+    },
+    { "op": "sync", "actor": "borealis", "saveAs": "contactDelivery" },
+    { "op": "assert", "actual": "/contactDelivery/applied", "equals": 1 },
+    {
+      "op": "submitInteraction",
+      "actor": "borealis",
+      "idempotencyKey": "message-1",
+      "request": {
+        "kind": "message",
+        "source": "civ_borealis",
+        "target": "civ_aurora",
+        "authorityDecision": { "mode": "president", "ref": "borealis-turn-8-message" },
+        "publicNarrative": "Borealis replies publicly.",
+        "payload": { "subject": "Re: contact", "body": "Greetings, Aurora." }
+      }
+    },
+    { "op": "sync", "actor": "aurora", "saveAs": "messageDelivery" },
+    { "op": "assert", "actual": "/messageDelivery/applied", "equals": 1 },
+    { "op": "getInteraction", "actor": "aurora", "interactionId": "int_contact_1", "saveAs": "contact" },
+    { "op": "getInteraction", "actor": "borealis", "interactionId": "int_message_1", "saveAs": "message" },
+    { "op": "listRelationships", "actor": "aurora", "query": { "civA": "civ_aurora", "civB": "civ_borealis" }, "saveAs": "relationship" },
+    { "op": "listEvents", "actor": "aurora", "limit": 10, "saveAs": "events" },
+    { "op": "listCivilizations", "actor": "aurora", "limit": 10, "saveAs": "civilizations" }
+  ]
+}

@@ -58,6 +58,23 @@ contracts-test:
 contracts-build-csharp:
     dotnet build packages/federation-contracts/csharp/FederationContracts.csproj
 
+# --- Fake civilization federation testkit (P4) ---
+
+# Build and test the fake civilization package.
+testkit: testkit-build testkit-test
+
+# Build the reusable library and CLI.
+testkit-build:
+    npm run build:testkit
+
+# Run the fake civilization package tests.
+testkit-test:
+    npm run test:testkit
+
+# Run a JSON scenario against the configured World.
+testkit-scenario file:
+    npm run fake-civ -- scenario {{file}}
+
 # --- Placeholder for the future world-map workstream (do not implement here) ---
 
 # P2: build the world-map app (web + service).

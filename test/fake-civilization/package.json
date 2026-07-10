@@ -1,0 +1,39 @@
+{
+  "name": "@ai-civ/fake-civilization-testkit",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Deterministic contract-driven fake civilization client for World Federation tests.",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22 <25"
+  },
+  "bin": {
+    "fake-civ": "./dist/cli.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "scenarios",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "cli": "npm run build --silent && node dist/cli.js",
+    "test": "npm run build && vitest run"
+  },
+  "dependencies": {
+    "@ai-civ/federation-contracts": "0.1.0",
+    "openapi-fetch": "0.13.8"
+  },
+  "devDependencies": {
+    "@types/node": "26.0.1",
+    "typescript": "6.0.3",
+    "vitest": "4.1.9"
+  }
+}

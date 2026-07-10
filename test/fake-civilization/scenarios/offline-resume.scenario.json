@@ -1,0 +1,37 @@
+{
+  "schemaVersion": "1",
+  "name": "offline target resumes and receives persisted command",
+  "actors": {
+    "aurora": {
+      "displayName": "Aurora",
+      "credentialRef": "aurora",
+      "capabilities": { "protocolVersion": "1.0.0", "supportedInteractionKinds": ["contact", "message"] }
+    },
+    "borealis": {
+      "displayName": "Borealis",
+      "credentialRef": "borealis",
+      "capabilities": { "protocolVersion": "1.0.0", "supportedInteractionKinds": ["contact", "message"] }
+    }
+  },
+  "steps": [
+    { "op": "register", "actor": "aurora", "idempotencyKey": "register-aurora-1" },
+    { "op": "register", "actor": "borealis", "idempotencyKey": "register-borealis-1" },
+    { "op": "setOnline", "actor": "borealis", "online": false },
+    {
+      "op": "submitInteraction",
+      "actor": "aurora",
+      "idempotencyKey": "offline-message-1",
+      "request": {
+        "kind": "message",
+        "source": "civ_aurora",
+        "target": "civ_borealis",
+        "authorityDecision": { "mode": "president" },
+        "payload": { "body": "Delivered after you return." }
+      }
+    },
+    { "op": "sync", "actor": "borealis", "expect": { "blockedOffline": true } },
+    { "op": "setOnline", "actor": "borealis", "online": true },
+    { "op": "sync", "actor": "borealis", "saveAs": "resumed" },
+    { "op": "assert", "actual": "/resumed/applied", "equals": 1 }
+  ]
+}
