@@ -9,30 +9,28 @@ using System.IO;
 using System.Threading.Tasks;
 using System.Threading;
 using System;
-namespace AiCiv.FederationContracts.Civilizations.Item.Commands.WithCommandIdAck
+namespace AiCiv.FederationContracts.Civilizations.Item.Commands.Item.Ack
 {
     /// <summary>
-    /// Builds and executes requests for operations under \civilizations\{civId}\commands\{commandId}:ack
+    /// Builds and executes requests for operations under \civilizations\{civId}\commands\{commandId}\ack
     /// </summary>
     [global::System.CodeDom.Compiler.GeneratedCode("Kiota", "1.0.0")]
-    public partial class WithCommandIdAckRequestBuilder : BaseRequestBuilder
+    public partial class AckRequestBuilder : BaseRequestBuilder
     {
         /// <summary>
-        /// Instantiates a new <see cref="global::AiCiv.FederationContracts.Civilizations.Item.Commands.WithCommandIdAck.WithCommandIdAckRequestBuilder"/> and sets the default values.
+        /// Instantiates a new <see cref="global::AiCiv.FederationContracts.Civilizations.Item.Commands.Item.Ack.AckRequestBuilder"/> and sets the default values.
         /// </summary>
-        /// <param name="commandId">World-assigned command id.</param>
         /// <param name="pathParameters">Path parameters for the request</param>
         /// <param name="requestAdapter">The request adapter to use to execute the requests.</param>
-        public WithCommandIdAckRequestBuilder(Dictionary<string, object> pathParameters, IRequestAdapter requestAdapter, string commandId = "") : base(requestAdapter, "{+baseurl}/civilizations/{civId}/commands/{commandId}:ack", pathParameters)
+        public AckRequestBuilder(Dictionary<string, object> pathParameters, IRequestAdapter requestAdapter) : base(requestAdapter, "{+baseurl}/civilizations/{civId}/commands/{commandId}/ack", pathParameters)
         {
-            if (!string.IsNullOrWhiteSpace(commandId)) PathParameters.Add("commandId", commandId);
         }
         /// <summary>
-        /// Instantiates a new <see cref="global::AiCiv.FederationContracts.Civilizations.Item.Commands.WithCommandIdAck.WithCommandIdAckRequestBuilder"/> and sets the default values.
+        /// Instantiates a new <see cref="global::AiCiv.FederationContracts.Civilizations.Item.Commands.Item.Ack.AckRequestBuilder"/> and sets the default values.
         /// </summary>
         /// <param name="rawUrl">The raw URL to use for the request builder.</param>
         /// <param name="requestAdapter">The request adapter to use to execute the requests.</param>
-        public WithCommandIdAckRequestBuilder(string rawUrl, IRequestAdapter requestAdapter) : base(requestAdapter, "{+baseurl}/civilizations/{civId}/commands/{commandId}:ack", rawUrl)
+        public AckRequestBuilder(string rawUrl, IRequestAdapter requestAdapter) : base(requestAdapter, "{+baseurl}/civilizations/{civId}/commands/{commandId}/ack", rawUrl)
         {
         }
         /// <summary>
@@ -91,11 +89,11 @@ namespace AiCiv.FederationContracts.Civilizations.Item.Commands.WithCommandIdAck
         /// <summary>
         /// Returns a request builder with the provided arbitrary URL. Using this method means any other path or query parameters are ignored.
         /// </summary>
-        /// <returns>A <see cref="global::AiCiv.FederationContracts.Civilizations.Item.Commands.WithCommandIdAck.WithCommandIdAckRequestBuilder"/></returns>
+        /// <returns>A <see cref="global::AiCiv.FederationContracts.Civilizations.Item.Commands.Item.Ack.AckRequestBuilder"/></returns>
         /// <param name="rawUrl">The raw URL to use for the request builder.</param>
-        public global::AiCiv.FederationContracts.Civilizations.Item.Commands.WithCommandIdAck.WithCommandIdAckRequestBuilder WithUrl(string rawUrl)
+        public global::AiCiv.FederationContracts.Civilizations.Item.Commands.Item.Ack.AckRequestBuilder WithUrl(string rawUrl)
         {
-            return new global::AiCiv.FederationContracts.Civilizations.Item.Commands.WithCommandIdAck.WithCommandIdAckRequestBuilder(rawUrl, RequestAdapter);
+            return new global::AiCiv.FederationContracts.Civilizations.Item.Commands.Item.Ack.AckRequestBuilder(rawUrl, RequestAdapter);
         }
     }
 }

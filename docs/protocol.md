@@ -37,9 +37,9 @@ flowchart LR
   end
   subgraph World[World orchestrator]
   end
-  Civ -- "PUSH: register / heartbeat / events:batch / interactions" --> World
+  Civ -- "PUSH: register / heartbeat / events/batch / interactions" --> World
   Civ -- "PULL: GET commands" --> World
-  Civ -- "ACK: commands/{id}:ack" --> World
+  Civ -- "ACK: commands/{id}/ack" --> World
   World -. "never calls civ URLs (MVP)" .-> Civ
 ```
 
@@ -89,23 +89,43 @@ branch.
 
 Authenticated requests (heartbeat, events, commands pull/ack, interactions) are HMAC-SHA256 signed.
 Public read projections (`GET /civilizations`, `/relationships`, `/events`) are unauthenticated.
-`POST /civilizations:register` bootstraps with a one-time `onboardingToken` instead.
+`POST /civilizations/register` bootstraps with a one-time `onboardingToken` instead.
 
-Required headers: `X-Civ-Id`, `X-Key-Id`, `X-Timestamp` (RFC 3339), `X-Nonce` (single-use),
-`X-Signature`. Optional: `Idempotency-Key`, `traceparent`.
+**Required headers** (modeled as explicit parameters on each authenticated operation so generated
+clients send them): `X-Civ-Id`, `X-Key-Id`, `X-Timestamp`, `X-Nonce`, `X-Protocol-Version`,
+`X-Signature`, and — for mutating POSTs — `Idempotency-Key`. `traceparent` is optional. `X-Civ-Id`
+MUST match the `civId` path/body value where present.
 
-**Canonical signing string** (LF-joined):
+**Canonical string** — join EXACTLY these 10 fields with a single `\n` (LF), no trailing newline:
 
 ```
-X-Timestamp + "\n" +
-X-Nonce     + "\n" +
-METHOD      + "\n" +
-normalizedPathAndQuery + "\n" +
-base64(SHA-256(rawRequestBody))
+1  protocolVersion   # literal "1" for this protocol (== X-Protocol-Version)
+2  civId             # X-Civ-Id
+3  keyId             # X-Key-Id
+4  timestamp         # X-Timestamp, Unix epoch SECONDS (e.g. 1780000000)
+5  nonce             # X-Nonce, single-use per key within the window
+6  idempotencyKey    # Idempotency-Key; empty string "" for non-idempotent reads
+7  METHOD            # HTTP method, UPPERCASE
+8  path              # RFC 3986-normalized path only, no "?", no query
+9  canonicalQuery    # see below; empty string when there is no query
+10 bodySha256Hex     # lowercase-hex SHA-256 of the raw body bytes; empty body => SHA-256 of zero bytes
 ```
 
-`X-Signature = base64(HMAC-SHA256(canonicalString, keyForKeyId))`. The World rejects requests
-outside a **±300 second** window or with a replayed nonce.
+**Canonical query string:** split the raw query into `key=value` pairs; percent-decode each key and
+value as `application/x-www-form-urlencoded` (so `+` decodes to a space); RFC 3986 percent-encode
+each (unreserved `A-Za-z0-9-._~` literal; space → `%20`, never `+`; UPPERCASE hex escapes); sort by
+encoded key, then encoded value; preserve repeated pairs; join as `key=value` with `&`; no leading
+`?`.
+
+**Signature:** `X-Signature = base64url(HMAC-SHA256(utf8(canonicalString), secretForKeyId))` using
+URL-safe base64 **without padding** (`-`/`_`, no `=`). The World rejects requests whose `X-Timestamp`
+is outside a **±300 second** window, or whose `X-Nonce` was already used for that `X-Key-Id` within
+the window.
+
+A machine-verifiable golden vector (with a deliberately messy query — spaces, reserved characters,
+repeated keys — plus an empty-idempotency read case) lives at
+[`examples/signing.vector.json`](../packages/federation-contracts/examples/signing.vector.json) and
+is exercised by `test/signing.test.ts`; the C# runtime (P2/P3) must reproduce it.
 
 > The contract documents these semantics; the signing/verification runtime is P2/P3.
 
@@ -124,7 +144,7 @@ sequenceDiagram
 
   B->>W: GET /civilizations/{B}/commands?after={cursor}
   W-->>B: 200 CommandPage (contact/message command)
-  B->>W: POST /civilizations/{B}/commands/{commandId}:ack (applied)
+  B->>W: POST /civilizations/{B}/commands/{commandId}/ack (applied)
   W-->>B: 200 CommandAckResult
 
   A->>W: GET /interactions/{id}

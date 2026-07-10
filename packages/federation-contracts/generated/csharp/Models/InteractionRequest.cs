@@ -8,7 +8,7 @@ using System;
 namespace AiCiv.FederationContracts.Models
 {
     /// <summary>
-    /// A President-authorized intent to `contact` or `message` another civilization. Submitted by the source civ; the World queues it as a command for the target to pull. Idempotent via the `Idempotency-Key` header (and optional `idempotencyKey` field). All contact/message actions are public in MVP.
+    /// A President-authorized intent to `contact` or `message` another civilization. Submitted by the source civ; the World queues it as a command for the target to pull. The `Idempotency-Key` HTTP header is the sole authoritative idempotency key (there is deliberately no body idempotency field to avoid two conflicting sources). All contact/message actions are public in MVP.
     /// </summary>
     [global::System.CodeDom.Compiler.GeneratedCode("Kiota", "1.0.0")]
     public partial class InteractionRequest : IAdditionalDataHolder, IParsable
@@ -25,14 +25,6 @@ namespace AiCiv.FederationContracts.Models
 #endif
         /// <summary>Optional expiry; the intent is abandoned if undelivered by then.</summary>
         public DateTimeOffset? ExpiresAt { get; set; }
-        /// <summary>Optional client idempotency key (mirrors the Idempotency-Key header).</summary>
-#if NETSTANDARD2_1_OR_GREATER || NETCOREAPP3_1_OR_GREATER
-#nullable enable
-        public string? IdempotencyKey { get; set; }
-#nullable restore
-#else
-        public string IdempotencyKey { get; set; }
-#endif
         /// <summary>Kind of inter-civilization interaction. Open set for forward compatibility. MVP defines only `contact` and `message`; trade, treaty, conflict, and migration are later additive kinds. Clients MUST tolerate unknown values and MUST NOT treat this as a closed enum.</summary>
 #if NETSTANDARD2_1_OR_GREATER || NETCOREAPP3_1_OR_GREATER
 #nullable enable
@@ -100,7 +92,6 @@ namespace AiCiv.FederationContracts.Models
             {
                 { "authorityDecision", n => { AuthorityDecision = n.GetObjectValue<global::AiCiv.FederationContracts.Models.AuthorityDecision>(global::AiCiv.FederationContracts.Models.AuthorityDecision.CreateFromDiscriminatorValue); } },
                 { "expiresAt", n => { ExpiresAt = n.GetDateTimeOffsetValue(); } },
-                { "idempotencyKey", n => { IdempotencyKey = n.GetStringValue(); } },
                 { "kind", n => { Kind = n.GetStringValue(); } },
                 { "payload", n => { Payload = n.GetObjectValue<global::AiCiv.FederationContracts.Models.InteractionRequest.InteractionRequest_payload>(global::AiCiv.FederationContracts.Models.InteractionRequest.InteractionRequest_payload.CreateFromDiscriminatorValue); } },
                 { "publicNarrative", n => { PublicNarrative = n.GetStringValue(); } },
@@ -117,7 +108,6 @@ namespace AiCiv.FederationContracts.Models
             if(ReferenceEquals(writer, null)) throw new ArgumentNullException(nameof(writer));
             writer.WriteObjectValue<global::AiCiv.FederationContracts.Models.AuthorityDecision>("authorityDecision", AuthorityDecision);
             writer.WriteDateTimeOffsetValue("expiresAt", ExpiresAt);
-            writer.WriteStringValue("idempotencyKey", IdempotencyKey);
             writer.WriteStringValue("kind", Kind);
             writer.WriteObjectValue<global::AiCiv.FederationContracts.Models.InteractionRequest.InteractionRequest_payload>("payload", Payload);
             writer.WriteStringValue("publicNarrative", PublicNarrative);

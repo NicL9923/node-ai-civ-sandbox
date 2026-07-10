@@ -4,7 +4,7 @@
  */
 
 export interface paths {
-    "/civilizations:register": {
+    "/civilizations/register": {
         parameters: {
             query?: never;
             header?: never;
@@ -86,7 +86,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/civilizations/{civId}/events:batch": {
+    "/civilizations/{civId}/events/batch": {
         parameters: {
             query?: never;
             header?: never;
@@ -129,7 +129,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/civilizations/{civId}/commands/{commandId}:ack": {
+    "/civilizations/{civId}/commands/{commandId}/ack": {
         parameters: {
             query?: never;
             header?: never;
@@ -592,7 +592,7 @@ export interface components {
         };
         /**
          * InteractionRequest
-         * @description A President-authorized intent to `contact` or `message` another civilization. Submitted by the source civ; the World queues it as a command for the target to pull. Idempotent via the `Idempotency-Key` header (and optional `idempotencyKey` field). All contact/message actions are public in MVP.
+         * @description A President-authorized intent to `contact` or `message` another civilization. Submitted by the source civ; the World queues it as a command for the target to pull. The `Idempotency-Key` HTTP header is the sole authoritative idempotency key (there is deliberately no body idempotency field to avoid two conflicting sources). All contact/message actions are public in MVP.
          */
         InteractionRequest: {
             kind: components["schemas"]["InteractionKind"];
@@ -607,8 +607,6 @@ export interface components {
             payload?: components["schemas"]["ContactIntentData"] | components["schemas"]["MessageIntentData"] | {
                 [key: string]: unknown;
             };
-            /** @description Optional client idempotency key (mirrors the Idempotency-Key header). */
-            idempotencyKey?: string;
             /**
              * Format: date-time
              * @description Optional expiry; the intent is abandoned if undelivered by then.
@@ -647,7 +645,7 @@ export interface components {
         };
         /**
          * CloudEvent
-         * @description A CloudEvents 1.0 event in structured JSON mode, extended with federation attributes. Used for civ-originated domain events (events:batch) and, via Command, for world-originated commands.
+         * @description A CloudEvents 1.0 event in structured JSON mode, extended with federation attributes. Used for civ-originated domain events (events/batch) and, via Command, for world-originated commands.
          *     Enum policy: `type` is an OPEN string (reverse-DNS versioned name) so additive event/command types never break existing clients. Concrete payload schemas for known `type`s live under schemas/envelope/payloads and are referenced by examples; `data` is intentionally permissive at the envelope level to preserve forward compatibility.
          */
         CloudEvent: {
@@ -894,10 +892,22 @@ export interface components {
         /** @description Second civ id for a relationship pair lookup (requires civA). */
         CivBQuery: string;
         /**
-         * @description Client-generated key for idempotent mutations. Replaying the same key returns the
-         *     original result rather than performing the operation again.
+         * @description Required client-generated idempotency key for mutating POSTs. Replaying the same key
+         *     returns the original result. This value is field 6 of the HMAC canonical string.
          */
-        IdempotencyKey: string;
+        IdempotencyKeyRequired: string;
+        /** @description Authenticated civilization id. MUST match the `civId` path/body value where present. */
+        HmacCivId: string;
+        /** @description Identifier of the S2S HMAC signing key (field 3 of the canonical string). */
+        HmacKeyId: string;
+        /** @description Unix epoch SECONDS at signing time (field 4). Rejected outside a ±300s window. */
+        HmacTimestamp: string;
+        /** @description Single-use nonce per key within the replay window (field 5). */
+        HmacNonce: string;
+        /** @description Federation protocol major version. The literal `1` (field 1 of the canonical string). */
+        HmacProtocolVersion: "1";
+        /** @description base64url (no padding) HMAC-SHA256 of the canonical string. See the civHmac scheme. */
+        HmacSignature: string;
         /** @description W3C Trace Context header for distributed tracing. */
         Traceparent: string;
     };
@@ -956,7 +966,13 @@ export type ParameterAfter = components['parameters']['After'];
 export type ParameterLimit = components['parameters']['Limit'];
 export type ParameterCivAQuery = components['parameters']['CivAQuery'];
 export type ParameterCivBQuery = components['parameters']['CivBQuery'];
-export type ParameterIdempotencyKey = components['parameters']['IdempotencyKey'];
+export type ParameterIdempotencyKeyRequired = components['parameters']['IdempotencyKeyRequired'];
+export type ParameterHmacCivId = components['parameters']['HmacCivId'];
+export type ParameterHmacKeyId = components['parameters']['HmacKeyId'];
+export type ParameterHmacTimestamp = components['parameters']['HmacTimestamp'];
+export type ParameterHmacNonce = components['parameters']['HmacNonce'];
+export type ParameterHmacProtocolVersion = components['parameters']['HmacProtocolVersion'];
+export type ParameterHmacSignature = components['parameters']['HmacSignature'];
 export type ParameterTraceparent = components['parameters']['Traceparent'];
 export type HeaderLocation = components['headers']['Location'];
 export type $defs = Record<string, never>;
@@ -964,12 +980,12 @@ export interface operations {
     registerCivilization: {
         parameters: {
             query?: never;
-            header?: {
+            header: {
                 /**
-                 * @description Client-generated key for idempotent mutations. Replaying the same key returns the
-                 *     original result rather than performing the operation again.
+                 * @description Required client-generated idempotency key for mutating POSTs. Replaying the same key
+                 *     returns the original result. This value is field 6 of the HMAC canonical string.
                  */
-                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                "Idempotency-Key": components["parameters"]["IdempotencyKeyRequired"];
                 /** @description W3C Trace Context header for distributed tracing. */
                 traceparent?: components["parameters"]["Traceparent"];
             };
@@ -1001,7 +1017,19 @@ export interface operations {
     heartbeatCivilization: {
         parameters: {
             query?: never;
-            header?: {
+            header: {
+                /** @description Federation protocol major version. The literal `1` (field 1 of the canonical string). */
+                "X-Protocol-Version": components["parameters"]["HmacProtocolVersion"];
+                /** @description Authenticated civilization id. MUST match the `civId` path/body value where present. */
+                "X-Civ-Id": components["parameters"]["HmacCivId"];
+                /** @description Identifier of the S2S HMAC signing key (field 3 of the canonical string). */
+                "X-Key-Id": components["parameters"]["HmacKeyId"];
+                /** @description Unix epoch SECONDS at signing time (field 4). Rejected outside a ±300s window. */
+                "X-Timestamp": components["parameters"]["HmacTimestamp"];
+                /** @description Single-use nonce per key within the replay window (field 5). */
+                "X-Nonce": components["parameters"]["HmacNonce"];
+                /** @description base64url (no padding) HMAC-SHA256 of the canonical string. See the civHmac scheme. */
+                "X-Signature": components["parameters"]["HmacSignature"];
                 /** @description W3C Trace Context header for distributed tracing. */
                 traceparent?: components["parameters"]["Traceparent"];
             };
@@ -1088,12 +1116,24 @@ export interface operations {
     ingestEventBatch: {
         parameters: {
             query?: never;
-            header?: {
+            header: {
+                /** @description Federation protocol major version. The literal `1` (field 1 of the canonical string). */
+                "X-Protocol-Version": components["parameters"]["HmacProtocolVersion"];
+                /** @description Authenticated civilization id. MUST match the `civId` path/body value where present. */
+                "X-Civ-Id": components["parameters"]["HmacCivId"];
+                /** @description Identifier of the S2S HMAC signing key (field 3 of the canonical string). */
+                "X-Key-Id": components["parameters"]["HmacKeyId"];
+                /** @description Unix epoch SECONDS at signing time (field 4). Rejected outside a ±300s window. */
+                "X-Timestamp": components["parameters"]["HmacTimestamp"];
+                /** @description Single-use nonce per key within the replay window (field 5). */
+                "X-Nonce": components["parameters"]["HmacNonce"];
+                /** @description base64url (no padding) HMAC-SHA256 of the canonical string. See the civHmac scheme. */
+                "X-Signature": components["parameters"]["HmacSignature"];
                 /**
-                 * @description Client-generated key for idempotent mutations. Replaying the same key returns the
-                 *     original result rather than performing the operation again.
+                 * @description Required client-generated idempotency key for mutating POSTs. Replaying the same key
+                 *     returns the original result. This value is field 6 of the HMAC canonical string.
                  */
-                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                "Idempotency-Key": components["parameters"]["IdempotencyKeyRequired"];
                 /** @description W3C Trace Context header for distributed tracing. */
                 traceparent?: components["parameters"]["Traceparent"];
             };
@@ -1133,7 +1173,20 @@ export interface operations {
                 /** @description Maximum items to return (server may return fewer). */
                 limit?: components["parameters"]["Limit"];
             };
-            header?: never;
+            header: {
+                /** @description Federation protocol major version. The literal `1` (field 1 of the canonical string). */
+                "X-Protocol-Version": components["parameters"]["HmacProtocolVersion"];
+                /** @description Authenticated civilization id. MUST match the `civId` path/body value where present. */
+                "X-Civ-Id": components["parameters"]["HmacCivId"];
+                /** @description Identifier of the S2S HMAC signing key (field 3 of the canonical string). */
+                "X-Key-Id": components["parameters"]["HmacKeyId"];
+                /** @description Unix epoch SECONDS at signing time (field 4). Rejected outside a ±300s window. */
+                "X-Timestamp": components["parameters"]["HmacTimestamp"];
+                /** @description Single-use nonce per key within the replay window (field 5). */
+                "X-Nonce": components["parameters"]["HmacNonce"];
+                /** @description base64url (no padding) HMAC-SHA256 of the canonical string. See the civHmac scheme. */
+                "X-Signature": components["parameters"]["HmacSignature"];
+            };
             path: {
                 /** @description World-assigned civilization id. */
                 civId: components["parameters"]["CivId"];
@@ -1160,7 +1213,24 @@ export interface operations {
     ackCommand: {
         parameters: {
             query?: never;
-            header?: {
+            header: {
+                /** @description Federation protocol major version. The literal `1` (field 1 of the canonical string). */
+                "X-Protocol-Version": components["parameters"]["HmacProtocolVersion"];
+                /** @description Authenticated civilization id. MUST match the `civId` path/body value where present. */
+                "X-Civ-Id": components["parameters"]["HmacCivId"];
+                /** @description Identifier of the S2S HMAC signing key (field 3 of the canonical string). */
+                "X-Key-Id": components["parameters"]["HmacKeyId"];
+                /** @description Unix epoch SECONDS at signing time (field 4). Rejected outside a ±300s window. */
+                "X-Timestamp": components["parameters"]["HmacTimestamp"];
+                /** @description Single-use nonce per key within the replay window (field 5). */
+                "X-Nonce": components["parameters"]["HmacNonce"];
+                /** @description base64url (no padding) HMAC-SHA256 of the canonical string. See the civHmac scheme. */
+                "X-Signature": components["parameters"]["HmacSignature"];
+                /**
+                 * @description Required client-generated idempotency key for mutating POSTs. Replaying the same key
+                 *     returns the original result. This value is field 6 of the HMAC canonical string.
+                 */
+                "Idempotency-Key": components["parameters"]["IdempotencyKeyRequired"];
                 /** @description W3C Trace Context header for distributed tracing. */
                 traceparent?: components["parameters"]["Traceparent"];
             };
@@ -1196,12 +1266,24 @@ export interface operations {
     submitInteraction: {
         parameters: {
             query?: never;
-            header?: {
+            header: {
+                /** @description Federation protocol major version. The literal `1` (field 1 of the canonical string). */
+                "X-Protocol-Version": components["parameters"]["HmacProtocolVersion"];
+                /** @description Authenticated civilization id. MUST match the `civId` path/body value where present. */
+                "X-Civ-Id": components["parameters"]["HmacCivId"];
+                /** @description Identifier of the S2S HMAC signing key (field 3 of the canonical string). */
+                "X-Key-Id": components["parameters"]["HmacKeyId"];
+                /** @description Unix epoch SECONDS at signing time (field 4). Rejected outside a ±300s window. */
+                "X-Timestamp": components["parameters"]["HmacTimestamp"];
+                /** @description Single-use nonce per key within the replay window (field 5). */
+                "X-Nonce": components["parameters"]["HmacNonce"];
+                /** @description base64url (no padding) HMAC-SHA256 of the canonical string. See the civHmac scheme. */
+                "X-Signature": components["parameters"]["HmacSignature"];
                 /**
-                 * @description Client-generated key for idempotent mutations. Replaying the same key returns the
-                 *     original result rather than performing the operation again.
+                 * @description Required client-generated idempotency key for mutating POSTs. Replaying the same key
+                 *     returns the original result. This value is field 6 of the HMAC canonical string.
                  */
-                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                "Idempotency-Key": components["parameters"]["IdempotencyKeyRequired"];
                 /** @description W3C Trace Context header for distributed tracing. */
                 traceparent?: components["parameters"]["Traceparent"];
             };
@@ -1235,7 +1317,20 @@ export interface operations {
     getInteraction: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                /** @description Federation protocol major version. The literal `1` (field 1 of the canonical string). */
+                "X-Protocol-Version": components["parameters"]["HmacProtocolVersion"];
+                /** @description Authenticated civilization id. MUST match the `civId` path/body value where present. */
+                "X-Civ-Id": components["parameters"]["HmacCivId"];
+                /** @description Identifier of the S2S HMAC signing key (field 3 of the canonical string). */
+                "X-Key-Id": components["parameters"]["HmacKeyId"];
+                /** @description Unix epoch SECONDS at signing time (field 4). Rejected outside a ±300s window. */
+                "X-Timestamp": components["parameters"]["HmacTimestamp"];
+                /** @description Single-use nonce per key within the replay window (field 5). */
+                "X-Nonce": components["parameters"]["HmacNonce"];
+                /** @description base64url (no padding) HMAC-SHA256 of the canonical string. See the civHmac scheme. */
+                "X-Signature": components["parameters"]["HmacSignature"];
+            };
             path: {
                 /** @description Interaction id. */
                 interactionId: components["parameters"]["InteractionId"];

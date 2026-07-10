@@ -3,8 +3,9 @@ title: InteractionRequest
 description: >-
   A President-authorized intent to `contact` or `message` another civilization.
   Submitted by the source civ; the World queues it as a command for the target
-  to pull. Idempotent via the `Idempotency-Key` header (and optional
-  `idempotencyKey` field). All contact/message actions are public in MVP.
+  to pull. The `Idempotency-Key` HTTP header is the sole authoritative idempotency
+  key (there is deliberately no body idempotency field to avoid two conflicting
+  sources). All contact/message actions are public in MVP.
 required:
   - kind
   - source
@@ -34,9 +35,6 @@ properties:
       - $ref: ./MessageIntentData.yaml
       - type: object
         additionalProperties: true
-  idempotencyKey:
-    type: string
-    description: Optional client idempotency key (mirrors the Idempotency-Key header).
   expiresAt:
     type: string
     format: date-time

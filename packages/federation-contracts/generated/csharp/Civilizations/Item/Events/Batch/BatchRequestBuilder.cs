@@ -9,28 +9,28 @@ using System.IO;
 using System.Threading.Tasks;
 using System.Threading;
 using System;
-namespace AiCiv.FederationContracts.Civilizations.Item.EventsBatch
+namespace AiCiv.FederationContracts.Civilizations.Item.Events.Batch
 {
     /// <summary>
-    /// Builds and executes requests for operations under \civilizations\{civId}\events:batch
+    /// Builds and executes requests for operations under \civilizations\{civId}\events\batch
     /// </summary>
     [global::System.CodeDom.Compiler.GeneratedCode("Kiota", "1.0.0")]
-    public partial class EventsBatchRequestBuilder : BaseRequestBuilder
+    public partial class BatchRequestBuilder : BaseRequestBuilder
     {
         /// <summary>
-        /// Instantiates a new <see cref="global::AiCiv.FederationContracts.Civilizations.Item.EventsBatch.EventsBatchRequestBuilder"/> and sets the default values.
+        /// Instantiates a new <see cref="global::AiCiv.FederationContracts.Civilizations.Item.Events.Batch.BatchRequestBuilder"/> and sets the default values.
         /// </summary>
         /// <param name="pathParameters">Path parameters for the request</param>
         /// <param name="requestAdapter">The request adapter to use to execute the requests.</param>
-        public EventsBatchRequestBuilder(Dictionary<string, object> pathParameters, IRequestAdapter requestAdapter) : base(requestAdapter, "{+baseurl}/civilizations/{civId}/events:batch", pathParameters)
+        public BatchRequestBuilder(Dictionary<string, object> pathParameters, IRequestAdapter requestAdapter) : base(requestAdapter, "{+baseurl}/civilizations/{civId}/events/batch", pathParameters)
         {
         }
         /// <summary>
-        /// Instantiates a new <see cref="global::AiCiv.FederationContracts.Civilizations.Item.EventsBatch.EventsBatchRequestBuilder"/> and sets the default values.
+        /// Instantiates a new <see cref="global::AiCiv.FederationContracts.Civilizations.Item.Events.Batch.BatchRequestBuilder"/> and sets the default values.
         /// </summary>
         /// <param name="rawUrl">The raw URL to use for the request builder.</param>
         /// <param name="requestAdapter">The request adapter to use to execute the requests.</param>
-        public EventsBatchRequestBuilder(string rawUrl, IRequestAdapter requestAdapter) : base(requestAdapter, "{+baseurl}/civilizations/{civId}/events:batch", rawUrl)
+        public BatchRequestBuilder(string rawUrl, IRequestAdapter requestAdapter) : base(requestAdapter, "{+baseurl}/civilizations/{civId}/events/batch", rawUrl)
         {
         }
         /// <summary>
@@ -91,11 +91,11 @@ namespace AiCiv.FederationContracts.Civilizations.Item.EventsBatch
         /// <summary>
         /// Returns a request builder with the provided arbitrary URL. Using this method means any other path or query parameters are ignored.
         /// </summary>
-        /// <returns>A <see cref="global::AiCiv.FederationContracts.Civilizations.Item.EventsBatch.EventsBatchRequestBuilder"/></returns>
+        /// <returns>A <see cref="global::AiCiv.FederationContracts.Civilizations.Item.Events.Batch.BatchRequestBuilder"/></returns>
         /// <param name="rawUrl">The raw URL to use for the request builder.</param>
-        public global::AiCiv.FederationContracts.Civilizations.Item.EventsBatch.EventsBatchRequestBuilder WithUrl(string rawUrl)
+        public global::AiCiv.FederationContracts.Civilizations.Item.Events.Batch.BatchRequestBuilder WithUrl(string rawUrl)
         {
-            return new global::AiCiv.FederationContracts.Civilizations.Item.EventsBatch.EventsBatchRequestBuilder(rawUrl, RequestAdapter);
+            return new global::AiCiv.FederationContracts.Civilizations.Item.Events.Batch.BatchRequestBuilder(rawUrl, RequestAdapter);
         }
     }
 }

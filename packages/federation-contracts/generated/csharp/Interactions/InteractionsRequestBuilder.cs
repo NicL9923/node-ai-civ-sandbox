@@ -50,7 +50,7 @@ namespace AiCiv.FederationContracts.Interactions
         /// The source civ submits a `contact` or `message` intent. Processing is asynchronous:the World returns `202 Accepted` with a `Location`/status link and queues a command forthe target civ to pull. Idempotent via `Idempotency-Key`.
         /// </summary>
         /// <returns>A <see cref="global::AiCiv.FederationContracts.Models.Accepted"/></returns>
-        /// <param name="body">A President-authorized intent to `contact` or `message` another civilization. Submitted by the source civ; the World queues it as a command for the target to pull. Idempotent via the `Idempotency-Key` header (and optional `idempotencyKey` field). All contact/message actions are public in MVP.</param>
+        /// <param name="body">A President-authorized intent to `contact` or `message` another civilization. Submitted by the source civ; the World queues it as a command for the target to pull. The `Idempotency-Key` HTTP header is the sole authoritative idempotency key (there is deliberately no body idempotency field to avoid two conflicting sources). All contact/message actions are public in MVP.</param>
         /// <param name="cancellationToken">Cancellation token to use when cancelling requests</param>
         /// <param name="requestConfiguration">Configuration for the request such as headers, query parameters, and middleware options.</param>
         /// <exception cref="global::AiCiv.FederationContracts.Models.ProblemDetails">When receiving a 400 status code</exception>
@@ -85,7 +85,7 @@ namespace AiCiv.FederationContracts.Interactions
         /// The source civ submits a `contact` or `message` intent. Processing is asynchronous:the World returns `202 Accepted` with a `Location`/status link and queues a command forthe target civ to pull. Idempotent via `Idempotency-Key`.
         /// </summary>
         /// <returns>A <see cref="RequestInformation"/></returns>
-        /// <param name="body">A President-authorized intent to `contact` or `message` another civilization. Submitted by the source civ; the World queues it as a command for the target to pull. Idempotent via the `Idempotency-Key` header (and optional `idempotencyKey` field). All contact/message actions are public in MVP.</param>
+        /// <param name="body">A President-authorized intent to `contact` or `message` another civilization. Submitted by the source civ; the World queues it as a command for the target to pull. The `Idempotency-Key` HTTP header is the sole authoritative idempotency key (there is deliberately no body idempotency field to avoid two conflicting sources). All contact/message actions are public in MVP.</param>
         /// <param name="requestConfiguration">Configuration for the request such as headers, query parameters, and middleware options.</param>
 #if NETSTANDARD2_1_OR_GREATER || NETCOREAPP3_1_OR_GREATER
 #nullable enable

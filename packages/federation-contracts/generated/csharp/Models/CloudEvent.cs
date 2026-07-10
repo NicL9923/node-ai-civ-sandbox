@@ -8,7 +8,7 @@ using System;
 namespace AiCiv.FederationContracts.Models
 {
     /// <summary>
-    /// A CloudEvents 1.0 event in structured JSON mode, extended with federation attributes. Used for civ-originated domain events (events:batch) and, via Command, for world-originated commands.Enum policy: `type` is an OPEN string (reverse-DNS versioned name) so additive event/command types never break existing clients. Concrete payload schemas for known `type`s live under schemas/envelope/payloads and are referenced by examples; `data` is intentionally permissive at the envelope level to preserve forward compatibility.
+    /// A CloudEvents 1.0 event in structured JSON mode, extended with federation attributes. Used for civ-originated domain events (events/batch) and, via Command, for world-originated commands.Enum policy: `type` is an OPEN string (reverse-DNS versioned name) so additive event/command types never break existing clients. Concrete payload schemas for known `type`s live under schemas/envelope/payloads and are referenced by examples; `data` is intentionally permissive at the envelope level to preserve forward compatibility.
     /// </summary>
     [global::System.CodeDom.Compiler.GeneratedCode("Kiota", "1.0.0")]
     public partial class CloudEvent : IAdditionalDataHolder, IParsable

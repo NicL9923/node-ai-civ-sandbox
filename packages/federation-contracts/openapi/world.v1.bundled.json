@@ -44,7 +44,7 @@
     }
   ],
   "paths": {
-    "/civilizations:register": {
+    "/civilizations/register": {
       "post": {
         "tags": [
           "civilizations"
@@ -55,7 +55,7 @@
         "security": [],
         "parameters": [
           {
-            "$ref": "#/components/parameters/IdempotencyKey"
+            "$ref": "#/components/parameters/IdempotencyKeyRequired"
           },
           {
             "$ref": "#/components/parameters/Traceparent"
@@ -113,6 +113,24 @@
         "parameters": [
           {
             "$ref": "#/components/parameters/CivId"
+          },
+          {
+            "$ref": "#/components/parameters/HmacProtocolVersion"
+          },
+          {
+            "$ref": "#/components/parameters/HmacCivId"
+          },
+          {
+            "$ref": "#/components/parameters/HmacKeyId"
+          },
+          {
+            "$ref": "#/components/parameters/HmacTimestamp"
+          },
+          {
+            "$ref": "#/components/parameters/HmacNonce"
+          },
+          {
+            "$ref": "#/components/parameters/HmacSignature"
           },
           {
             "$ref": "#/components/parameters/Traceparent"
@@ -228,7 +246,7 @@
         }
       }
     },
-    "/civilizations/{civId}/events:batch": {
+    "/civilizations/{civId}/events/batch": {
       "post": {
         "tags": [
           "events"
@@ -241,7 +259,25 @@
             "$ref": "#/components/parameters/CivId"
           },
           {
-            "$ref": "#/components/parameters/IdempotencyKey"
+            "$ref": "#/components/parameters/HmacProtocolVersion"
+          },
+          {
+            "$ref": "#/components/parameters/HmacCivId"
+          },
+          {
+            "$ref": "#/components/parameters/HmacKeyId"
+          },
+          {
+            "$ref": "#/components/parameters/HmacTimestamp"
+          },
+          {
+            "$ref": "#/components/parameters/HmacNonce"
+          },
+          {
+            "$ref": "#/components/parameters/HmacSignature"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKeyRequired"
           },
           {
             "$ref": "#/components/parameters/Traceparent"
@@ -299,6 +335,24 @@
             "$ref": "#/components/parameters/CivId"
           },
           {
+            "$ref": "#/components/parameters/HmacProtocolVersion"
+          },
+          {
+            "$ref": "#/components/parameters/HmacCivId"
+          },
+          {
+            "$ref": "#/components/parameters/HmacKeyId"
+          },
+          {
+            "$ref": "#/components/parameters/HmacTimestamp"
+          },
+          {
+            "$ref": "#/components/parameters/HmacNonce"
+          },
+          {
+            "$ref": "#/components/parameters/HmacSignature"
+          },
+          {
             "$ref": "#/components/parameters/After"
           },
           {
@@ -331,7 +385,7 @@
         }
       }
     },
-    "/civilizations/{civId}/commands/{commandId}:ack": {
+    "/civilizations/{civId}/commands/{commandId}/ack": {
       "post": {
         "tags": [
           "commands"
@@ -345,6 +399,27 @@
           },
           {
             "$ref": "#/components/parameters/CommandId"
+          },
+          {
+            "$ref": "#/components/parameters/HmacProtocolVersion"
+          },
+          {
+            "$ref": "#/components/parameters/HmacCivId"
+          },
+          {
+            "$ref": "#/components/parameters/HmacKeyId"
+          },
+          {
+            "$ref": "#/components/parameters/HmacTimestamp"
+          },
+          {
+            "$ref": "#/components/parameters/HmacNonce"
+          },
+          {
+            "$ref": "#/components/parameters/HmacSignature"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKeyRequired"
           },
           {
             "$ref": "#/components/parameters/Traceparent"
@@ -396,7 +471,25 @@
         "description": "The source civ submits a `contact` or `message` intent. Processing is asynchronous:\nthe World returns `202 Accepted` with a `Location`/status link and queues a command for\nthe target civ to pull. Idempotent via `Idempotency-Key`.\n",
         "parameters": [
           {
-            "$ref": "#/components/parameters/IdempotencyKey"
+            "$ref": "#/components/parameters/HmacProtocolVersion"
+          },
+          {
+            "$ref": "#/components/parameters/HmacCivId"
+          },
+          {
+            "$ref": "#/components/parameters/HmacKeyId"
+          },
+          {
+            "$ref": "#/components/parameters/HmacTimestamp"
+          },
+          {
+            "$ref": "#/components/parameters/HmacNonce"
+          },
+          {
+            "$ref": "#/components/parameters/HmacSignature"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKeyRequired"
           },
           {
             "$ref": "#/components/parameters/Traceparent"
@@ -460,6 +553,24 @@
         "parameters": [
           {
             "$ref": "#/components/parameters/InteractionId"
+          },
+          {
+            "$ref": "#/components/parameters/HmacProtocolVersion"
+          },
+          {
+            "$ref": "#/components/parameters/HmacCivId"
+          },
+          {
+            "$ref": "#/components/parameters/HmacKeyId"
+          },
+          {
+            "$ref": "#/components/parameters/HmacTimestamp"
+          },
+          {
+            "$ref": "#/components/parameters/HmacNonce"
+          },
+          {
+            "$ref": "#/components/parameters/HmacSignature"
           }
         ],
         "responses": {
@@ -606,7 +717,7 @@
         "type": "apiKey",
         "in": "header",
         "name": "X-Signature",
-        "description": "HMAC-SHA256 request signing. Every authenticated request MUST include these headers:\n`X-Civ-Id`, `X-Key-Id`, `X-Timestamp` (RFC 3339), `X-Nonce` (single-use), and\n`X-Signature`. Optional: `Idempotency-Key`, `traceparent`.\n\nCanonical signing string (LF-joined):\n`X-Timestamp + \"\\n\" + X-Nonce + \"\\n\" + METHOD + \"\\n\" + normalizedPathAndQuery + \"\\n\" +\nbase64(SHA-256(rawBody))`.\n\n`X-Signature = base64(HMAC-SHA256(canonicalString, keyForKeyId))`. The World rejects\nrequests outside a ±300s window or with a replayed nonce. Full details in\n`docs/protocol.md`.\n"
+        "description": "HMAC-SHA256 request signing. Authenticated requests MUST send these required headers:\n`X-Civ-Id`, `X-Key-Id`, `X-Timestamp`, `X-Nonce`, `X-Protocol-Version`, `X-Signature`, and\n(for mutating POSTs) `Idempotency-Key`. `traceparent` is optional. `X-Civ-Id` MUST match the\n`civId` path/body value where present. These headers are also modeled as explicit parameters\non each authenticated operation so generated clients can send them.\n\nBuild the canonical string by joining EXACTLY these 10 fields with a single LF (`\\n`) in this\norder (no trailing newline):\n\n1. `protocolVersion` — the literal `1` for this protocol (matches `X-Protocol-Version`).\n2. `civId` (`X-Civ-Id`).\n3. `keyId` (`X-Key-Id`).\n4. `timestamp` — Unix epoch SECONDS (`X-Timestamp`), e.g. `1780000000`.\n5. `nonce` (`X-Nonce`).\n6. `idempotencyKey` (`Idempotency-Key`) — the empty string for non-idempotent reads.\n7. HTTP method, UPPERCASE (e.g. `POST`).\n8. RFC 3986-normalized request path only (no `?`, no query).\n9. Canonical query string (see below; empty string when there is no query).\n10. Lowercase-hex SHA-256 of the raw transmitted request-body bytes (UTF-8 JSON bytes; an\n    empty body uses the SHA-256 of zero bytes).\n\nCanonical query string: split the raw query into `key=value` pairs; percent-DECODE each key\nand value as `application/x-www-form-urlencoded` (so `+` decodes to a space); then RFC 3986\npercent-ENCODE each key and value (unreserved `A-Za-z0-9-._~` stay literal; a space becomes\n`%20`, never `+`; all escapes use UPPERCASE hex). Sort pairs by encoded key, then by encoded\nvalue; preserve repeated pairs. Join as `key=value` with `&`. Do NOT include a leading `?`.\n\n`X-Signature = base64url(HMAC-SHA256(utf8(canonicalString), secretForKeyId))` using\nURL-safe base64 WITHOUT padding (`-`/`_`, no `=`). The World rejects requests whose\n`X-Timestamp` is outside a ±300 second window, or whose `X-Nonce` was already used for that\n`X-Key-Id` within the window. A machine-verifiable vector lives at\n`examples/signing.vector.json`; full prose is in `docs/protocol.md`.\n"
       }
     },
     "parameters": {
@@ -676,14 +787,72 @@
           "type": "string"
         }
       },
-      "IdempotencyKey": {
+      "IdempotencyKeyRequired": {
         "name": "Idempotency-Key",
         "in": "header",
-        "required": false,
-        "description": "Client-generated key for idempotent mutations. Replaying the same key returns the\noriginal result rather than performing the operation again.\n",
+        "required": true,
+        "description": "Required client-generated idempotency key for mutating POSTs. Replaying the same key\nreturns the original result. This value is field 6 of the HMAC canonical string.\n",
         "schema": {
           "type": "string",
+          "minLength": 1,
           "maxLength": 255
+        }
+      },
+      "HmacCivId": {
+        "name": "X-Civ-Id",
+        "in": "header",
+        "required": true,
+        "description": "Authenticated civilization id. MUST match the `civId` path/body value where present.",
+        "schema": {
+          "type": "string"
+        }
+      },
+      "HmacKeyId": {
+        "name": "X-Key-Id",
+        "in": "header",
+        "required": true,
+        "description": "Identifier of the S2S HMAC signing key (field 3 of the canonical string).",
+        "schema": {
+          "type": "string"
+        }
+      },
+      "HmacTimestamp": {
+        "name": "X-Timestamp",
+        "in": "header",
+        "required": true,
+        "description": "Unix epoch SECONDS at signing time (field 4). Rejected outside a ±300s window.",
+        "schema": {
+          "type": "string",
+          "pattern": "^[0-9]+$"
+        }
+      },
+      "HmacNonce": {
+        "name": "X-Nonce",
+        "in": "header",
+        "required": true,
+        "description": "Single-use nonce per key within the replay window (field 5).",
+        "schema": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "HmacProtocolVersion": {
+        "name": "X-Protocol-Version",
+        "in": "header",
+        "required": true,
+        "description": "Federation protocol major version. The literal `1` (field 1 of the canonical string).",
+        "schema": {
+          "type": "string",
+          "const": "1"
+        }
+      },
+      "HmacSignature": {
+        "name": "X-Signature",
+        "in": "header",
+        "required": true,
+        "description": "base64url (no padding) HMAC-SHA256 of the canonical string. See the civHmac scheme.",
+        "schema": {
+          "type": "string"
         }
       },
       "Traceparent": {
@@ -1476,7 +1645,7 @@
       "InteractionRequest": {
         "type": "object",
         "title": "InteractionRequest",
-        "description": "A President-authorized intent to `contact` or `message` another civilization. Submitted by the source civ; the World queues it as a command for the target to pull. Idempotent via the `Idempotency-Key` header (and optional `idempotencyKey` field). All contact/message actions are public in MVP.",
+        "description": "A President-authorized intent to `contact` or `message` another civilization. Submitted by the source civ; the World queues it as a command for the target to pull. The `Idempotency-Key` HTTP header is the sole authoritative idempotency key (there is deliberately no body idempotency field to avoid two conflicting sources). All contact/message actions are public in MVP.",
         "required": [
           "kind",
           "source",
@@ -1516,10 +1685,6 @@
                 "additionalProperties": true
               }
             ]
-          },
-          "idempotencyKey": {
-            "type": "string",
-            "description": "Optional client idempotency key (mirrors the Idempotency-Key header)."
           },
           "expiresAt": {
             "type": "string",
@@ -1632,7 +1797,7 @@
       "CloudEvent": {
         "type": "object",
         "title": "CloudEvent",
-        "description": "A CloudEvents 1.0 event in structured JSON mode, extended with federation attributes. Used for civ-originated domain events (events:batch) and, via Command, for world-originated commands.\nEnum policy: `type` is an OPEN string (reverse-DNS versioned name) so additive event/command types never break existing clients. Concrete payload schemas for known `type`s live under schemas/envelope/payloads and are referenced by examples; `data` is intentionally permissive at the envelope level to preserve forward compatibility.",
+        "description": "A CloudEvents 1.0 event in structured JSON mode, extended with federation attributes. Used for civ-originated domain events (events/batch) and, via Command, for world-originated commands.\nEnum policy: `type` is an OPEN string (reverse-DNS versioned name) so additive event/command types never break existing clients. Concrete payload schemas for known `type`s live under schemas/envelope/payloads and are referenced by examples; `data` is intentionally permissive at the envelope level to preserve forward compatibility.",
         "required": [
           "id",
           "specversion",

@@ -54,7 +54,7 @@ security:
   - civHmac: []
 
 paths:
-  /civilizations:register:
+  /civilizations/register:
     post:
       tags: [civilizations]
       operationId: registerCivilization
@@ -65,7 +65,7 @@ paths:
         registration (with `duplicate: true`). Bootstrap endpoint — not HMAC-signed.
       security: []
       parameters:
-        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/IdempotencyKeyRequired'
         - $ref: '#/components/parameters/Traceparent'
       requestBody:
         required: true
@@ -96,6 +96,12 @@ paths:
       description: Liveness signal carrying a compact public projection and pull hints.
       parameters:
         - $ref: '#/components/parameters/CivId'
+        - $ref: '#/components/parameters/HmacProtocolVersion'
+        - $ref: '#/components/parameters/HmacCivId'
+        - $ref: '#/components/parameters/HmacKeyId'
+        - $ref: '#/components/parameters/HmacTimestamp'
+        - $ref: '#/components/parameters/HmacNonce'
+        - $ref: '#/components/parameters/HmacSignature'
         - $ref: '#/components/parameters/Traceparent'
       requestBody:
         required: true
@@ -155,7 +161,7 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
         '500': { $ref: '#/components/responses/InternalError' }
 
-  /civilizations/{civId}/events:batch:
+  /civilizations/{civId}/events/batch:
     post:
       tags: [events]
       operationId: ingestEventBatch
@@ -166,7 +172,13 @@ paths:
         per submitted event.
       parameters:
         - $ref: '#/components/parameters/CivId'
-        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/HmacProtocolVersion'
+        - $ref: '#/components/parameters/HmacCivId'
+        - $ref: '#/components/parameters/HmacKeyId'
+        - $ref: '#/components/parameters/HmacTimestamp'
+        - $ref: '#/components/parameters/HmacNonce'
+        - $ref: '#/components/parameters/HmacSignature'
+        - $ref: '#/components/parameters/IdempotencyKeyRequired'
         - $ref: '#/components/parameters/Traceparent'
       requestBody:
         required: true
@@ -197,6 +209,12 @@ paths:
         cursor. Commands persist until acked or expired, so an offline civ misses nothing.
       parameters:
         - $ref: '#/components/parameters/CivId'
+        - $ref: '#/components/parameters/HmacProtocolVersion'
+        - $ref: '#/components/parameters/HmacCivId'
+        - $ref: '#/components/parameters/HmacKeyId'
+        - $ref: '#/components/parameters/HmacTimestamp'
+        - $ref: '#/components/parameters/HmacNonce'
+        - $ref: '#/components/parameters/HmacSignature'
         - $ref: '#/components/parameters/After'
         - $ref: '#/components/parameters/Limit'
       responses:
@@ -211,7 +229,7 @@ paths:
         '429': { $ref: '#/components/responses/TooManyRequests' }
         '500': { $ref: '#/components/responses/InternalError' }
 
-  /civilizations/{civId}/commands/{commandId}:ack:
+  /civilizations/{civId}/commands/{commandId}/ack:
     post:
       tags: [commands]
       operationId: ackCommand
@@ -222,6 +240,13 @@ paths:
       parameters:
         - $ref: '#/components/parameters/CivId'
         - $ref: '#/components/parameters/CommandId'
+        - $ref: '#/components/parameters/HmacProtocolVersion'
+        - $ref: '#/components/parameters/HmacCivId'
+        - $ref: '#/components/parameters/HmacKeyId'
+        - $ref: '#/components/parameters/HmacTimestamp'
+        - $ref: '#/components/parameters/HmacNonce'
+        - $ref: '#/components/parameters/HmacSignature'
+        - $ref: '#/components/parameters/IdempotencyKeyRequired'
         - $ref: '#/components/parameters/Traceparent'
       requestBody:
         required: true
@@ -251,7 +276,13 @@ paths:
         the World returns `202 Accepted` with a `Location`/status link and queues a command for
         the target civ to pull. Idempotent via `Idempotency-Key`.
       parameters:
-        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/HmacProtocolVersion'
+        - $ref: '#/components/parameters/HmacCivId'
+        - $ref: '#/components/parameters/HmacKeyId'
+        - $ref: '#/components/parameters/HmacTimestamp'
+        - $ref: '#/components/parameters/HmacNonce'
+        - $ref: '#/components/parameters/HmacSignature'
+        - $ref: '#/components/parameters/IdempotencyKeyRequired'
         - $ref: '#/components/parameters/Traceparent'
       requestBody:
         required: true
@@ -284,6 +315,12 @@ paths:
       description: Returns the interaction record and its current lifecycle status.
       parameters:
         - $ref: '#/components/parameters/InteractionId'
+        - $ref: '#/components/parameters/HmacProtocolVersion'
+        - $ref: '#/components/parameters/HmacCivId'
+        - $ref: '#/components/parameters/HmacKeyId'
+        - $ref: '#/components/parameters/HmacTimestamp'
+        - $ref: '#/components/parameters/HmacNonce'
+        - $ref: '#/components/parameters/HmacSignature'
       responses:
         '200':
           description: The interaction record and current status.
@@ -369,17 +406,38 @@ components:
       in: header
       name: X-Signature
       description: |
-        HMAC-SHA256 request signing. Every authenticated request MUST include these headers:
-        `X-Civ-Id`, `X-Key-Id`, `X-Timestamp` (RFC 3339), `X-Nonce` (single-use), and
-        `X-Signature`. Optional: `Idempotency-Key`, `traceparent`.
+        HMAC-SHA256 request signing. Authenticated requests MUST send these required headers:
+        `X-Civ-Id`, `X-Key-Id`, `X-Timestamp`, `X-Nonce`, `X-Protocol-Version`, `X-Signature`, and
+        (for mutating POSTs) `Idempotency-Key`. `traceparent` is optional. `X-Civ-Id` MUST match the
+        `civId` path/body value where present. These headers are also modeled as explicit parameters
+        on each authenticated operation so generated clients can send them.
 
-        Canonical signing string (LF-joined):
-        `X-Timestamp + "\n" + X-Nonce + "\n" + METHOD + "\n" + normalizedPathAndQuery + "\n" +
-        base64(SHA-256(rawBody))`.
+        Build the canonical string by joining EXACTLY these 10 fields with a single LF (`\n`) in this
+        order (no trailing newline):
 
-        `X-Signature = base64(HMAC-SHA256(canonicalString, keyForKeyId))`. The World rejects
-        requests outside a ±300s window or with a replayed nonce. Full details in
-        `docs/protocol.md`.
+        1. `protocolVersion` — the literal `1` for this protocol (matches `X-Protocol-Version`).
+        2. `civId` (`X-Civ-Id`).
+        3. `keyId` (`X-Key-Id`).
+        4. `timestamp` — Unix epoch SECONDS (`X-Timestamp`), e.g. `1780000000`.
+        5. `nonce` (`X-Nonce`).
+        6. `idempotencyKey` (`Idempotency-Key`) — the empty string for non-idempotent reads.
+        7. HTTP method, UPPERCASE (e.g. `POST`).
+        8. RFC 3986-normalized request path only (no `?`, no query).
+        9. Canonical query string (see below; empty string when there is no query).
+        10. Lowercase-hex SHA-256 of the raw transmitted request-body bytes (UTF-8 JSON bytes; an
+            empty body uses the SHA-256 of zero bytes).
+
+        Canonical query string: split the raw query into `key=value` pairs; percent-DECODE each key
+        and value as `application/x-www-form-urlencoded` (so `+` decodes to a space); then RFC 3986
+        percent-ENCODE each key and value (unreserved `A-Za-z0-9-._~` stay literal; a space becomes
+        `%20`, never `+`; all escapes use UPPERCASE hex). Sort pairs by encoded key, then by encoded
+        value; preserve repeated pairs. Join as `key=value` with `&`. Do NOT include a leading `?`.
+
+        `X-Signature = base64url(HMAC-SHA256(utf8(canonicalString), secretForKeyId))` using
+        URL-safe base64 WITHOUT padding (`-`/`_`, no `=`). The World rejects requests whose
+        `X-Timestamp` is outside a ±300 second window, or whose `X-Nonce` was already used for that
+        `X-Key-Id` within the window. A machine-verifiable vector lives at
+        `examples/signing.vector.json`; full prose is in `docs/protocol.md`.
 
   parameters:
     CivId:
@@ -434,16 +492,62 @@ components:
       description: Second civ id for a relationship pair lookup (requires civA).
       schema:
         type: string
-    IdempotencyKey:
+    IdempotencyKeyRequired:
       name: Idempotency-Key
       in: header
-      required: false
+      required: true
       description: |
-        Client-generated key for idempotent mutations. Replaying the same key returns the
-        original result rather than performing the operation again.
+        Required client-generated idempotency key for mutating POSTs. Replaying the same key
+        returns the original result. This value is field 6 of the HMAC canonical string.
       schema:
         type: string
+        minLength: 1
         maxLength: 255
+    HmacCivId:
+      name: X-Civ-Id
+      in: header
+      required: true
+      description: Authenticated civilization id. MUST match the `civId` path/body value where present.
+      schema:
+        type: string
+    HmacKeyId:
+      name: X-Key-Id
+      in: header
+      required: true
+      description: Identifier of the S2S HMAC signing key (field 3 of the canonical string).
+      schema:
+        type: string
+    HmacTimestamp:
+      name: X-Timestamp
+      in: header
+      required: true
+      description: Unix epoch SECONDS at signing time (field 4). Rejected outside a ±300s window.
+      schema:
+        type: string
+        pattern: "^[0-9]+$"
+    HmacNonce:
+      name: X-Nonce
+      in: header
+      required: true
+      description: Single-use nonce per key within the replay window (field 5).
+      schema:
+        type: string
+        minLength: 1
+    HmacProtocolVersion:
+      name: X-Protocol-Version
+      in: header
+      required: true
+      description: Federation protocol major version. The literal `1` (field 1 of the canonical string).
+      schema:
+        type: string
+        const: "1"
+    HmacSignature:
+      name: X-Signature
+      in: header
+      required: true
+      description: base64url (no padding) HMAC-SHA256 of the canonical string. See the civHmac scheme.
+      schema:
+        type: string
     Traceparent:
       name: traceparent
       in: header

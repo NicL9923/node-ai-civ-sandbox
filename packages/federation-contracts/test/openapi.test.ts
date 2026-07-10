@@ -73,10 +73,37 @@ describe("bundled OpenAPI document", () => {
     expect(ids.length).toBe(new Set(ids).size);
   });
 
-  it("uses colon custom-method paths for register, batch, and ack", () => {
+  it("uses plain path segments (no colon custom methods anywhere)", () => {
     const paths = Object.keys(bundled.paths);
-    expect(paths).toContain("/civilizations:register");
-    expect(paths.some((p) => p.endsWith("/events:batch"))).toBe(true);
-    expect(paths.some((p) => p.endsWith(":ack"))).toBe(true);
+    expect(paths).toContain("/civilizations/register");
+    expect(paths).toContain("/civilizations/{civId}/events/batch");
+    expect(paths).toContain("/civilizations/{civId}/commands/{commandId}/ack");
+    // No path may contain a colon custom-method (e.g. ":register", ":batch", ":ack").
+    for (const p of paths) expect(p.includes(":")).toBe(false);
+  });
+
+  it("models required HMAC headers as parameters on authenticated operations", () => {
+    const refsFor = (pathKey: string, method: string): string[] => {
+      const op = bundled.paths[pathKey]?.[method] as
+        | { parameters?: Array<{ $ref?: string; name?: string }> }
+        | undefined;
+      return (op?.parameters ?? []).map((p) => p.$ref ?? p.name ?? "");
+    };
+    const heartbeat = refsFor("/civilizations/{civId}/heartbeat", "post").join(" ");
+    for (const h of [
+      "HmacCivId",
+      "HmacKeyId",
+      "HmacTimestamp",
+      "HmacNonce",
+      "HmacProtocolVersion",
+      "HmacSignature",
+    ]) {
+      expect(heartbeat).toContain(h);
+    }
+    // Mutating POSTs require an Idempotency-Key.
+    expect(refsFor("/interactions", "post").join(" ")).toContain("IdempotencyKeyRequired");
+    expect(refsFor("/civilizations/{civId}/events/batch", "post").join(" ")).toContain(
+      "IdempotencyKeyRequired",
+    );
   });
 });
