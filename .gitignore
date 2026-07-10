@@ -1,14 +1,29 @@
+# Node
 node_modules/
+**/node_modules/
 dist/
+**/dist/
+*.log
+
+# .NET
+[Bb]in/
+[Oo]bj/
+*.user
+
+# Secrets & local env
 .env
 .env.*
 !.env.example
-*.log
-*.zip
 .admin-key.local
 .azure-outputs.json
-.DS_Store
 
+# Deploy artifacts
+*.zip
+
+# Bicep compiled output
 infra/*.json
+infra/**/*.json
 
+# Misc
+.DS_Store
 .deploy-error.tmp

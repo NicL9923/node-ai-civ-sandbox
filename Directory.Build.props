@@ -1,0 +1,19 @@
+<Project>
+
+  <!--
+    Repository-wide MSBuild defaults for future .NET projects (P1 federation
+    contracts, P2 world service). Intentionally conservative: only language/
+    nullability settings that are safe before any project exists. No
+    TargetFramework and no TreatWarningsAsErrors so a new project can opt in
+    without fighting the repo defaults.
+  -->
+
+  <PropertyGroup>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <EnforceCodeStyleInBuild>false</EnforceCodeStyleInBuild>
+  </PropertyGroup>
+
+</Project>
