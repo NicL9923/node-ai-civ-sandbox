@@ -1,47 +1,62 @@
-using System.Collections.Concurrent;
 using WorldMap.Core.Abstractions;
 using WorldMap.Core.Domain;
 
 namespace WorldMap.Infrastructure.InMemory;
 
 /// <summary>
-/// Thread-safe in-memory public world-event ledger keyed by <c>EventId</c>, with a
-/// secondary index over <c>DedupeKey</c> for at-most-once ingestion.
+/// Thread-safe in-memory world-event ledger. <see cref="AppendAsync"/> assigns the global
+/// <c>Worldsequence</c> and inserts atomically under a lock (allocate-through-insert), idempotent by
+/// <c>DedupeKey</c>. Because assignment and insertion are one critical section, the read cursor can
+/// never advance past a sequence whose record is not yet committed.
 /// </summary>
 public sealed class InMemoryWorldEventRepository : IWorldEventRepository
 {
-    private readonly ConcurrentDictionary<string, WorldEvent> _byId = new(StringComparer.Ordinal);
-    private readonly ConcurrentDictionary<string, string> _dedupeToId = new(StringComparer.Ordinal);
+    private readonly List<WorldEvent> _ordered = [];
+    private readonly Dictionary<string, WorldEvent> _byDedupe = new(StringComparer.Ordinal);
+    private readonly Lock _gate = new();
+    private long _worldsequence;
 
-    public Task AddAsync(WorldEvent worldEvent, CancellationToken ct)
+    public Task<WorldEventAppend> AppendAsync(WorldEvent worldEvent, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
-        _byId[worldEvent.EventId] = worldEvent;
-        _dedupeToId[worldEvent.DedupeKey] = worldEvent.EventId;
-        return Task.CompletedTask;
+        lock (_gate)
+        {
+            if (_byDedupe.TryGetValue(worldEvent.DedupeKey, out var existing))
+            {
+                return Task.FromResult(new WorldEventAppend(InMemoryClone.Copy(existing), true));
+            }
+
+            var copy = InMemoryClone.Copy(worldEvent);
+            copy.Worldsequence = ++_worldsequence;
+            _ordered.Add(copy);
+            _byDedupe[copy.DedupeKey] = copy;
+            return Task.FromResult(new WorldEventAppend(InMemoryClone.Copy(copy), false));
+        }
     }
 
     public Task<WorldEvent?> GetByDedupeAsync(string dedupeKey, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
-        if (_dedupeToId.TryGetValue(dedupeKey, out var id) && _byId.TryGetValue(id, out var evt))
+        lock (_gate)
         {
-            return Task.FromResult<WorldEvent?>(evt);
+            return Task.FromResult(_byDedupe.TryGetValue(dedupeKey, out var e) ? InMemoryClone.Copy(e) : null);
         }
-
-        return Task.FromResult<WorldEvent?>(null);
     }
 
     public Task<Page<WorldEvent>> ListAsync(long afterSequence, int limit, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
-        var items = _byId.Values
-            .Where(e => e.Worldsequence > afterSequence)
-            .OrderBy(e => e.Worldsequence)
-            .Take(limit)
-            .ToList();
+        lock (_gate)
+        {
+            var items = _ordered
+                .Where(e => e.Worldsequence > afterSequence)
+                .OrderBy(e => e.Worldsequence)
+                .Take(limit)
+                .Select(InMemoryClone.Copy)
+                .ToList();
 
-        long? next = limit > 0 && items.Count == limit ? items[^1].Worldsequence : null;
-        return Task.FromResult(new Page<WorldEvent>(items, next));
+            long? next = items.Count == limit && items.Count > 0 ? items[^1].Worldsequence : null;
+            return Task.FromResult(new Page<WorldEvent>(items, next));
+        }
     }
 }

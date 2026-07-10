@@ -7,10 +7,11 @@ using WorldMap.Core.Configuration;
 namespace WorldMap.Infrastructure.Cosmos;
 
 /// <summary>
-/// Idempotently provisions the <c>worldmap</c> database and its containers at startup. All
-/// containers share the <c>/pk</c> partition-key path; the nonce and idempotency containers
-/// enable time-to-live so expired entries self-purge. Default (index-everything) indexing is
-/// left in place — adequate for the MVP query shapes.
+/// Opt-in Cosmos provisioner. Only registered when <c>WorldMap:Storage:BootstrapEnabled</c> is true;
+/// normal runtime relies on <see cref="CosmosReadinessProbe"/> to validate the schema instead of
+/// creating it. Idempotently creates the database and every required container (all sharing the
+/// <c>/pk</c> partition-key path). The nonce and idempotency containers enable time-to-live so
+/// expired entries self-purge. Default (index-everything) indexing is adequate for the MVP queries.
 /// </summary>
 public sealed class CosmosBootstrapper(
     CosmosClient client,
@@ -24,22 +25,13 @@ public sealed class CosmosBootstrapper(
         logger.LogInformation("Ensuring Cosmos database '{Database}' and containers exist.", _databaseName);
 
         var database = (await client.CreateDatabaseIfNotExistsAsync(
-            _databaseName, cancellationToken: cancellationToken)).Database;
+            _databaseName, cancellationToken: cancellationToken).ConfigureAwait(false)).Database;
 
-        // Standard containers (no TTL).
-        await EnsureContainerAsync(database, CosmosContainers.Civilizations, cancellationToken);
-        await EnsureContainerAsync(database, CosmosContainers.Credentials, cancellationToken);
-        await EnsureContainerAsync(database, CosmosContainers.Interactions, cancellationToken);
-        await EnsureContainerAsync(database, CosmosContainers.Commands, cancellationToken);
-        await EnsureContainerAsync(database, CosmosContainers.WorldEvents, cancellationToken);
-        await EnsureContainerAsync(database, CosmosContainers.Relationships, cancellationToken);
-        await EnsureContainerAsync(database, CosmosContainers.Onboarding, cancellationToken);
-        await EnsureContainerAsync(database, CosmosContainers.Sequences, cancellationToken);
-
-        // TTL-enabled containers: DefaultTimeToLive = -1 turns on TTL without a blanket default,
-        // so only items that set their own `ttl` expire.
-        await EnsureContainerAsync(database, CosmosContainers.Nonces, cancellationToken, timeToLive: -1);
-        await EnsureContainerAsync(database, CosmosContainers.Idempotency, cancellationToken, timeToLive: -1);
+        foreach (var name in CosmosContainers.All)
+        {
+            var ttl = CosmosContainers.TtlContainers.Contains(name) ? -1 : (int?)null;
+            await EnsureContainerAsync(database, name, cancellationToken, ttl).ConfigureAwait(false);
+        }
 
         logger.LogInformation("Cosmos provisioning complete for database '{Database}'.", _databaseName);
     }
@@ -49,12 +41,14 @@ public sealed class CosmosBootstrapper(
     private static async Task EnsureContainerAsync(
         Database database, string name, CancellationToken ct, int? timeToLive = null)
     {
+        // DefaultTimeToLive = -1 turns TTL on without a blanket default, so only items that set their
+        // own `ttl` expire.
         var properties = new ContainerProperties(name, CosmosContainers.PartitionKeyPath);
         if (timeToLive is { } ttl)
         {
             properties.DefaultTimeToLive = ttl;
         }
 
-        await database.CreateContainerIfNotExistsAsync(properties, cancellationToken: ct);
+        await database.CreateContainerIfNotExistsAsync(properties, cancellationToken: ct).ConfigureAwait(false);
     }
 }

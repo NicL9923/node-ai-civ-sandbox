@@ -44,6 +44,24 @@ public sealed class WorldAppFactory : WebApplicationFactory<Program>
 
     private static string TokenAt(int i) => $"onb-test-token-{i}";
 
+    private static string CivIdAt(int i) => $"civ_t{i}";
+
+    /// <summary>The fixed, preprovisioned civId that a given onboarding token resolves to.</summary>
+    public static string CivIdForToken(string token)
+    {
+        // Records are provisioned as token "onb-test-token-{i}" -> civId "civ_t{i}".
+        var dash = token.LastIndexOf('-');
+        if (dash >= 0 && int.TryParse(token[(dash + 1)..], out var i))
+        {
+            return CivIdAt(i);
+        }
+
+        throw new ArgumentException($"'{token}' is not a harness-provisioned onboarding token.", nameof(token));
+    }
+
+    /// <summary>The fixed civId bound to <see cref="PrimaryOnboardingToken"/> (record 0).</summary>
+    public static string PrimaryCivId => CivIdAt(0);
+
     private static string SecretRefAt(int i) => $"ref-{i}";
 
     private static string SecretAt(int i) => $"test-secret-{i}";

@@ -42,14 +42,15 @@ internal static class InteractionEndpoints
         .WithName("submitInteraction")
         .WithTags("interactions");
 
-        // GET /interactions/{interactionId} — status lookup.
+        // GET /interactions/{interactionId} — status lookup (source or target only).
         group.MapGet("/interactions/{interactionId}", async (
             string interactionId,
             HttpContext http,
             IInteractionService interactions,
             CancellationToken ct) =>
         {
-            var result = await interactions.GetAsync(interactionId, ct);
+            var auth = EndpointHelpers.Auth(http);
+            var result = await interactions.GetAsync(auth.CivId, interactionId, ct);
             return ApiResults.Ok(result, http);
         })
         .AddEndpointFilter<HmacAuthEndpointFilter>()

@@ -71,7 +71,17 @@ public interface IInteractionService
         string idempotencyKey,
         CancellationToken ct);
 
-    Task<Result<InteractionDto>> GetAsync(string interactionId, CancellationToken ct);
+    /// <summary>Reads an interaction's status. Only its source or target civ is authorized.</summary>
+    Task<Result<InteractionDto>> GetAsync(string requesterCivId, string interactionId, CancellationToken ct);
+}
+
+/// <summary>
+/// Drives (and resumes) the durable interaction process manager. Idempotent and safe to call
+/// inline after acceptance and again from the maintenance worker.
+/// </summary>
+public interface IInteractionProcessor
+{
+    Task ProcessAsync(string interactionId, CancellationToken ct);
 }
 
 /// <summary>Public relationship projections (list or single-pair lookup).</summary>

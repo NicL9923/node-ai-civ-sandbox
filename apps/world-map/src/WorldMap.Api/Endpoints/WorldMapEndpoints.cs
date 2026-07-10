@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
+using WorldMap.Core.Abstractions;
 
 namespace WorldMap.Api.Endpoints;
 
@@ -17,12 +18,19 @@ internal static class WorldMapEndpoints
         v1.MapInteractionEndpoints();
         v1.MapRelationshipEndpoints();
 
-        // Liveness/readiness for orchestration.
+        // Liveness — independent of dependencies (is the process running?).
         app.MapGet("/health", () => TypedResults.Ok(new { status = "healthy" }))
             .WithName("health")
             .AllowAnonymous();
 
-        app.MapGet("/health/ready", () => TypedResults.Ok(new { status = "ready" }))
+        // Readiness — probes required backing dependencies (storage/secret/onboarding).
+        app.MapGet("/health/ready", async (IReadinessProbe probe, HttpContext http, CancellationToken ct) =>
+        {
+            var result = await probe.CheckAsync(ct);
+            return result.Ready
+                ? Microsoft.AspNetCore.Http.Results.Ok(new { status = "ready", detail = result.Detail })
+                : Microsoft.AspNetCore.Http.Results.Json(new { status = "not_ready", detail = result.Detail }, statusCode: StatusCodes.Status503ServiceUnavailable);
+        })
             .WithName("ready")
             .AllowAnonymous();
     }

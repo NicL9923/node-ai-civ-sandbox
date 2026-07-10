@@ -6,18 +6,20 @@ using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
 using WorldMap.Api.Endpoints;
+using WorldMap.Api.Middleware;
+using WorldMap.Api.Sse;
 using WorldMap.Api.Telemetry;
 using WorldMap.Api.Workers;
+using WorldMap.Core.Abstractions;
 using WorldMap.Core.Application;
 using WorldMap.Core.Configuration;
 using WorldMap.Infrastructure;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// --- Options ---
+// --- Options (bound once; the resolved instance also drives provider validation) ---
 builder.Services.AddOptions<WorldMapOptions>().BindConfiguration(WorldMapOptions.SectionName);
-var telemetryConnectionString =
-    builder.Configuration[$"{WorldMapOptions.SectionName}:Telemetry:AzureMonitorConnectionString"];
+var options = builder.Configuration.GetSection(WorldMapOptions.SectionName).Get<WorldMapOptions>() ?? new WorldMapOptions();
 
 // --- JSON: match the federation wire format everywhere ---
 builder.Services.ConfigureHttpJsonOptions(o =>
@@ -30,35 +32,44 @@ builder.Services.ConfigureHttpJsonOptions(o =>
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddMetrics();
 builder.Services.AddSingleton<WorldMapMetrics>();
-builder.Services.AddWorldMapInfrastructure(builder.Configuration);
+builder.Services.AddSingleton<CivRateLimiter>();
+
+// Shared SSE broadcaster is fed at commit time via IWorldEventSink (replaces per-client polling).
+builder.Services.AddSingleton<SseBroadcaster>();
+builder.Services.AddSingleton<IWorldEventSink>(sp => sp.GetRequiredService<SseBroadcaster>());
+
+builder.Services.AddWorldMapInfrastructure(options, builder.Environment.IsDevelopment());
 builder.Services.AddWorldMapApplication();
 builder.Services.AddHostedService<WorldMaintenanceWorker>();
 
-// --- Problem details for unhandled failures ---
 builder.Services.AddProblemDetails();
 
-// --- Request body size guard (event batch capped at 500 items) ---
+// --- Request body size guard ---
 builder.WebHost.ConfigureKestrel(k => k.Limits.MaxRequestBodySize = 4 * 1024 * 1024);
 
-// --- Rate limiting: partition by authenticated civ (X-Civ-Id) else client IP ---
-builder.Services.AddRateLimiter(options =>
+// --- Pre-auth GLOBAL rate limiting: partition by NETWORK identity only (never a client header).
+//     Health probes are exempt so orchestrators are never throttled. ---
+builder.Services.AddRateLimiter(rl =>
 {
-    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
-    options.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(context =>
+    rl.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    rl.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(context =>
     {
-        var partitionKey = context.Request.Headers.TryGetValue("X-Civ-Id", out var civ) && !string.IsNullOrEmpty(civ)
-            ? $"civ:{civ}"
-            : $"ip:{context.Connection.RemoteIpAddress}";
-
-        return RateLimitPartition.GetSlidingWindowLimiter(partitionKey, _ => new SlidingWindowRateLimiterOptions
+        var path = context.Request.Path;
+        if (path.StartsWithSegments("/health"))
         {
-            PermitLimit = 300,
+            return RateLimitPartition.GetNoLimiter("health");
+        }
+
+        var ip = context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+        return RateLimitPartition.GetSlidingWindowLimiter($"ip:{ip}", _ => new SlidingWindowRateLimiterOptions
+        {
+            PermitLimit = 600,
             Window = TimeSpan.FromMinutes(1),
             SegmentsPerWindow = 6,
             QueueLimit = 0,
         });
     });
-    options.OnRejected = async (context, ct) =>
+    rl.OnRejected = async (context, ct) =>
     {
         context.HttpContext.Response.ContentType = "application/problem+json";
         await context.HttpContext.Response.WriteAsync(
@@ -76,20 +87,21 @@ var otel = builder.Services.AddOpenTelemetry()
         .AddRuntimeInstrumentation()
         .AddMeter(WorldMapMetrics.MeterName));
 
-if (!string.IsNullOrEmpty(telemetryConnectionString))
+if (!string.IsNullOrEmpty(options.Telemetry.AzureMonitorConnectionString))
 {
-    otel.UseAzureMonitor(o => o.ConnectionString = telemetryConnectionString);
+    otel.UseAzureMonitor(o => o.ConnectionString = options.Telemetry.AzureMonitorConnectionString);
 }
 
 var app = builder.Build();
 
-// The HMAC auth endpoint filter must hash the raw request body, but minimal-API model
-// binding consumes the body stream before endpoint filters run. Enable buffering up front
-// so the filter can rewind and read the exact transmitted bytes for signature verification.
-app.Use((context, next) =>
+// Enable request-body buffering up front so the HMAC endpoint filter can re-read the raw body
+// bytes AFTER minimal-API model binding has consumed the stream. Without this, signed requests
+// that carry a body (POST/PUT) fail signature verification because the filter would hash an
+// empty body. Signing headers cap the body at 4 MiB (see Kestrel MaxRequestBodySize above).
+app.Use(async (context, next) =>
 {
     context.Request.EnableBuffering();
-    return next();
+    await next(context);
 });
 
 app.UseRateLimiter();

@@ -123,11 +123,30 @@ public sealed class HmacAuthEndpointFilter : IEndpointFilter
             return Fail(ErrorCode.InvalidSignature, "Invalid request signature.", "bad_signature");
         }
 
-        // Single-use nonce within the replay window.
-        var nonceExpiry = now.AddSeconds(HmacCanonicalizer.ReplayWindowSeconds);
-        if (!await nonceStore.TryConsumeAsync(keyId, nonce, nonceExpiry, ct))
+        // Single-use nonce within the replay window. Scope by civId+keyId+nonce; the entry's expiry
+        // is derived from the SIGNED timestamp (not verification time) so a future-dated valid
+        // request cannot be replayed after an early expiry.
+        var nonceExpiry = DateTimeOffset.FromUnixTimeSeconds(ts).AddSeconds(HmacCanonicalizer.ReplayWindowSeconds);
+
+        // Reject a request whose signed replay window has already elapsed. Without this, a request at
+        // the oldest accepted whole-second timestamp would store a nonce that is already expired,
+        // letting it be replayed within that second.
+        if (nonceExpiry <= now)
+        {
+            return Fail(ErrorCode.ClockSkew, "The request's signed replay window has already elapsed.", "clock_skew");
+        }
+
+        if (!await nonceStore.TryConsumeAsync(civId, keyId, nonce, nonceExpiry, now, ct))
         {
             return Fail(ErrorCode.ReplayDetected, "Nonce has already been used within the replay window.", "replay");
+        }
+
+        // Post-auth, per-civ rate limiting keyed by the VERIFIED civ id.
+        var civRateLimiter = services.GetService<CivRateLimiter>();
+        if (civRateLimiter is not null && !await civRateLimiter.TryAcquireAsync(civId))
+        {
+            metrics?.RecordAuthFailure("civ_rate_limited");
+            return ApiResults.Problem(ErrorResult.Create(ErrorCode.RateLimited, "Per-civilization rate limit exceeded."), http);
         }
 
         http.Items[AuthContext.HttpContextItemKey] = new AuthContext(civId, keyId, idempotencyKey);

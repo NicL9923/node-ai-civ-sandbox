@@ -23,8 +23,8 @@ src/
                            rate limiting, OpenTelemetry, static placeholder, maintenance worker.
   WorldMap.Core            Domain aggregates + state machines, application services, Result<T>,
                            HMAC canonicalizer/signer, wire DTOs (System.Text.Json), config options.
-  WorldMap.Infrastructure  In-memory + Azure Cosmos repositories/stores, AES-GCM secret store,
-                           sequence allocator, DI registration.
+  WorldMap.Infrastructure  In-memory + Azure Cosmos repositories/stores, config-backed secret
+                           resolver, readiness probe, DI registration.
 tests/
   WorldMap.UnitTests         Domain/service/HMAC/crypto unit tests (incl. the golden signing vectors).
   WorldMap.IntegrationTests  WebApplicationFactory endpoint + contract-conformance tests.

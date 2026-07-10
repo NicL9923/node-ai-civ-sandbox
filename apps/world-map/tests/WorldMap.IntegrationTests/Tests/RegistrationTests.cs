@@ -39,6 +39,9 @@ public sealed class RegistrationTests : WorldTestBase
         Assert.Equal(JsonValueKind.String, root.GetProperty("keyId").ValueKind);
         Assert.False(root.GetProperty("duplicate").GetBoolean());
 
+        // The token binds to its fixed, preprovisioned civId.
+        Assert.Equal(WorldAppFactory.PrimaryCivId, root.GetProperty("civId").GetString());
+
         // The secret is never returned — retrieval is strictly out-of-band.
         Assert.False(root.TryGetProperty("secret", out _));
         Assert.DoesNotContain("secret", text, StringComparison.OrdinalIgnoreCase);
@@ -74,6 +77,23 @@ public sealed class RegistrationTests : WorldTestBase
         Assert.True(replayBody!.Duplicate);
         Assert.Equal(firstBody!.CivId, replayBody.CivId);
         Assert.Equal(firstBody.KeyId, replayBody.KeyId);
+    }
+
+    [Fact]
+    public async Task Register_same_key_with_different_body_returns_409_idempotency_conflict()
+    {
+        var key = Guid.NewGuid().ToString("N");
+
+        var first = await RegisterAsync(WorldAppFactory.PrimaryOnboardingToken, key, displayName: "Republic of Aurora");
+        Assert.Equal(HttpStatusCode.Created, first.StatusCode);
+
+        // Same token + same Idempotency-Key but a DIFFERENT request body: the stored fingerprint
+        // no longer matches, so this is a hard idempotency conflict, not a replay.
+        var conflict = await RegisterAsync(WorldAppFactory.PrimaryOnboardingToken, key, displayName: "Totally Different Name");
+
+        Assert.Equal(HttpStatusCode.Conflict, conflict.StatusCode);
+        var problem = await ProblemBody.ReadAsync(conflict);
+        Assert.Equal("idempotency_conflict", problem.Code);
     }
 
     [Fact]

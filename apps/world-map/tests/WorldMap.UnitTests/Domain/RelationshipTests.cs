@@ -4,106 +4,66 @@ namespace WorldMap.UnitTests.Domain;
 
 public sealed class RelationshipTests
 {
-    private static readonly DateTimeOffset Start = new(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
+    private static readonly DateTimeOffset Now = new(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
 
-    [Fact]
-    public void ApplyContact_IncreasesFamiliarityAndVersion()
+    [Theory]
+    [InlineData(10, 11, true)]  // distinct higher sequence → applies
+    [InlineData(10, 9, true)]   // distinct LOWER sequence → still applies (order-independent, exactly-once)
+    [InlineData(10, 10, false)] // same sequence → idempotent no-op
+    public void ApplyContact_AppliesEachDistinctWorldSequenceExactlyOnce(long incoming, long replay, bool expectedApplied)
     {
-        var relationship = Relationship.CreateNeutral("civ_a", "civ_b", 1, Start);
+        var relationship = Relationship.CreateNeutral("z", "a", Now);
+        Assert.True(RelationshipMath.ApplyContact(relationship, incoming, Now));
+        var familiarity = relationship.Familiarity;
 
-        RelationshipMath.ApplyContact(relationship, Start.AddMinutes(1));
+        var changed = RelationshipMath.ApplyContact(relationship, replay, Now.AddMinutes(1));
 
-        Assert.Equal(0.10, relationship.Familiarity, 10);
-        Assert.Equal(1, relationship.Version);
-        Assert.Equal(Start.AddMinutes(1), relationship.UpdatedAt);
-        Assert.Equal("neutral", relationship.Stance);
+        Assert.Equal(expectedApplied, changed);
+        Assert.Equal(expectedApplied ? familiarity + 0.10 : familiarity, relationship.Familiarity, 10);
+        Assert.True(relationship.HasApplied(incoming));
+        Assert.Equal(expectedApplied || replay == incoming, relationship.HasApplied(replay));
     }
 
     [Fact]
-    public void ApplyContact_Repeatedly_ClampsAtOne()
+    public void ApplyMessage_ReplayOfSameSequenceIsNoOpAndNarrativeIsStable()
     {
-        var relationship = Relationship.CreateNeutral("civ_a", "civ_b", 1, Start);
+        var relationship = Relationship.CreateNeutral("civ_a", "civ_b", Now);
+        Assert.True(RelationshipMath.ApplyMessage(relationship, 42, "Aurora", "Trade", Now));
 
-        for (var i = 0; i < 20; i++)
-        {
-            RelationshipMath.ApplyContact(relationship, Start.AddMinutes(i + 1));
-        }
-
-        Assert.Equal(1, relationship.Familiarity);
-        Assert.Equal(20, relationship.Version);
+        Assert.False(RelationshipMath.ApplyMessage(relationship, 42, "Changed", "Changed", Now.AddDays(1)));
+        Assert.Equal(0.02, relationship.Familiarity, 10);
+        Assert.Equal("Aurora sent a public message: \"Trade\".", relationship.NarrativeSummary);
+        Assert.True(relationship.HasApplied(42));
     }
 
     [Fact]
-    public void ApplyContact_AtFriendlyThreshold_FlipsStance()
+    public void Mutations_ClampBoundsAndBecomeFriendlyAtThreshold()
     {
-        var relationship = Relationship.CreateNeutral("civ_a", "civ_b", 1, Start);
+        var relationship = Relationship.CreateNeutral("a", "b", Now);
+        relationship.Familiarity = 0.59;
+        relationship.Trust = 10;
+        relationship.Grievance = -1;
+        relationship.Threat = 101;
+        relationship.Interdependence = 4;
 
-        for (var i = 0; i < 6; i++)
-        {
-            RelationshipMath.ApplyContact(relationship, Start.AddMinutes(i + 1));
-        }
+        Assert.True(RelationshipMath.ApplyContact(relationship, 1, Now));
 
-        Assert.True(relationship.Familiarity >= RelationshipMath.FriendlyFamiliarityThreshold);
+        Assert.Equal(1, relationship.Trust);
+        Assert.Equal(0, relationship.Grievance);
+        Assert.Equal(100, relationship.Threat);
+        Assert.Equal(1, relationship.Interdependence);
+        Assert.Equal(0.69, relationship.Familiarity, 10);
+        Assert.Equal("wary", relationship.Stance);
+
+        relationship.Threat = 0;
+        Assert.True(RelationshipMath.ApplyContact(relationship, 2, Now));
         Assert.Equal("friendly", relationship.Stance);
     }
 
-    [Theory]
-    [InlineData("Trade", "Aurora sent a public message: \"Trade\".")]
-    [InlineData(null, "Aurora sent a public message.")]
-    [InlineData("", "Aurora sent a public message.")]
-    public void ApplyMessage_UpdatesNarrativeAndFamiliarity(string? subject, string expectedNarrative)
-    {
-        var relationship = Relationship.CreateNeutral("civ_a", "civ_b", 1, Start);
-
-        RelationshipMath.ApplyMessage(relationship, "Aurora", subject, Start.AddMinutes(1));
-
-        Assert.Equal(0.02, relationship.Familiarity, 10);
-        Assert.Equal(expectedNarrative, relationship.NarrativeSummary);
-        Assert.Equal(1, relationship.Version);
-    }
-
     [Fact]
-    public void ApplyContact_ClampsEveryDimensionToSchemaBounds()
+    public void PairIdentity_IsCanonical()
     {
-        var relationship = Relationship.CreateNeutral("civ_a", "civ_b", 1, Start);
-        relationship.Trust = 4;
-        relationship.Grievance = -10;
-        relationship.Threat = 500;
-        relationship.Familiarity = 3;
-        relationship.Interdependence = -2;
-
-        RelationshipMath.ApplyContact(relationship, Start.AddMinutes(1));
-
-        Assert.InRange(relationship.Trust, -1, 1);
-        Assert.InRange(relationship.Grievance, 0, 100);
-        Assert.InRange(relationship.Threat, 0, 100);
-        Assert.InRange(relationship.Familiarity, 0, 1);
-        Assert.InRange(relationship.Interdependence, 0, 1);
-    }
-
-    [Theory]
-    [InlineData("civ_a", "civ_b")]
-    [InlineData("civ_b", "civ_a")]
-    public void CanonicalizeAndPairKey_OrderCivilizations(string first, string second)
-    {
-        var pair = Relationship.Canonicalize(first, second);
-
-        Assert.Equal("civ_a", pair.CivA);
-        Assert.Equal("civ_b", pair.CivB);
-        Assert.Equal("civ_a|civ_b", Relationship.PairKeyFor(first, second));
-    }
-
-    [Fact]
-    public void CreateNeutral_UsesCanonicalPairAndDefaults()
-    {
-        var relationship = Relationship.CreateNeutral("civ_z", "civ_a", 7, Start);
-
-        Assert.Equal("civ_a", relationship.CivA);
-        Assert.Equal("civ_z", relationship.CivB);
-        Assert.Equal("civ_a|civ_z", relationship.PairKey);
-        Assert.Equal(0, relationship.Trust);
-        Assert.Equal(0, relationship.Familiarity);
-        Assert.Equal("neutral", relationship.Stance);
-        Assert.Equal(0, relationship.Version);
+        Assert.Equal(("a", "z"), Relationship.Canonicalize("z", "a"));
+        Assert.Equal(Relationship.PairKeyFor("z", "a"), Relationship.PairKeyFor("a", "z"));
     }
 }

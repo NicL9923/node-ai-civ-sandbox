@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Text.Json;
 using WorldMap.Core.Contracts;
 using WorldMap.IntegrationTests.Harness;
 
@@ -33,5 +34,15 @@ public sealed class PublicReadsTests : WorldTestBase
     {
         var response = await Client.GetAsync("/health");
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Health_ready_returns_200_and_reports_ready()
+    {
+        var response = await Client.GetAsync("/health/ready");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal("ready", doc.RootElement.GetProperty("status").GetString());
     }
 }

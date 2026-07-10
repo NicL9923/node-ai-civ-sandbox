@@ -38,10 +38,23 @@ public sealed class Command
     public DateTimeOffset? AckedAt { get; set; }
     public bool Expired { get; set; }
 
+    /// <summary>
+    /// True once the ack outcome has been propagated to the linked interaction. A crash after the
+    /// command reaches a terminal ack but before the interaction is reconciled leaves this false,
+    /// so the worker (or an ack replay) can repair the interaction.
+    /// </summary>
+    public bool AckReconciled { get; set; }
+
     public DateTimeOffset CreatedAt { get; set; }
     public string? Etag { get; set; }
 
+    /// <summary>Optimistic-concurrency version for compare-and-set ack transitions.</summary>
+    public int Version { get; set; }
+
     public bool IsAcked => AckStatus is not null;
+
+    /// <summary>A command is pullable only while un-acked and un-expired.</summary>
+    public bool IsPullable => AckStatus is null && !Expired;
 
     public CommandDto ToDto() => new()
     {
@@ -64,8 +77,11 @@ public sealed class Command
 }
 
 /// <summary>
-/// A public world event in the ordered ledger — both civ-ingested events and
-/// world-originated events surface here for the public <c>/events</c> feed and SSE.
+/// A public world event in the ordered ledger, backing the citizen-facing <c>/events</c> feed and
+/// SSE stream. To keep the public feed citizen-safe, the World NEVER reflects arbitrary producer
+/// <c>data</c>: only <see cref="PublicData"/> — either world-built (interaction summaries) or null
+/// for civ-ingested events — is exposed, and it is bounded at append time. Raw producer payloads
+/// are not stored here.
 /// </summary>
 public sealed class WorldEvent
 {
@@ -76,22 +92,26 @@ public sealed class WorldEvent
     public required string Source { get; set; }
     public string? Subject { get; set; }
     public DateTimeOffset? Time { get; set; }
-    public string? Datacontenttype { get; set; }
-    public string? Dataschema { get; set; }
-    public JsonNode? Data { get; set; }
+
+    /// <summary>
+    /// Citizen-safe, bounded public payload. World-built for interaction events; null for
+    /// civ-ingested events (whose arbitrary producer data is never surfaced publicly).
+    /// </summary>
+    public JsonNode? PublicData { get; set; }
+
     public string? CorrelationId { get; set; }
     public string? CausationId { get; set; }
-    public string? IdempotencyKey { get; set; }
 
     /// <summary>Source civ id for civ-ingested events (null for world-originated events).</summary>
     public string? SourceCiv { get; set; }
 
-    /// <summary>Dedupe key: CloudEvents idempotencykey, else source + id.</summary>
+    /// <summary>Producer-scoped dedupe identity (never the raw event id alone).</summary>
     public required string DedupeKey { get; set; }
 
     public DateTimeOffset CreatedAt { get; set; }
 
-    public CloudEventDto ToDto() => new()
+    /// <summary>Citizen-safe public projection — envelope metadata plus the bounded public data only.</summary>
+    public CloudEventDto ToPublicDto() => new()
     {
         Id = EventId,
         Specversion = "1.0",
@@ -99,12 +119,11 @@ public sealed class WorldEvent
         Source = Source,
         Subject = Subject,
         Time = Time,
-        Datacontenttype = Datacontenttype,
-        Dataschema = Dataschema,
-        Data = Data?.DeepClone(),
+        Datacontenttype = PublicData is null ? null : "application/json",
+        Data = PublicData?.DeepClone(),
         Correlationid = CorrelationId,
         Causationid = CausationId,
-        Idempotencykey = IdempotencyKey,
         Worldsequence = Worldsequence.ToString(),
     };
 }
+

@@ -37,16 +37,26 @@ internal sealed class CosmosDoc<T>
     /// <summary>Per-item time-to-live in seconds; ignored unless the container has TTL enabled.</summary>
     [JsonPropertyName("ttl")]
     public int? Ttl { get; set; }
+
+    /// <summary>
+    /// Denormalized expiry as UTC epoch SECONDS (int64), promoted to the top level so expiry sweeps
+    /// compare numerically (<c>c.expiresAtEpoch &lt;= @now</c>) instead of lexically over ISO-8601
+    /// <c>DateTimeOffset</c> strings — which would mis-order values written with differing offsets.
+    /// Null on containers that don't query by expiry.
+    /// </summary>
+    [JsonPropertyName("expiresAtEpoch")]
+    public long? ExpiresAtEpoch { get; set; }
 }
 
 /// <summary>Factory helpers for <see cref="CosmosDoc{T}"/> so call sites stay terse.</summary>
 internal static class CosmosDoc
 {
-    public static CosmosDoc<T> Create<T>(string id, string pk, T payload, int? ttl = null) => new()
+    public static CosmosDoc<T> Create<T>(string id, string pk, T payload, int? ttl = null, long? expiresAtEpoch = null) => new()
     {
         Id = id,
         Pk = pk,
         Payload = payload,
         Ttl = ttl,
+        ExpiresAtEpoch = expiresAtEpoch,
     };
 }

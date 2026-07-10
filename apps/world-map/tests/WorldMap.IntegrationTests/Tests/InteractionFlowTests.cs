@@ -67,12 +67,46 @@ public sealed class InteractionFlowTests : WorldTestBase
         Assert.Single(relPage!.Items);
         Assert.True(relPage.Items[0].Familiarity > 0);
 
-        // 7) The interaction is visible in the public world-event feed.
+        // 7) The interaction is visible in the public world-event feed as a SAFE summary: the
+        //    interaction id is surfaced via causationid (not raw data), the source/subject are the
+        //    two civs, and data carries only the allowlisted contact summary — never the raw payload.
         var events = await Client.GetFromJsonAsync<EventPageDto>("/world/v1/events", WorldMapJson.Options);
-        Assert.Contains(events!.Items, e =>
-            e.Type == "world.civilization.contact.v1" &&
-            e.Data is not null &&
-            e.Data["interactionId"]?.GetValue<string>() == interactionId);
+        var contactEvent = Assert.Single(events!.Items, e =>
+            e.Type == "world.civilization.contact.v1" && e.Causationid == interactionId);
+
+        Assert.Equal($"/civilizations/{a.CivId}", contactEvent.Source);
+        Assert.Equal(b.CivId, contactEvent.Subject);
+        Assert.NotNull(contactEvent.Data);
+        Assert.Equal("contact", contactEvent.Data!["kind"]!.GetValue<string>());
+        Assert.Equal(a.CivId, contactEvent.Data["fromCiv"]!.GetValue<string>());
+
+        // The raw request payload (the greeting text) must NOT leak into the public feed.
+        var publicJson = contactEvent.Data.ToJsonString();
+        Assert.DoesNotContain("Greetings from Aurora", publicJson, StringComparison.Ordinal);
+        Assert.Null(contactEvent.Data["greeting"]);
+    }
+
+    [Fact]
+    public async Task Third_civ_cannot_read_an_interaction_it_is_not_party_to()
+    {
+        var a = await Factory.RegisterCivAsync(Client, "Aurora");
+        var b = await Factory.RegisterCivAsync(Client, "Borealis");
+        var c = await Factory.RegisterCivAsync(Client, "Cindra");
+
+        var interaction = TestDtos.ContactInteraction(a.CivId, b.CivId, "Between A and B only.");
+        var submit = await PostSignedAsync("/world/v1/interactions", interaction, a, Guid.NewGuid().ToString("N"));
+        Assert.Equal(HttpStatusCode.Accepted, submit.StatusCode);
+        var interactionId = (await submit.Content.ReadFromJsonAsync<AcceptedDto>(WorldMapJson.Options))!.ResourceId!;
+
+        // C signs a perfectly valid GET but is neither source nor target -> 403 access_denied.
+        var response = await GetSignedAsync($"/world/v1/interactions/{interactionId}", c);
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        var problem = await ProblemBody.ReadAsync(response);
+        Assert.Equal("access_denied", problem.Code);
+
+        // Sanity: the actual target B can read it.
+        var byTarget = await GetSignedAsync($"/world/v1/interactions/{interactionId}", b);
+        Assert.Equal(HttpStatusCode.OK, byTarget.StatusCode);
     }
 
     [Fact]

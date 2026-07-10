@@ -24,6 +24,32 @@ public enum LivenessStatus
     Offline,
 }
 
+/// <summary>
+/// Internal fine-grained progress of the interaction process manager. Distinct from the closed
+/// wire <see cref="InteractionStatus"/>: it lets the worker resume a partially-processed
+/// interaction after a crash, replaying each idempotent step. Advances monotonically.
+/// </summary>
+public enum InteractionStep
+{
+    /// <summary>Persisted and idempotency claim durable; 202 already returnable.</summary>
+    Accepted,
+
+    /// <summary>Authorization recorded (the World records, it does not adjudicate).</summary>
+    Authorized,
+
+    /// <summary>Ordered into the ledger: public world event appended, worldsequence assigned.</summary>
+    EventAppended,
+
+    /// <summary>Relationship projection updated deterministically (guarded by worldsequence).</summary>
+    RelationshipUpdated,
+
+    /// <summary>Durable command enqueued for the target civ.</summary>
+    CommandQueued,
+
+    /// <summary>Processing complete (interaction is queued/delivered/acknowledged/terminal).</summary>
+    Done,
+}
+
 /// <summary>Terminal outcome a civ reports when acking a pulled command.</summary>
 public enum CommandAckStatus
 {

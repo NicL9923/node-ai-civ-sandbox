@@ -67,11 +67,19 @@ internal static class EventEndpoints
         string? after,
         HttpContext http,
         IEventService events,
+        WorldMap.Api.Sse.SseBroadcaster broadcaster,
         CancellationToken ct)
     {
         if (!CursorCodec.TryDecode(after, out var cursor))
         {
             http.Response.StatusCode = StatusCodes.Status400BadRequest;
+            return;
+        }
+
+        using var subscription = broadcaster.Subscribe();
+        if (subscription is null)
+        {
+            http.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
             return;
         }
 
@@ -81,38 +89,67 @@ internal static class EventEndpoints
 
         try
         {
-            // Prime + poll. Bounded interval; the /events cursor feed is the interoperable baseline.
+            // Catch-up: drain the durable feed to its head (paging past the first 200), tracking the
+            // highest worldsequence sent. The subscription (opened above) has buffered anything
+            // committed meanwhile; we then switch to live delivery, de-duplicating by worldsequence.
+            long lastSent = cursor;
             while (!ct.IsCancellationRequested)
             {
-                var read = await events.ReadAfterAsync(cursor, 100, ct);
-                if (read.IsSuccess)
+                var read = await events.ReadAfterAsync(lastSent, 200, ct);
+                if (!read.IsSuccess || read.Value.Items.Count == 0)
                 {
-                    var (items, lastOrdinal) = read.Value;
-                    foreach (var evt in items)
-                    {
-                        var json = JsonSerializer.Serialize(evt, WorldMapJson.Options);
-                        await http.Response.WriteAsync($"data: {json}\n\n", Encoding.UTF8, ct);
-                    }
-
-                    if (items.Count > 0)
-                    {
-                        cursor = lastOrdinal;
-                        await http.Response.Body.FlushAsync(ct);
-                    }
-                    else
-                    {
-                        // Keep-alive comment so proxies don't close an idle stream.
-                        await http.Response.WriteAsync(": keep-alive\n\n", Encoding.UTF8, ct);
-                        await http.Response.Body.FlushAsync(ct);
-                    }
+                    break;
                 }
 
-                await Task.Delay(TimeSpan.FromSeconds(1), ct);
+                foreach (var evt in read.Value.Items)
+                {
+                    await WriteFrameAsync(http, evt, ct);
+                }
+
+                lastSent = read.Value.LastOrdinal;
+                await http.Response.Body.FlushAsync(ct);
+            }
+
+            var reader = subscription.Reader;
+            while (!ct.IsCancellationRequested)
+            {
+                // Heartbeat if no event arrives within the interval so idle proxies stay open.
+                using var heartbeat = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                heartbeat.CancelAfter(TimeSpan.FromSeconds(15));
+                try
+                {
+                    var evt = await reader.ReadAsync(heartbeat.Token);
+
+                    // Skip anything already delivered during catch-up (overlap window).
+                    if (long.TryParse(evt.Worldsequence, out var ws) && ws <= lastSent)
+                    {
+                        continue;
+                    }
+
+                    if (long.TryParse(evt.Worldsequence, out var seq))
+                    {
+                        lastSent = seq;
+                    }
+
+                    await WriteFrameAsync(http, evt, ct);
+                    await http.Response.Body.FlushAsync(ct);
+                }
+                catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+                {
+                    await http.Response.WriteAsync(": keep-alive\n\n", Encoding.UTF8, ct);
+                    await http.Response.Body.FlushAsync(ct);
+                }
             }
         }
         catch (OperationCanceledException)
         {
             // Client disconnected — normal SSE termination.
         }
+    }
+
+    private static Task WriteFrameAsync(HttpContext http, CloudEventDto evt, CancellationToken ct)
+    {
+        var json = JsonSerializer.Serialize(evt, WorldMapJson.Options);
+        return http.Response.WriteAsync($"data: {json}\n\n", Encoding.UTF8, ct);
     }
 }

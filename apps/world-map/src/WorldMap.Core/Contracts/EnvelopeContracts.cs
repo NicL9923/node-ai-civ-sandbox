@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 
@@ -48,6 +49,14 @@ public record CloudEventDto
 
     [JsonPropertyName("worldsequence")]
     public string? Worldsequence { get; init; }
+
+    /// <summary>
+    /// Additive CloudEvents extension attributes not modeled above. Preserved end-to-end so a
+    /// forward-compatible producer's extensions round-trip through ingestion without loss. (The
+    /// public projection is rebuilt from safe fields, so this never leaks producer data publicly.)
+    /// </summary>
+    [JsonExtensionData]
+    public Dictionary<string, JsonElement>? Extensions { get; init; }
 }
 
 /// <summary>A world-originated command a civ PULLs and then ACKs (CloudEvent + delivery metadata).</summary>

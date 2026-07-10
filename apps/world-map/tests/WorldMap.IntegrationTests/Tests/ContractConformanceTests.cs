@@ -45,4 +45,44 @@ public sealed class ContractConformanceTests
 
         JsonSubset.AssertContains(original.RootElement, actual.RootElement);
     }
+
+    [Fact]
+    public void CloudEvent_with_unknown_extension_attribute_round_trips_without_loss()
+    {
+        // A forward-compatible producer sends an extension attribute the DTO does not model
+        // explicitly. It must be captured by JsonExtensionData and survive the round-trip so
+        // ingestion never silently drops unknown-but-valid CloudEvents attributes.
+        const string original = """
+        {
+          "id": "civ_aurora-evt-9001",
+          "specversion": "1.0",
+          "type": "civ.agent.acted.v1",
+          "source": "/civilizations/civ_aurora",
+          "time": "2026-07-10T18:04:00Z",
+          "data": { "action": "gather" },
+          "idempotencykey": "civ_aurora-9001",
+          "traceparent": "00-abcd1234abcd1234abcd1234abcd1234-1234abcd1234abcd-01",
+          "regionhint": "eu-west"
+        }
+        """;
+
+        var dto = JsonSerializer.Deserialize<CloudEventDto>(original, WorldMapJson.Options);
+        Assert.NotNull(dto);
+        Assert.NotNull(dto!.Extensions);
+        Assert.True(dto.Extensions!.ContainsKey("traceparent"));
+        Assert.True(dto.Extensions.ContainsKey("regionhint"));
+
+        var roundTripped = JsonSerializer.Serialize(dto, WorldMapJson.Options);
+
+        using var expected = JsonDocument.Parse(original);
+        using var actual = JsonDocument.Parse(roundTripped);
+        JsonSubset.AssertContains(expected.RootElement, actual.RootElement);
+
+        // Explicitly assert the unknown extension attributes survived by value.
+        var root = actual.RootElement;
+        Assert.Equal(
+            "00-abcd1234abcd1234abcd1234abcd1234-1234abcd1234abcd-01",
+            root.GetProperty("traceparent").GetString());
+        Assert.Equal("eu-west", root.GetProperty("regionhint").GetString());
+    }
 }

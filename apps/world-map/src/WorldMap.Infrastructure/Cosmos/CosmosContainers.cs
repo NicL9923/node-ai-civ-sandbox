@@ -15,6 +15,8 @@ internal static class CosmosContainers
     public const string Idempotency = "idempotency";
     public const string Nonces = "nonces";
     public const string Onboarding = "onboarding";
+
+    /// <summary>Counter documents backing the atomic sequence/ordinal allocators (PK = stream name).</summary>
     public const string Sequences = "sequences";
 
     /// <summary>Uniform partition-key path used by every container (see <see cref="CosmosDoc{T}"/>).</summary>
@@ -26,6 +28,24 @@ internal static class CosmosContainers
     /// it is a known hot-partition tradeoff to revisit at scale (e.g. time-bucketed partitions).
     /// </summary>
     public const string WorldEventFeedPartition = "public";
+
+    /// <summary>Containers that enable time-to-live (per-item <c>ttl</c> drives expiry).</summary>
+    public static readonly IReadOnlyList<string> TtlContainers = [Nonces, Idempotency];
+
+    /// <summary>Every container the runtime requires to exist (validated by the readiness probe).</summary>
+    public static readonly IReadOnlyList<string> All =
+    [
+        Civilizations,
+        Credentials,
+        Interactions,
+        Commands,
+        WorldEvents,
+        Relationships,
+        Idempotency,
+        Nonces,
+        Onboarding,
+        Sequences,
+    ];
 }
 
 /// <summary>

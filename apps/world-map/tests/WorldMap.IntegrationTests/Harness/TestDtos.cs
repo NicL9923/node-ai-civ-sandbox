@@ -64,17 +64,43 @@ public static class TestDtos
         AppliedAt = DateTimeOffset.UtcNow,
     };
 
-    public static EventBatchDto EventBatch(string civId, params (string Id, string IdempotencyKey)[] events) => new()
+    public static InteractionRequestDto MessageInteraction(string source, string target, string body, string? subject = null) => new()
     {
-        Events = events.Select(e => new CloudEventDto
+        Kind = "message",
+        Source = source,
+        Target = target,
+        AuthorityDecision = new AuthorityDecisionDto
         {
-            Id = e.Id,
-            Specversion = "1.0",
-            Type = "civ.agent.acted.v1",
-            Source = $"/civilizations/{civId}",
-            Time = DateTimeOffset.UtcNow,
-            Data = new JsonObject { ["agentRef"] = "a_1", ["action"] = "gather" },
-            Idempotencykey = e.IdempotencyKey,
-        }).ToList(),
+            Mode = "president",
+            Ref = "decree_2",
+            AuthorizedAt = DateTimeOffset.UtcNow,
+        },
+        PublicNarrative = "A diplomatic message.",
+        Payload = new JsonObject
+        {
+            ["body"] = body,
+            ["subject"] = subject,
+        },
     };
+
+    /// <summary>A single civ-sourced CloudEvent carrying arbitrary producer data (never surfaced publicly).</summary>
+    public static CloudEventDto CivEvent(string civId, string id, string idempotencyKey, JsonNode? data = null) => new()
+    {
+        Id = id,
+        Specversion = "1.0",
+        Type = "civ.agent.acted.v1",
+        Source = $"/civilizations/{civId}",
+        Time = DateTimeOffset.UtcNow,
+        Data = data ?? new JsonObject { ["agentRef"] = "a_1", ["action"] = "gather" },
+        Idempotencykey = idempotencyKey,
+    };
+
+    /// <summary>Wraps a set of pre-built CloudEvents into a batch DTO (used by invalid/mixed-batch tests).</summary>
+    public static EventBatchDto Batch(params CloudEventDto[] events) => new()
+    {
+        Events = events.ToList(),
+    };
+
+    public static EventBatchDto EventBatch(string civId, params (string Id, string IdempotencyKey)[] events) =>
+        Batch(events.Select(e => CivEvent(civId, e.Id, e.IdempotencyKey)).ToArray());
 }

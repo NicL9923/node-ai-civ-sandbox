@@ -4,19 +4,18 @@ using WorldMap.Core.Abstractions;
 namespace WorldMap.Infrastructure.InMemory;
 
 /// <summary>
-/// In-memory one-time onboarding token consumption tracker. The onboarding service validates
-/// the token against the provisioned records; this store only guarantees a token binds at most
-/// one civilization (atomic first-writer-wins).
+/// Thread-safe in-memory one-time onboarding reservation, keyed by the token HASH (never the raw
+/// token). Idempotent for the same civ so a resumed registration re-reserves without burning the
+/// token; a reservation for a different civ is rejected.
 /// </summary>
 public sealed class InMemoryOnboardingTokenStore : IOnboardingTokenStore
 {
-    private readonly ConcurrentDictionary<string, string> _consumed = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, string> _reserved = new(StringComparer.Ordinal);
 
-    public Task<bool> TryConsumeAsync(string token, string civId, CancellationToken ct)
+    public Task<bool> TryReserveAsync(string tokenHash, string civId, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
-
-        // TryAdd is atomic: exactly one civ wins the token.
-        return Task.FromResult(_consumed.TryAdd(token, civId));
+        var owner = _reserved.GetOrAdd(tokenHash, civId);
+        return Task.FromResult(owner == civId);
     }
 }

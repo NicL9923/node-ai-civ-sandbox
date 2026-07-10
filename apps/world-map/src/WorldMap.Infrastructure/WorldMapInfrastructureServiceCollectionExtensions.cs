@@ -1,11 +1,9 @@
 using System.Text.Json;
 using Azure.Identity;
 using Microsoft.Azure.Cosmos;
-using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using WorldMap.Core.Abstractions;
 using WorldMap.Core.Configuration;
-using WorldMap.Core.Sequencing;
 using WorldMap.Infrastructure.Cosmos;
 using WorldMap.Infrastructure.InMemory;
 using WorldMap.Infrastructure.Secrets;
@@ -13,36 +11,49 @@ using WorldMap.Infrastructure.Secrets;
 namespace WorldMap.Infrastructure;
 
 /// <summary>
-/// Composition root for the World Infrastructure layer. Selects the storage provider from
-/// <c>WorldMap:Storage:Provider</c> and registers the matching repositories, stores, and
-/// sequence allocator. All backing services are singletons so in-memory state (and the shared
-/// thread-safe <see cref="CosmosClient"/>) persist across scoped requests within the process.
+/// Composition root for the World Infrastructure layer. Validates the storage provider against an
+/// explicit allowlist and registers the matching repositories, stores, readiness probe, and (for
+/// Cosmos, only when bootstrap is enabled) the provisioning bootstrapper. Backing services are
+/// singletons so in-memory state and the thread-safe <see cref="CosmosClient"/> persist across
+/// scoped requests within the process.
 /// </summary>
 public static class WorldMapInfrastructureServiceCollectionExtensions
 {
-    private const string CosmosProvider = "Cosmos";
-
     public static IServiceCollection AddWorldMapInfrastructure(
-        this IServiceCollection services, IConfiguration configuration)
+        this IServiceCollection services,
+        WorldMapOptions options,
+        bool isDevelopment)
     {
         ArgumentNullException.ThrowIfNull(services);
-        ArgumentNullException.ThrowIfNull(configuration);
+        ArgumentNullException.ThrowIfNull(options);
 
-        // Safe to call even if the host also binds WorldMapOptions — binds are additive.
-        services.AddOptions<WorldMapOptions>().BindConfiguration(WorldMapOptions.SectionName);
-
-        // The configuration-backed secret resolver is provider-agnostic (secrets are
-        // provisioned out-of-band; only references are persisted on credentials).
-        services.AddSingleton<ISecretStore, ConfigurationSecretStore>();
-
-        var provider = configuration[$"{WorldMapOptions.SectionName}:Storage:Provider"];
-        if (string.Equals(provider, CosmosProvider, StringComparison.OrdinalIgnoreCase))
+        if (!Enum.TryParse<StorageProvider>(options.Storage.Provider, ignoreCase: true, out var provider))
         {
-            AddCosmos(services, configuration);
+            throw new InvalidOperationException(
+                $"WorldMap:Storage:Provider '{options.Storage.Provider}' is invalid. Allowed values: {string.Join(", ", Enum.GetNames<StorageProvider>())}.");
         }
-        else
+
+        // Shared, provider-agnostic services: the config-backed secret resolver and the hash-only
+        // onboarding registry (secrets are provisioned out-of-band; only references are persisted).
+        services.AddSingleton<ISecretStore, ConfigurationSecretStore>();
+        services.AddSingleton<IOnboardingRegistry, OnboardingRegistry>();
+
+        switch (provider)
         {
-            AddInMemory(services);
+            case StorageProvider.InMemory:
+                if (!isDevelopment && !options.Storage.AllowInMemoryOutsideDevelopment)
+                {
+                    throw new InvalidOperationException(
+                        "The InMemory storage provider is not durable and is blocked outside Development. " +
+                        "Use Cosmos, or set WorldMap:Storage:AllowInMemoryOutsideDevelopment=true only for an explicit dev/test scenario.");
+                }
+
+                AddInMemory(services);
+                break;
+
+            case StorageProvider.Cosmos:
+                AddCosmos(services, options);
+                break;
         }
 
         return services;
@@ -60,19 +71,18 @@ public static class WorldMapInfrastructureServiceCollectionExtensions
         services.AddSingleton<INonceStore, InMemoryNonceStore>();
         services.AddSingleton<IIdempotencyStore, InMemoryIdempotencyStore>();
         services.AddSingleton<IOnboardingTokenStore, InMemoryOnboardingTokenStore>();
-
-        services.AddSingleton<ISequenceAllocator, InMemorySequenceAllocator>();
+        services.AddSingleton<IReadinessProbe, InMemoryReadinessProbe>();
     }
 
-    private static void AddCosmos(IServiceCollection services, IConfiguration configuration)
+    private static void AddCosmos(IServiceCollection services, WorldMapOptions options)
     {
-        var endpoint = configuration[$"{WorldMapOptions.SectionName}:Storage:CosmosEndpoint"];
-        if (string.IsNullOrWhiteSpace(endpoint))
+        if (string.IsNullOrWhiteSpace(options.Storage.CosmosEndpoint))
         {
             throw new InvalidOperationException(
                 "WorldMap:Storage:CosmosEndpoint is required when WorldMap:Storage:Provider is 'Cosmos'.");
         }
 
+        var endpoint = options.Storage.CosmosEndpoint;
         services.AddSingleton(_ =>
         {
             var clientOptions = new CosmosClientOptions
@@ -86,8 +96,12 @@ public static class WorldMapInfrastructureServiceCollectionExtensions
             return new CosmosClient(endpoint, new DefaultAzureCredential(), clientOptions);
         });
 
-        // Provisions the database + containers at startup (idempotent).
-        services.AddHostedService<CosmosBootstrapper>();
+        // Container creation is gated: only provision when explicitly enabled. Normal runtime relies
+        // on the readiness probe to validate that required containers exist.
+        if (options.Storage.BootstrapEnabled)
+        {
+            services.AddHostedService<CosmosBootstrapper>();
+        }
 
         services.AddSingleton<ICivilizationRepository, CosmosCivilizationRepository>();
         services.AddSingleton<ICivCredentialRepository, CosmosCivCredentialRepository>();
@@ -99,7 +113,6 @@ public static class WorldMapInfrastructureServiceCollectionExtensions
         services.AddSingleton<INonceStore, CosmosNonceStore>();
         services.AddSingleton<IIdempotencyStore, CosmosIdempotencyStore>();
         services.AddSingleton<IOnboardingTokenStore, CosmosOnboardingTokenStore>();
-
-        services.AddSingleton<ISequenceAllocator, CosmosSequenceAllocator>();
+        services.AddSingleton<IReadinessProbe, CosmosReadinessProbe>();
     }
 }

@@ -7,35 +7,26 @@ using WorldMap.Core.Common;
 using WorldMap.Core.Configuration;
 using WorldMap.Core.Contracts;
 using WorldMap.Core.Domain;
-using WorldMap.Core.Sequencing;
 
 namespace WorldMap.Core.Application.Impl;
 
 /// <summary>
-/// President-authorized inter-civ interactions (MVP: <c>contact</c> and <c>message</c>).
-/// Submission is asynchronous: the World records the interaction, assigns a
-/// <c>worldsequence</c>, updates the relationship deterministically, appends a public
-/// world event, and queues a durable command for the target civ to pull — then returns
-/// 202 Accepted. Idempotent by <c>Idempotency-Key</c>.
+/// President-authorized inter-civ interactions (MVP: <c>contact</c> and <c>message</c>). Submission
+/// durably persists an <c>accepted</c> interaction and its idempotency claim BEFORE any downstream
+/// effect, returns 202, then drives the resumable process manager (inline best-effort; the worker
+/// resumes anything left incomplete). Reads are restricted to the interaction's source or target.
 /// </summary>
 public sealed class InteractionService(
     ICivilizationRepository civilizations,
     IInteractionRepository interactions,
-    ICommandRepository commands,
-    IWorldEventRepository worldEvents,
-    IRelationshipRepository relationships,
-    IIdempotencyStore idempotency,
-    ISequenceAllocator sequence,
+    IInteractionProcessor processor,
+    IdempotencyExecutor idempotency,
     TimeProvider clock,
     IOptions<WorldMapOptions> options,
     ILogger<InteractionService> logger) : IInteractionService
 {
     private const string ContactKind = "contact";
     private const string MessageKind = "message";
-    private const string ContactEventType = "world.civilization.contact.v1";
-    private const string MessageEventType = "world.civilization.message.v1";
-    private const string RelationshipOrdinalStream = "__relationship_ordinal";
-
     private readonly WorldMapOptions _options = options.Value;
 
     public async Task<Result<InteractionSubmitResult>> SubmitAsync(
@@ -44,105 +35,82 @@ public sealed class InteractionService(
         string idempotencyKey,
         CancellationToken ct)
     {
-        var scope = $"interactions:{authenticatedCivId}:{idempotencyKey}";
-        var replay = await idempotency.GetAsync(scope, ct);
-        if (replay is not null)
-        {
-            var original = JsonSerializer.Deserialize<AcceptedDto>(replay.ResponseJson, WorldMapJson.Options)!;
-            return new InteractionSubmitResult(original with { Duplicate = true }, replay.Location ?? original.StatusUrl);
-        }
-
         var validation = await ValidateAsync(authenticatedCivId, request, ct);
         if (validation is not null)
         {
             return validation;
         }
 
+        var scope = $"interactions:{authenticatedCivId}:{idempotencyKey}";
+        var fingerprint = RequestFingerprint.Of(request);
+        var ttl = TimeSpan.FromSeconds(_options.Interaction.IdempotencyTtlSeconds);
+        var interactionId = Ids.InteractionId(scope);
+
+        var outcome = await idempotency.ExecuteAsync<AcceptedDto>(
+            scope,
+            fingerprint,
+            ttl,
+            innerCt => AcceptAsync(interactionId, request, innerCt),
+            body => body with { Duplicate = true },
+            ct);
+
+        if (!outcome.IsSuccess)
+        {
+            return outcome.Error;
+        }
+
+        // Acceptance + idempotency claim are durable; drive processing (idempotent). A failure here
+        // does not affect the already-durable 202 — the maintenance worker resumes incomplete work.
+        try
+        {
+            await processor.ProcessAsync(interactionId, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogWarning(ex, "Inline processing of interaction {InteractionId} failed; worker will resume.", interactionId);
+        }
+
+        var location = outcome.Value.Location ?? outcome.Value.Body.StatusUrl;
+        return new InteractionSubmitResult(outcome.Value.Body, location);
+    }
+
+    private async Task<Result<OperationOutcome<AcceptedDto>>> AcceptAsync(
+        string interactionId,
+        InteractionRequestDto request,
+        CancellationToken ct)
+    {
         var now = clock.GetUtcNow();
-        var kind = request.Kind!;
-        var source = request.Source!;
-        var target = request.Target!;
-        var sourceCiv = (await civilizations.GetAsync(source, ct))!;
-
-        var interactionId = Ids.NewInteractionId();
-        var correlationId = Ids.NewCorrelationId();
-
-        var interaction = new Interaction
-        {
-            InteractionId = interactionId,
-            Kind = kind,
-            Source = source,
-            Target = target,
-            Status = InteractionStatus.Received,
-            AuthorityDecision = request.AuthorityDecision,
-            PublicNarrative = request.PublicNarrative,
-            Payload = request.Payload?.DeepClone(),
-            Public = true,
-            CorrelationId = correlationId,
-            CreatedAt = now,
-            UpdatedAt = now,
-            ExpiresAt = request.ExpiresAt,
-        };
-
-        // Authorize (the World records but does not adjudicate the civ's constitution).
-        interaction.Authorize(now);
-
-        // Assign the total-order worldsequence and order into the ledger.
-        var worldsequence = await sequence.NextWorldSequenceAsync(ct);
-        interaction.AssignSequence(worldsequence, now);
-
-        // Deterministically create/update the relationship projection.
-        await UpdateRelationshipAsync(kind, source, target, sourceCiv.DisplayName, request, now, ct);
-
-        // Build the command payload + envelope for the target to pull.
-        var commandData = BuildCommandData(kind, interactionId, sourceCiv, request);
-        var commandId = Ids.NewCommandId();
-        var commandSequence = await sequence.NextCommandSequenceAsync(target, ct);
-        var eventType = kind == ContactKind ? ContactEventType : MessageEventType;
-
-        await commands.AddAsync(new Command
-        {
-            CommandId = commandId,
-            TargetCivId = target,
-            CommandSequence = commandSequence,
-            Worldsequence = worldsequence,
-            EventId = Ids.NewWorldEventId(),
-            Type = eventType,
-            Source = $"/civilizations/{source}",
-            Subject = target,
-            Time = now,
-            Data = commandData,
-            CorrelationId = correlationId,
-            CausationId = interactionId,
-            IdempotencyKey = $"cmd:{interactionId}",
-            DeliveredAt = now,
-            ExpiresAt = interaction.ExpiresAt ?? now.AddSeconds(_options.Interaction.CommandTtlSeconds),
-            InteractionId = interactionId,
-            CreatedAt = now,
-        }, ct);
-
-        interaction.Queue(commandId, now);
-        await interactions.AddAsync(interaction, ct);
-
-        // Append the interaction to the public world-event feed (same worldsequence).
-        await worldEvents.AddAsync(new WorldEvent
-        {
-            EventId = Ids.NewWorldEventId(),
-            Worldsequence = worldsequence,
-            Type = eventType,
-            Source = $"/civilizations/{source}",
-            Subject = target,
-            Time = now,
-            Datacontenttype = "application/json",
-            Data = commandData.DeepClone(),
-            CorrelationId = correlationId,
-            CausationId = interactionId,
-            SourceCiv = source,
-            DedupeKey = $"interaction:{interactionId}",
-            CreatedAt = now,
-        }, ct);
-
         var statusUrl = $"{_options.WorldBaseUrl}/interactions/{interactionId}";
+
+        var existing = await interactions.GetAsync(interactionId, ct);
+        if (existing is null)
+        {
+            var effectiveExpiresAt = ComputeEffectiveExpiry(request.ExpiresAt, now);
+            await interactions.AddAsync(new Interaction
+            {
+                InteractionId = interactionId,
+                Kind = request.Kind!,
+                Source = request.Source!,
+                Target = request.Target!,
+                Status = InteractionStatus.Received,
+                Step = InteractionStep.Accepted,
+                AuthorityDecision = request.AuthorityDecision,
+                PublicNarrative = request.PublicNarrative,
+                Payload = request.Payload?.DeepClone(),
+                Public = true,
+                CorrelationId = Ids.CorrelationId(interactionId),
+                CommandId = Interaction.DeriveCommandId(interactionId),
+                EventId = Interaction.DeriveEventId(interactionId),
+                CreatedAt = now,
+                UpdatedAt = now,
+                EffectiveExpiresAt = effectiveExpiresAt,
+                Version = 0,
+            }, ct);
+
+            logger.LogInformation("Interaction {InteractionId} ({Kind}) accepted: {Source} -> {Target}.",
+                interactionId, request.Kind, request.Source, request.Target);
+        }
+
         var accepted = new AcceptedDto
         {
             Status = "accepted",
@@ -151,28 +119,30 @@ public sealed class InteractionService(
             Duplicate = false,
         };
 
-        await idempotency.PutIfAbsentAsync(new IdempotencyRecord
-        {
-            Scope = scope,
-            ResponseJson = JsonSerializer.Serialize(accepted, WorldMapJson.Options),
-            StatusCode = 202,
-            Location = statusUrl,
-            CreatedAt = now,
-            ExpiresAt = now.AddSeconds(_options.Interaction.IdempotencyTtlSeconds),
-        }, ct);
-
-        logger.LogInformation("Interaction {InteractionId} ({Kind}) queued: {Source} -> {Target}, worldsequence {Ws}.",
-            interactionId, kind, source, target, worldsequence);
-
-        return new InteractionSubmitResult(accepted, statusUrl);
+        return new OperationOutcome<AcceptedDto>(accepted, 202, statusUrl);
     }
 
-    public async Task<Result<InteractionDto>> GetAsync(string interactionId, CancellationToken ct)
+    public async Task<Result<InteractionDto>> GetAsync(string requesterCivId, string interactionId, CancellationToken ct)
     {
         var interaction = await interactions.GetAsync(interactionId, ct);
-        return interaction is null
-            ? ErrorResult.Create(ErrorCode.InteractionNotFound, $"Interaction '{interactionId}' not found.")
-            : interaction.ToDto();
+        if (interaction is null)
+        {
+            return ErrorResult.Create(ErrorCode.InteractionNotFound, $"Interaction '{interactionId}' not found.");
+        }
+
+        // Only the source or target civ may read an interaction's status.
+        if (requesterCivId != interaction.Source && requesterCivId != interaction.Target)
+        {
+            return ErrorResult.Create(ErrorCode.AccessDenied, "Only the source or target civilization may view this interaction.");
+        }
+
+        return interaction.ToDto();
+    }
+
+    private DateTimeOffset ComputeEffectiveExpiry(DateTimeOffset? requested, DateTimeOffset now)
+    {
+        var cap = now.AddSeconds(_options.Interaction.CommandTtlSeconds);
+        return requested is { } r && r < cap ? r : cap;
     }
 
     private async Task<ErrorInfo?> ValidateAsync(string authenticatedCivId, InteractionRequestDto request, CancellationToken ct)
@@ -209,7 +179,6 @@ public sealed class InteractionService(
             return ErrorResult.Create(ErrorCode.CivilizationNotFound, $"Target civilization '{request.Target}' not found.");
         }
 
-        // Kind-specific payload validation.
         if (request.Kind == ContactKind)
         {
             var contact = Deserialize<ContactIntentDataDto>(request.Payload);
@@ -230,67 +199,6 @@ public sealed class InteractionService(
         }
 
         return null;
-    }
-
-    private async Task UpdateRelationshipAsync(
-        string kind,
-        string source,
-        string target,
-        string sourceDisplayName,
-        InteractionRequestDto request,
-        DateTimeOffset now,
-        CancellationToken ct)
-    {
-        var pairKey = Relationship.PairKeyFor(source, target);
-        var relationship = await relationships.GetAsync(pairKey, ct);
-        if (relationship is null)
-        {
-            var ordinal = await sequence.NextCommandSequenceAsync(RelationshipOrdinalStream, ct);
-            relationship = Relationship.CreateNeutral(source, target, ordinal, now);
-        }
-
-        if (kind == ContactKind)
-        {
-            RelationshipMath.ApplyContact(relationship, now);
-        }
-        else
-        {
-            var subject = Deserialize<MessageIntentDataDto>(request.Payload)?.Subject;
-            RelationshipMath.ApplyMessage(relationship, sourceDisplayName, subject, now);
-        }
-
-        await relationships.UpsertAsync(relationship, ct);
-    }
-
-    private static JsonNode BuildCommandData(string kind, string interactionId, Domain.Civilization sourceCiv, InteractionRequestDto request)
-    {
-        if (kind == ContactKind)
-        {
-            var intent = Deserialize<ContactIntentDataDto>(request.Payload);
-            var data = new ContactCommandDataDto
-            {
-                InteractionId = interactionId,
-                FromCiv = sourceCiv.CivId,
-                FromDisplayName = sourceCiv.DisplayName,
-                Greeting = intent?.Greeting,
-                PublicNarrative = request.PublicNarrative,
-            };
-            return JsonSerializer.SerializeToNode(data, WorldMapJson.Options)!;
-        }
-        else
-        {
-            var intent = Deserialize<MessageIntentDataDto>(request.Payload);
-            var data = new MessageCommandDataDto
-            {
-                InteractionId = interactionId,
-                FromCiv = sourceCiv.CivId,
-                FromDisplayName = sourceCiv.DisplayName,
-                Subject = intent?.Subject,
-                Body = intent?.Body ?? string.Empty,
-                InReplyTo = intent?.InReplyTo,
-            };
-            return JsonSerializer.SerializeToNode(data, WorldMapJson.Options)!;
-        }
     }
 
     private static T? Deserialize<T>(JsonNode? node) where T : class

@@ -1,4 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using WorldMap.Core.Abstractions;
 using WorldMap.Core.Application.Impl;
 
 namespace WorldMap.Core.Application;
@@ -13,6 +15,11 @@ public static class WorldMapApplicationServiceCollectionExtensions
     /// </summary>
     public static IServiceCollection AddWorldMapApplication(this IServiceCollection services)
     {
+        services.AddSingleton<PublicEventFactory>();
+        services.TryAddSingleton<IWorldEventSink, NoOpWorldEventSink>();
+        services.AddScoped<IdempotencyExecutor>();
+        services.AddScoped<IInteractionProcessor, InteractionProcessor>();
+
         services.AddScoped<IOnboardingService, OnboardingService>();
         services.AddScoped<ICivilizationService, CivilizationService>();
         services.AddScoped<IEventService, EventService>();

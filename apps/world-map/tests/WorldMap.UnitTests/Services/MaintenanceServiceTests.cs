@@ -1,47 +1,83 @@
 using WorldMap.Core.Domain;
+using WorldMap.UnitTests.Domain;
 
 namespace WorldMap.UnitTests.Services;
 
 public sealed class MaintenanceServiceTests
 {
     [Fact]
-    public async Task SweepAsync_AfterExpiry_ExpiresCommandAndInteraction()
+    public async Task SweepResumesIncompleteInteractions()
     {
         var world = new TestWorld();
-        var expiresAt = world.Clock.GetUtcNow().AddMinutes(1);
-        var interaction = new Interaction
-        {
-            InteractionId = "int_1",
-            Kind = "contact",
-            Source = "civ_a",
-            Target = "civ_b",
-            Status = InteractionStatus.Queued,
-            ExpiresAt = expiresAt,
-            CreatedAt = world.Clock.GetUtcNow(),
-            UpdatedAt = world.Clock.GetUtcNow(),
-        };
-        var command = new Command
-        {
-            CommandId = "cmd_1",
-            TargetCivId = "civ_b",
-            CommandSequence = 1,
-            EventId = "evt_1",
-            Type = "test.command",
-            Source = "/world",
-            DeliveredAt = world.Clock.GetUtcNow(),
-            ExpiresAt = expiresAt,
-            InteractionId = interaction.InteractionId,
-            CreatedAt = world.Clock.GetUtcNow(),
-        };
-        await world.InteractionRepository.AddAsync(interaction, CancellationToken.None);
-        await world.Commands.AddAsync(command, CancellationToken.None);
-        world.Clock.Advance(TimeSpan.FromMinutes(2));
+        var (source, target) = await world.SeedCivPairAsync();
+        var interaction = InteractionTests.Create();
+        interaction.Source = source;
+        interaction.Target = target;
+        await world.InteractionRepository.AddAsync(interaction, default);
 
-        await world.Maintenance.SweepAsync(CancellationToken.None);
+        await world.Maintenance.SweepAsync(default);
 
-        var storedInteraction = await world.InteractionRepository.GetAsync("int_1", CancellationToken.None);
-        var storedCommand = await world.Commands.GetAsync("civ_b", "cmd_1", CancellationToken.None);
-        Assert.Equal(InteractionStatus.Expired, storedInteraction!.Status);
-        Assert.True(storedCommand!.Expired);
+        Assert.Equal(InteractionStatus.Queued,
+            (await world.InteractionRepository.GetAsync(interaction.InteractionId, default))!.Status);
+        Assert.Single(await world.Commands.PullAsync(target, 0, 10, default));
     }
+
+    [Fact]
+    public async Task SweepExpiresCommandAndLinkedInteractionPastEffectiveExpiry()
+    {
+        var world = new TestWorld();
+        var now = world.Clock.GetUtcNow();
+        var interaction = CreateQueued("int-expire", now.AddSeconds(1));
+        await world.InteractionRepository.AddAsync(interaction, default);
+        await world.Commands.EnqueueAsync(new Command
+        {
+            CommandId = interaction.CommandId,
+            TargetCivId = interaction.Target,
+            EventId = interaction.EventId,
+            Type = "test",
+            Source = "/world",
+            DeliveredAt = now,
+            ExpiresAt = interaction.EffectiveExpiresAt,
+            InteractionId = interaction.InteractionId,
+            CreatedAt = now,
+        }, default);
+
+        world.Clock.Advance(TimeSpan.FromSeconds(2));
+        await world.Maintenance.SweepAsync(default);
+
+        Assert.Equal(InteractionStatus.Expired,
+            (await world.InteractionRepository.GetAsync(interaction.InteractionId, default))!.Status);
+        var command = await world.Commands.GetAsync(interaction.Target, interaction.CommandId, default);
+        Assert.True(command!.Expired);
+        Assert.False(command.IsPullable);
+    }
+
+    [Fact]
+    public async Task SweepExpiresInteractionWithoutCommandPastEffectiveExpiry()
+    {
+        var world = new TestWorld();
+        var interaction = CreateQueued("int-alone", world.Clock.GetUtcNow().AddSeconds(1));
+        await world.InteractionRepository.AddAsync(interaction, default);
+        world.Clock.Advance(TimeSpan.FromSeconds(2));
+
+        await world.Maintenance.SweepAsync(default);
+
+        Assert.Equal(InteractionStatus.Expired,
+            (await world.InteractionRepository.GetAsync(interaction.InteractionId, default))!.Status);
+    }
+
+    private static Interaction CreateQueued(string id, DateTimeOffset expiresAt) => new()
+    {
+        InteractionId = id,
+        Kind = "contact",
+        Source = "civ_a",
+        Target = "civ_b",
+        Status = InteractionStatus.Queued,
+        Step = InteractionStep.Done,
+        CommandId = Interaction.DeriveCommandId(id),
+        EventId = Interaction.DeriveEventId(id),
+        CreatedAt = expiresAt.AddMinutes(-1),
+        UpdatedAt = expiresAt.AddMinutes(-1),
+        EffectiveExpiresAt = expiresAt,
+    };
 }

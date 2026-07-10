@@ -27,3 +27,7 @@ infra/**/*.json
 # Misc
 .DS_Store
 .deploy-error.tmp
+
+# Test run artifacts
+TestResults/
+**/TestResults/

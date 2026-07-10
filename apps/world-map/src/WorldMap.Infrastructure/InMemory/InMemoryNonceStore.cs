@@ -4,9 +4,9 @@ using WorldMap.Core.Abstractions;
 namespace WorldMap.Infrastructure.InMemory;
 
 /// <summary>
-/// In-memory single-use nonce store for HMAC replay protection. A nonce is accepted once
-/// per <c>keyId</c> within its window; a repeat before expiry is a replay. Expired entries
-/// are pruned opportunistically so the map does not grow unbounded.
+/// Thread-safe in-memory nonce store for HMAC replay protection, scoped by <c>civId + keyId + nonce</c>.
+/// A nonce is accepted once within its window; its expiry is derived from the signed timestamp by the
+/// caller. Two civs may independently use the same <c>keyId</c>+<c>nonce</c> without collision.
 /// </summary>
 public sealed class InMemoryNonceStore : INonceStore
 {
@@ -15,18 +15,16 @@ public sealed class InMemoryNonceStore : INonceStore
     private readonly ConcurrentDictionary<string, DateTimeOffset> _seen = new(StringComparer.Ordinal);
     private readonly Lock _gate = new();
 
-    public Task<bool> TryConsumeAsync(string keyId, string nonce, DateTimeOffset expiresAt, CancellationToken ct)
+    public Task<bool> TryConsumeAsync(string civId, string keyId, string nonce, DateTimeOffset expiresAt, DateTimeOffset now, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
-        var now = DateTimeOffset.UtcNow;
-        var key = $"{keyId}|{nonce}";
+        var key = $"{civId}|{keyId}|{nonce}";
 
         lock (_gate)
         {
-            // Replay only if a still-valid entry exists. An expired entry is treated as fresh.
             if (_seen.TryGetValue(key, out var existingExpiry) && existingExpiry > now)
             {
-                return Task.FromResult(false);
+                return Task.FromResult(false); // Replay within the window.
             }
 
             _seen[key] = expiresAt;

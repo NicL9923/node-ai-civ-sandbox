@@ -42,7 +42,10 @@ public static class CursorCodec
         {
             var json = Encoding.UTF8.GetString(Convert.FromBase64String(s));
             using var doc = JsonDocument.Parse(json);
-            if (doc.RootElement.TryGetProperty("o", out var o) && o.TryGetInt64(out var value) && value >= 0)
+            if (doc.RootElement.TryGetProperty("o", out var o)
+                && o.ValueKind == JsonValueKind.Number
+                && o.TryGetInt64(out var value)
+                && value >= 0)
             {
                 ordinal = value;
                 return true;

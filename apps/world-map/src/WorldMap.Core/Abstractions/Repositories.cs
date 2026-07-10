@@ -3,8 +3,9 @@ using WorldMap.Core.Domain;
 namespace WorldMap.Core.Abstractions;
 
 /// <summary>
-/// Registry of civilizations. The World is the sole writer. Reads back the citizen-safe
-/// projection; writes upsert the full aggregate.
+/// Registry of civilizations. The World is the sole writer. The repository assigns a stable
+/// monotonic <c>Ordinal</c> at first insert (allocate-through-insert), so list pagination never
+/// exposes a cursor position past a civ that has not yet been persisted.
 /// </summary>
 public interface ICivilizationRepository
 {
@@ -12,13 +13,14 @@ public interface ICivilizationRepository
 
     Task<Page<Civilization>> ListAsync(long afterOrdinal, int limit, CancellationToken ct);
 
+    /// <summary>Upserts a civ. On first insert the repository assigns <c>Ordinal</c> atomically.</summary>
     Task UpsertAsync(Civilization civilization, CancellationToken ct);
 
     /// <summary>All civilizations (for the maintenance worker's liveness sweep).</summary>
     Task<IReadOnlyList<Civilization>> ListAllAsync(CancellationToken ct);
 }
 
-/// <summary>Stores the S2S HMAC credential (encrypted secret envelope) per civ.</summary>
+/// <summary>Stores the S2S HMAC credential (civId/keyId/secretRef) per civ. No secret material.</summary>
 public interface ICivCredentialRepository
 {
     Task<CivCredential?> GetAsync(string civId, CancellationToken ct);
@@ -26,29 +28,61 @@ public interface ICivCredentialRepository
     Task UpsertAsync(CivCredential credential, CancellationToken ct);
 }
 
-/// <summary>The interaction ledger. The World is the sole writer.</summary>
+/// <summary>
+/// The interaction ledger. The World is the sole writer. Interactions are persisted in an
+/// <c>accepted</c> state before any downstream effect; the process manager advances them through
+/// idempotent steps. <see cref="UpdateAsync"/> uses optimistic concurrency on <c>Version</c>.
+/// </summary>
 public interface IInteractionRepository
 {
     Task<Interaction?> GetAsync(string interactionId, CancellationToken ct);
 
     Task AddAsync(Interaction interaction, CancellationToken ct);
 
-    Task UpdateAsync(Interaction interaction, CancellationToken ct);
+    /// <summary>
+    /// Optimistic-concurrency update. Returns <c>true</c> on success, <c>false</c> if the stored
+    /// version moved on (the caller should reload and retry).
+    /// </summary>
+    Task<bool> UpdateAsync(Interaction interaction, CancellationToken ct);
 
-    /// <summary>Non-terminal interactions with an <c>expiresAt</c> at or before <paramref name="now"/>.</summary>
+    /// <summary>Non-terminal interactions whose processing has not reached <c>Queued</c> (worker resume).</summary>
+    Task<IReadOnlyList<Interaction>> ListIncompleteAsync(CancellationToken ct);
+
+    /// <summary>Non-terminal interactions with an <c>effectiveExpiresAt</c> at or before <paramref name="now"/>.</summary>
     Task<IReadOnlyList<Interaction>> ListExpirableAsync(DateTimeOffset now, CancellationToken ct);
 }
 
-/// <summary>Per-civ durable command queue that civs pull from and ack.</summary>
+/// <summary>
+/// Per-civ durable command queue. <see cref="EnqueueAsync"/> assigns the per-civ
+/// <c>CommandSequence</c> atomically at insert and is idempotent by the deterministic
+/// <c>CommandId</c>. <see cref="TryAckAsync"/> is a compare-and-set terminal transition.
+/// </summary>
 public interface ICommandRepository
 {
     Task<Command?> GetAsync(string targetCivId, string commandId, CancellationToken ct);
 
-    Task AddAsync(Command command, CancellationToken ct);
+    /// <summary>
+    /// Atomically assigns <c>CommandSequence</c> and inserts. If a command with the same
+    /// <c>CommandId</c> already exists, returns the existing one (idempotent enqueue).
+    /// </summary>
+    Task<Command> EnqueueAsync(Command command, CancellationToken ct);
 
-    Task UpdateAsync(Command command, CancellationToken ct);
+    /// <summary>
+    /// Compare-and-set the terminal ack outcome. Succeeds only if the command is not already acked;
+    /// returns the authoritative (post-transition or pre-existing) command and whether this call won.
+    /// </summary>
+    Task<CommandAckTransition> TryAckAsync(string targetCivId, string commandId, CommandAckStatus status, DateTimeOffset now, CancellationToken ct);
 
-    /// <summary>Non-expired commands for a civ with sequence &gt; <paramref name="afterSequence"/>, ordered ascending.</summary>
+    /// <summary>Marks a command's ack propagation to its interaction as reconciled.</summary>
+    Task MarkAckReconciledAsync(string targetCivId, string commandId, CancellationToken ct);
+
+    /// <summary>Marks an un-acked command expired (compare-and-set; no-op if already acked/expired).</summary>
+    Task MarkExpiredAsync(string targetCivId, string commandId, CancellationToken ct);
+
+    /// <summary>
+    /// Non-expired, un-acked commands for a civ with sequence &gt; <paramref name="afterSequence"/>,
+    /// ordered ascending. Terminal (acked) and expired commands are never returned.
+    /// </summary>
     Task<IReadOnlyList<Command>> PullAsync(string targetCivId, long afterSequence, int limit, CancellationToken ct);
 
     /// <summary>Count of un-acked, non-expired commands queued for a civ.</summary>
@@ -56,25 +90,52 @@ public interface ICommandRepository
 
     /// <summary>Un-acked commands past their <c>expiresAt</c> (for the maintenance worker).</summary>
     Task<IReadOnlyList<Command>> ListExpirableAsync(DateTimeOffset now, CancellationToken ct);
+
+    /// <summary>Acked commands whose interaction reconciliation has not completed (worker repair).</summary>
+    Task<IReadOnlyList<Command>> ListUnreconciledAsync(CancellationToken ct);
 }
 
-/// <summary>The ordered public world-event ledger backing <c>/events</c> and the SSE stream.</summary>
+/// <summary>Result of a compare-and-set command ack transition.</summary>
+public readonly record struct CommandAckTransition(bool Won, Command Command);
+
+/// <summary>
+/// The ordered public world-event ledger backing <c>/events</c> and the SSE stream.
+/// <see cref="AppendAsync"/> assigns the global <c>Worldsequence</c> atomically at insert
+/// (allocate-through-insert) and is idempotent by <c>DedupeKey</c>, so the read cursor never
+/// advances past a sequence whose record is not yet committed.
+/// </summary>
 public interface IWorldEventRepository
 {
-    Task AddAsync(WorldEvent worldEvent, CancellationToken ct);
+    /// <summary>
+    /// Atomically assigns <c>Worldsequence</c> and inserts. If an event with the same
+    /// <c>DedupeKey</c> already exists, returns the existing one with <c>WasDuplicate</c> true
+    /// (idempotent append).
+    /// </summary>
+    Task<WorldEventAppend> AppendAsync(WorldEvent worldEvent, CancellationToken ct);
 
     Task<WorldEvent?> GetByDedupeAsync(string dedupeKey, CancellationToken ct);
 
-    /// <summary>Events with worldsequence &gt; <paramref name="afterSequence"/>, ordered ascending.</summary>
+    /// <summary>Committed events with worldsequence &gt; <paramref name="afterSequence"/>, ascending.</summary>
     Task<Page<WorldEvent>> ListAsync(long afterSequence, int limit, CancellationToken ct);
 }
 
-/// <summary>Public relationship projections. The World is the sole writer.</summary>
+/// <summary>Result of a world-event append: the committed (or pre-existing) event and a dedupe flag.</summary>
+public readonly record struct WorldEventAppend(WorldEvent Event, bool WasDuplicate);
+
+/// <summary>
+/// Public relationship projections. The World is the sole writer. The repository assigns a stable
+/// <c>Ordinal</c> at first insert; <see cref="TryUpsertAsync"/> uses optimistic concurrency on
+/// <c>Version</c> so a concurrent update cannot silently clobber a newer state.
+/// </summary>
 public interface IRelationshipRepository
 {
     Task<Relationship?> GetAsync(string pairKey, CancellationToken ct);
 
     Task<Page<Relationship>> ListAsync(long afterOrdinal, int limit, CancellationToken ct);
 
-    Task UpsertAsync(Relationship relationship, CancellationToken ct);
+    /// <summary>
+    /// Optimistic-concurrency upsert. On first insert assigns <c>Ordinal</c>. Returns <c>false</c>
+    /// if the stored version moved on (caller reloads and retries).
+    /// </summary>
+    Task<bool> TryUpsertAsync(Relationship relationship, CancellationToken ct);
 }

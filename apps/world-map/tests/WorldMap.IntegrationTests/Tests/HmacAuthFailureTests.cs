@@ -130,4 +130,33 @@ public sealed class HmacAuthFailureTests : WorldTestBase
         var problem = await ProblemBody.ReadAsync(response);
         Assert.Equal("civ_id_mismatch", problem.Code);
     }
+
+    [Fact]
+    public async Task Two_civs_sharing_key_id_may_reuse_the_same_nonce_without_false_replay()
+    {
+        // Both civs are provisioned with keyId "key_01"; the nonce store is scoped by
+        // civId+keyId+nonce, so an identical nonce value from two DIFFERENT civs is NOT a replay.
+        var a = await Factory.RegisterCivAsync(Client, "Aurora");
+        var b = await Factory.RegisterCivAsync(Client, "Borealis");
+        Assert.Equal(a.KeyId, b.KeyId);
+
+        var sharedNonce = Guid.NewGuid().ToString("N");
+        var timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+
+        var responseA = await SignedHeartbeatAsync(a, sharedNonce, timestamp);
+        Assert.Equal(HttpStatusCode.OK, responseA.StatusCode);
+
+        var responseB = await SignedHeartbeatAsync(b, sharedNonce, timestamp);
+        Assert.Equal(HttpStatusCode.OK, responseB.StatusCode);
+    }
+
+    private async Task<HttpResponseMessage> SignedHeartbeatAsync(CivContext civ, string nonce, long timestamp)
+    {
+        var path = $"/world/v1/civilizations/{civ.CivId}/heartbeat";
+        var body = Signing.SerializeBody(TestDtos.Heartbeat(civ.CivId, civ.CivId));
+        var request = Signing.BuildSignedRequest(
+            HttpMethod.Post, path, string.Empty, body, civ.CivId, civ.KeyId, civ.Secret,
+            nonce: nonce, timestamp: timestamp);
+        return await Client.SendAsync(request);
+    }
 }

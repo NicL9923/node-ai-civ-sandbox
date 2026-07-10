@@ -1,6 +1,5 @@
 using System.Security.Cryptography;
 using System.Text;
-using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using WorldMap.Core.Abstractions;
@@ -8,30 +7,27 @@ using WorldMap.Core.Common;
 using WorldMap.Core.Configuration;
 using WorldMap.Core.Contracts;
 using WorldMap.Core.Domain;
-using WorldMap.Core.Sequencing;
 
 namespace WorldMap.Core.Application.Impl;
 
 /// <summary>
-/// Civilization onboarding. Consumes an operator-preprovisioned onboarding record
-/// (token -&gt; civId/keyId/secretRef); the World binds the civilization to that fixed
-/// identity and persists only the <c>secretRef</c> — it never mints, stores, or returns
-/// the HMAC secret (the civ receives its secret out-of-band; the runtime resolves it via
-/// <c>ISecretStore</c>). Idempotent by <c>Idempotency-Key</c>: a replay returns the original
-/// result.
+/// Civilization onboarding. Resolves a presented token by HASH to a preprovisioned record, then
+/// runs a resumable, idempotent finalize (reserve token → persist credential ref → persist civ)
+/// under an idempotency claim scoped by <c>register:{tokenHash}:{idempotencyKey}</c>. The token is
+/// not "burned" on a downstream failure — a retry with the same key resumes. The World never mints,
+/// stores, or returns the HMAC secret.
 /// </summary>
 public sealed class OnboardingService(
     ICivilizationRepository civilizations,
     ICivCredentialRepository credentials,
+    IOnboardingRegistry registry,
     IOnboardingTokenStore onboardingTokens,
     ISecretStore secretStore,
-    IIdempotencyStore idempotency,
-    ISequenceAllocator sequence,
+    IdempotencyExecutor idempotency,
     TimeProvider clock,
     IOptions<WorldMapOptions> options,
     ILogger<OnboardingService> logger) : IOnboardingService
 {
-    private const string CivOrdinalStream = "__civ_ordinal";
     private readonly WorldMapOptions _options = options.Value;
 
     public async Task<Result<RegistrationResult>> RegisterAsync(
@@ -45,31 +41,50 @@ public sealed class OnboardingService(
             return validation;
         }
 
-        var scope = $"register::{idempotencyKey}";
-        var replay = await idempotency.GetAsync(scope, ct);
-        if (replay is not null)
-        {
-            var original = JsonSerializer.Deserialize<RegistrationResponseDto>(replay.ResponseJson, WorldMapJson.Options)!;
-            return new RegistrationResult(original with { Duplicate = true }, replay.Location ?? BuildLocation(original.CivId));
-        }
-
-        var record = FindOnboardingRecord(request.OnboardingToken!);
+        var tokenHash = Sha256Hex(request.OnboardingToken!);
+        var record = registry.Resolve(tokenHash);
         if (record is null)
         {
-            logger.LogInformation("Registration rejected: onboarding token did not match any provisioned record.");
+            logger.LogInformation("Registration rejected: onboarding token did not resolve to a provisioned record.");
             return ErrorResult.Create(ErrorCode.RegistrationConflict, "The onboarding token is invalid or has already been used.");
         }
 
-        // Atomically consume the token so it binds at most one civilization.
-        if (!await onboardingTokens.TryConsumeAsync(record.Token, record.CivId, ct))
+        var scope = $"register:{tokenHash}:{idempotencyKey}";
+        var fingerprint = RequestFingerprint.Of(request);
+        var ttl = TimeSpan.FromSeconds(_options.Interaction.IdempotencyTtlSeconds);
+
+        var outcome = await idempotency.ExecuteAsync<RegistrationResponseDto>(
+            scope,
+            fingerprint,
+            ttl,
+            innerCt => FinalizeAsync(record, request, innerCt),
+            body => body with { Duplicate = true },
+            ct);
+
+        if (!outcome.IsSuccess)
         {
-            logger.LogInformation("Registration rejected: onboarding token already consumed for {CivId}.", record.CivId);
+            return outcome.Error;
+        }
+
+        return new RegistrationResult(outcome.Value.Body, outcome.Value.Location ?? BuildLocation(record.CivId));
+    }
+
+    private async Task<Result<OperationOutcome<RegistrationResponseDto>>> FinalizeAsync(
+        ResolvedOnboardingRecord record,
+        RegistrationRequestDto request,
+        CancellationToken ct)
+    {
+        // Reserve the token by hash. Idempotent for the same civ, so a resumed finalize re-reserves
+        // without burning the token; a reservation by a different civ is impossible (fixed mapping).
+        if (!await onboardingTokens.TryReserveAsync(record.TokenHash, record.CivId, ct))
+        {
+            logger.LogInformation("Registration rejected: token already reserved for a different civ.");
             return ErrorResult.Create(ErrorCode.RegistrationConflict, "The onboarding token is invalid or has already been used.");
         }
 
         var now = clock.GetUtcNow();
 
-        // Persist only the credential reference — no secret material is stored here.
+        // Persist only the credential reference — never secret material.
         await credentials.UpsertAsync(new CivCredential
         {
             CivId = record.CivId,
@@ -81,12 +96,10 @@ public sealed class OnboardingService(
 
         if (secretStore.GetSecret(record.SecretRef) is null)
         {
-            // Not fatal: the civ simply cannot authenticate until the secret is provisioned.
-            logger.LogWarning("Onboarding record for {CivId} references secretRef '{SecretRef}' which does not resolve yet.",
-                record.CivId, record.SecretRef);
+            logger.LogWarning("Onboarding record for {CivId} references a secretRef that does not resolve yet.", record.CivId);
         }
 
-        var ordinal = await sequence.NextCommandSequenceAsync(CivOrdinalStream, ct);
+        var existing = await civilizations.GetAsync(record.CivId, ct);
         await civilizations.UpsertAsync(new Civilization
         {
             CivId = record.CivId,
@@ -94,10 +107,10 @@ public sealed class OnboardingService(
             DisplayName = request.DisplayName!,
             ProtocolVersion = _options.ProtocolVersion,
             Capabilities = request.Capabilities,
-            RegisteredAt = now,
-            CreatedAt = now,
+            RegisteredAt = existing?.RegisteredAt ?? now,
+            CreatedAt = existing?.CreatedAt ?? now,
             UpdatedAt = now,
-            Ordinal = ordinal,
+            Ordinal = existing?.Ordinal ?? 0,
         }, ct);
 
         var response = new RegistrationResponseDto
@@ -107,46 +120,15 @@ public sealed class OnboardingService(
             ProtocolVersion = _options.ProtocolVersion,
             WorldBaseUrl = _options.WorldBaseUrl,
             CommandsCursor = null,
-            RegisteredAt = now,
+            RegisteredAt = existing?.RegisteredAt ?? now,
             Duplicate = false,
         };
-        var location = BuildLocation(record.CivId);
-
-        await idempotency.PutIfAbsentAsync(new IdempotencyRecord
-        {
-            Scope = scope,
-            ResponseJson = JsonSerializer.Serialize(response, WorldMapJson.Options),
-            StatusCode = 201,
-            Location = location,
-            CreatedAt = now,
-            ExpiresAt = now.AddSeconds(_options.Interaction.IdempotencyTtlSeconds),
-        }, ct);
 
         logger.LogInformation("Civilization {CivId} registered via provisioned onboarding record.", record.CivId);
-        return new RegistrationResult(response, location);
+        return new OperationOutcome<RegistrationResponseDto>(response, 201, BuildLocation(record.CivId));
     }
 
-    private OnboardingRecord? FindOnboardingRecord(string presentedToken)
-    {
-        // Constant-time hash comparison so registration does not leak token contents via timing.
-        var presentedHash = Sha256(presentedToken);
-        foreach (var record in _options.Onboarding.Records)
-        {
-            if (string.IsNullOrEmpty(record.Token) || string.IsNullOrEmpty(record.CivId) || string.IsNullOrEmpty(record.SecretRef))
-            {
-                continue;
-            }
-
-            if (CryptographicOperations.FixedTimeEquals(presentedHash, Sha256(record.Token)))
-            {
-                return record;
-            }
-        }
-
-        return null;
-    }
-
-    private static byte[] Sha256(string value) => SHA256.HashData(Encoding.UTF8.GetBytes(value));
+    private static string Sha256Hex(string value) => Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
 
     private static ErrorInfo? Validate(RegistrationRequestDto request)
     {

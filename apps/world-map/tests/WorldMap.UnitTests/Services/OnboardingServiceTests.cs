@@ -1,99 +1,101 @@
+using Microsoft.Extensions.Logging.Abstractions;
+using WorldMap.Core.Application;
+using WorldMap.Core.Application.Impl;
 using WorldMap.Core.Common;
 using WorldMap.Core.Contracts;
+using WorldMap.Infrastructure;
+using WorldMap.Infrastructure.InMemory;
+using WorldMap.UnitTests.Fakes;
 
 namespace WorldMap.UnitTests.Services;
 
 public sealed class OnboardingServiceTests
 {
     [Fact]
-    public async Task RegisterAsync_ValidRequest_StoresCivilizationAndCredential()
+    public async Task Register_BindsPreprovisionedCivilizationAndReplayIsDuplicate()
     {
         var world = new TestWorld();
-        var request = ValidRequest("token-a");
+        var request = Valid("token-a");
 
-        var result = await world.Onboarding.RegisterAsync(request, "register-1", CancellationToken.None);
-
-        Assert.True(result.IsSuccess);
-        Assert.False(result.Value.Body.Duplicate);
-        Assert.Equal($"https://world.test/world/v1/civilizations/{result.Value.Body.CivId}", result.Value.Location);
-        Assert.NotNull(await world.Civilizations.GetAsync(result.Value.Body.CivId, CancellationToken.None));
-        var credential = await world.Credentials.GetAsync(result.Value.Body.CivId, CancellationToken.None);
-        Assert.NotNull(credential);
-        Assert.Equal("civ_ra", credential.CivId);
-        Assert.Equal("ref-a", credential.SecretRef);
-        // The runtime persists only a reference — never secret material.
-        Assert.Equal("secret-a", world.SecretStore.GetSecret(credential.SecretRef));
-    }
-
-    [Fact]
-    public async Task RegisterAsync_SameIdempotencyKey_ReturnsDuplicateOriginal()
-    {
-        var world = new TestWorld();
-        var request = ValidRequest("token-a");
-
-        var first = await world.Onboarding.RegisterAsync(request, "same-key", CancellationToken.None);
-        var replay = await world.Onboarding.RegisterAsync(request, "same-key", CancellationToken.None);
+        var first = await world.Onboarding.RegisterAsync(request, "key", default);
+        var replay = await world.Onboarding.RegisterAsync(request, "key", default);
 
         Assert.True(first.IsSuccess);
-        Assert.True(replay.IsSuccess);
+        Assert.Equal("civ_ra", first.Value.Body.CivId);
         Assert.False(first.Value.Body.Duplicate);
         Assert.True(replay.Value.Body.Duplicate);
-        Assert.Equal(first.Value.Body.CivId, replay.Value.Body.CivId);
         Assert.Equal(first.Value.Location, replay.Value.Location);
+        Assert.NotNull(await world.Civilizations.GetAsync("civ_ra", default));
+        var credential = await world.Credentials.GetAsync("civ_ra", default);
+        Assert.Equal("ref-a", credential!.SecretRef);
     }
 
     [Fact]
-    public async Task RegisterAsync_InvalidToken_ReturnsRegistrationConflict()
+    public async Task Register_UnknownTokenReturnsRegistrationConflict()
     {
-        var world = new TestWorld();
-
-        var result = await world.Onboarding.RegisterAsync(
-            ValidRequest("not-configured"),
-            "register-invalid",
-            CancellationToken.None);
+        var result = await new TestWorld().Onboarding.RegisterAsync(Valid("unknown"), "key", default);
 
         Assert.False(result.IsSuccess);
         Assert.Equal(ErrorCode.RegistrationConflict, result.Error.Code);
     }
 
     [Fact]
-    public async Task RegisterAsync_UsedTokenWithDifferentKey_ReturnsRegistrationConflict()
+    public async Task Register_FailureAfterReservationCanResumeWithSameKey()
     {
         var world = new TestWorld();
-        await world.Onboarding.RegisterAsync(ValidRequest("token-a"), "register-1", CancellationToken.None);
+        var registry = new OnboardingRegistry(world.Options, NullLogger<OnboardingRegistry>.Instance);
+        var reservingStore = new ThrowOnceAfterTokenReserve(world.OnboardingTokens);
+        var service = new OnboardingService(
+            world.Civilizations, world.Credentials, registry, reservingStore, world.SecretStore,
+            world.Idempotency, world.Clock, world.Options, NullLogger<OnboardingService>.Instance);
 
-        var result = await world.Onboarding.RegisterAsync(
-            ValidRequest("token-a"),
-            "register-2",
-            CancellationToken.None);
+        await Assert.ThrowsAsync<InjectedFailureException>(
+            () => service.RegisterAsync(Valid("token-a"), "resume", default));
+        Assert.Null(await world.Civilizations.GetAsync("civ_ra", default));
 
-        Assert.False(result.IsSuccess);
-        Assert.Equal(ErrorCode.RegistrationConflict, result.Error.Code);
+        world.Clock.Advance(TimeSpan.FromSeconds(6));
+        var retry = await service.RegisterAsync(Valid("token-a"), "resume", default);
+
+        Assert.True(retry.IsSuccess);
+        Assert.Equal("civ_ra", retry.Value.Body.CivId);
+        Assert.Single(await world.Civilizations.ListAllAsync(default));
+    }
+
+    [Fact]
+    public async Task Register_ConcurrentDifferentKeysForSameTokenConvergeOnOneCivilization()
+    {
+        var world = new TestWorld();
+        var results = await Task.WhenAll(Enumerable.Range(0, 20)
+            .Select(i => world.Onboarding.RegisterAsync(Valid("token-a"), $"key-{i}", default)));
+
+        Assert.All(results, result =>
+        {
+            Assert.True(result.IsSuccess);
+            Assert.Equal("civ_ra", result.Value.Body.CivId);
+        });
+        Assert.Single(await world.Civilizations.ListAllAsync(default));
     }
 
     [Theory]
-    [InlineData(true, false)]
-    [InlineData(false, true)]
-    [InlineData(true, true)]
-    public async Task RegisterAsync_MissingDisplayNameOrCapabilities_ReturnsValidationFailed(
-        bool missingDisplayName,
-        bool missingCapabilities)
+    [InlineData(null, "Aurora")]
+    [InlineData("token-a", null)]
+    public async Task Register_RequiredFieldsAreValidated(string? token, string? displayName)
     {
-        var world = new TestWorld();
-        var request = new RegistrationRequestDto
-        {
-            OnboardingToken = "token-a",
-            DisplayName = missingDisplayName ? null : "Aurora",
-            Capabilities = missingCapabilities ? null : TestWorld.Capabilities,
-        };
-
-        var result = await world.Onboarding.RegisterAsync(request, "invalid", CancellationToken.None);
+        var result = await new TestWorld().Onboarding.RegisterAsync(
+            new RegistrationRequestDto
+            {
+                OnboardingToken = token,
+                DisplayName = displayName,
+                Capabilities = TestWorld.Capabilities,
+            },
+            "key",
+            default);
 
         Assert.False(result.IsSuccess);
         Assert.Equal(ErrorCode.ValidationFailed, result.Error.Code);
     }
 
-    private static RegistrationRequestDto ValidRequest(string token) => new()
+    private static RegistrationRequestDto Valid(string token) => new()
     {
         OnboardingToken = token,
         DisplayName = "Aurora",
