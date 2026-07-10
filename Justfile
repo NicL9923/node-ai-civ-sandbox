@@ -58,8 +58,25 @@ contracts-test:
 contracts-build-csharp:
     dotnet build packages/federation-contracts/csharp/FederationContracts.csproj
 
-# --- Placeholder for the future world-map workstream (do not implement here) ---
+# --- World-map runtime (P2: .NET 10 ASP.NET Core World federation service) ---
 
-# P2: build the world-map app (web + service).
+# Restore the world-map .NET projects.
+world-restore:
+    dotnet restore AiCivilization.slnx
+
+# Build the world-map API (proves the runtime compiles).
+world-build:
+    dotnet build apps/world-map/src/WorldMap.Api/WorldMap.Api.csproj -c Debug
+
+# Run the world-map unit + integration test suites.
+world-test:
+    dotnet test apps/world-map/tests/WorldMap.UnitTests/WorldMap.UnitTests.csproj -c Debug
+    dotnet test apps/world-map/tests/WorldMap.IntegrationTests/WorldMap.IntegrationTests.csproj -c Debug
+
+# Run the world-map API locally (in-memory storage; cwd = apps/world-map/src/WorldMap.Api).
+world-run:
+    dotnet run --project apps/world-map/src/WorldMap.Api/WorldMap.Api.csproj
+
+# Build the whole .NET solution (contracts C# + world-map).
 world:
-    @echo "[placeholder] apps/world-map build lands in P2"
+    dotnet build AiCivilization.slnx -c Debug

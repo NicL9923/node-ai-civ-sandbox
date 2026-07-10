@@ -1,3 +1,8 @@
 <Solution>
   <Project Path="packages/federation-contracts/csharp/FederationContracts.csproj" />
+  <Project Path="apps/world-map/src/WorldMap.Core/WorldMap.Core.csproj" />
+  <Project Path="apps/world-map/src/WorldMap.Infrastructure/WorldMap.Infrastructure.csproj" />
+  <Project Path="apps/world-map/src/WorldMap.Api/WorldMap.Api.csproj" />
+  <Project Path="apps/world-map/tests/WorldMap.UnitTests/WorldMap.UnitTests.csproj" />
+  <Project Path="apps/world-map/tests/WorldMap.IntegrationTests/WorldMap.IntegrationTests.csproj" />
 </Solution>

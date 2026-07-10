@@ -26,6 +26,7 @@
     "check:contracts": "npm run check -w @ai-civ/federation-contracts",
     "typecheck:contracts": "npm run typecheck -w @ai-civ/federation-contracts",
     "test:contracts": "npm run test -w @ai-civ/federation-contracts",
-    "build:world": "echo \"[placeholder] apps/world-map build lands in P2\""
+    "build:world": "dotnet build apps/world-map/src/WorldMap.Api/WorldMap.Api.csproj -c Release",
+    "test:world": "dotnet test apps/world-map/tests/WorldMap.UnitTests/WorldMap.UnitTests.csproj && dotnet test apps/world-map/tests/WorldMap.IntegrationTests/WorldMap.IntegrationTests.csproj"
   }
 }

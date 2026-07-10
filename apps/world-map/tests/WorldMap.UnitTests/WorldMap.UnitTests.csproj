@@ -1,0 +1,33 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="coverlet.collector" Version="6.0.4" />
+    <PackageReference Include="Microsoft.Extensions.TimeProvider.Testing" Version="10.7.0" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\WorldMap.Core\WorldMap.Core.csproj" />
+    <ProjectReference Include="..\..\src\WorldMap.Infrastructure\WorldMap.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\src\WorldMap.Api\WorldMap.Api.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Golden HMAC signing vectors shared with the P1 contract test suite. -->
+    <Content Include="..\..\..\..\packages\federation-contracts\examples\signing.vector.json" Link="Fixtures\signing.vector.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>
