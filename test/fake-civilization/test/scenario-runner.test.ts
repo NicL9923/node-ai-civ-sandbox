@@ -1,4 +1,5 @@
-import { readdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { components } from "@ai-civ/federation-contracts";
@@ -158,7 +159,8 @@ describe("scenario fixtures", () => {
   });
 
   it("rejects operations outside the fixed DSL during loading", async () => {
-    const path = join(process.cwd(), "test", "fake-civilization", ".invalid-scenario.json");
+    const directory = await mkdtemp(join(tmpdir(), "fake-civ-scenario-"));
+    const path = join(directory, "invalid.json");
     await writeFile(path, JSON.stringify({
       schemaVersion: "1",
       name: "invalid",
@@ -168,7 +170,7 @@ describe("scenario fixtures", () => {
     try {
       await expect(loadScenario(path)).rejects.toThrow("Unsupported scenario operation");
     } finally {
-      await rm(path, { force: true });
+      await rm(directory, { force: true, recursive: true });
     }
   });
 });
