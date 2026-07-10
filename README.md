@@ -13,7 +13,7 @@ as placeholders and land in later phases.
 │   ├── civilization/          # The AI civilization sandbox (Node/TS) — the only runnable app
 │   └── world-map/             # [placeholder] P2 world-map app (web + service)
 ├── packages/
-│   └── federation-contracts/  # [placeholder] P1 cross-civilization contracts
+│   └── federation-contracts/  # P1 World<->Civilization protocol (OpenAPI 3.1 + generated TS/C#)
 ├── infra/
 │   ├── civilization/main.bicep  # Civilization Azure deployment (App Service + Cosmos + Foundry)
 │   └── README.md
@@ -32,7 +32,8 @@ as placeholders and land in later phases.
 
 - Node.js 22 (`>=22 <25`) and npm
 - Optional: [`just`](https://github.com/casey/just) for the task runner
-- Optional: .NET 10 SDK (only needed once P1/P2 .NET projects exist)
+- .NET 10 SDK — required to generate/build the federation contracts' C# artifacts (P1); still
+  optional for the civilization app
 
 ## Local commands
 
@@ -52,6 +53,25 @@ npm ci
 
 `build` / `test` / `typecheck` delegate to the `apps/civilization` workspace via
 `-w apps/civilization`.
+
+## Federation contracts (P1)
+
+`packages/federation-contracts` is the versioned source of truth for the World ⇄ Civilization
+protocol: hand-authored OpenAPI 3.1 + modular JSON Schema, with deterministic, checked-in TypeScript
+(openapi-typescript) and C# (Kiota) artifacts. See its
+[README](packages/federation-contracts/README.md) and the protocol semantics in
+[`docs/protocol.md`](docs/protocol.md).
+
+| Task | npm (root) | just |
+|---|---|---|
+| Lint OpenAPI | `npm run lint:contracts` | `just contracts-lint` |
+| Regenerate artifacts | `npm run generate:contracts` | `just contracts-generate` |
+| Fail on drift | `npm run check:contracts` | `just contracts-check` |
+| Contract tests | `npm run test:contracts` | `just contracts-test` |
+| Full contract gate | `npm run build:contracts` | `just contracts` |
+
+Regenerating requires the pinned Kiota tool: `dotnet tool restore` (manifest in
+`.config/dotnet-tools.json`).
 
 ### Running the civilization app directly
 
@@ -77,6 +97,11 @@ run by CI in this repo.
 
 ## CI
 
-`.github/workflows/ci.yml` builds and tests the civilization app on Node 22 (`npm ci` →
-`npm run build` → `npm test`) for changes under `apps/civilization/**`, `packages/**`, or the root
-workspace files. No deployment workflow is included.
+`.github/workflows/ci.yml` runs two jobs on changes under `apps/civilization/**`, `packages/**`, or
+the root workspace/.NET files:
+
+- **civilization** — `npm ci` → `npm run build` → `npm test` on Node 22 (Ubuntu).
+- **contracts** — on Ubuntu **and** Windows: `npm ci`, `dotnet tool restore`, OpenAPI lint, contract
+  **drift check** (regenerate + diff), typecheck, tests, and a C# build.
+
+No deployment workflow is included.

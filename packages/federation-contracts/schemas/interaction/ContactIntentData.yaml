@@ -1,0 +1,13 @@
+type: object
+title: ContactIntentData
+description: Typed payload for a `contact` interaction — an initial diplomatic hail.
+required:
+  - greeting
+properties:
+  greeting:
+    type: string
+    maxLength: 2000
+    description: The opening message from the initiating civilization.
+  purpose:
+    type: string
+    description: Optional stated purpose of contact (open string).

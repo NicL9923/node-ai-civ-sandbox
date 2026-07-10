@@ -1,0 +1,60 @@
+type: object
+title: ProblemDetails
+description: >-
+  RFC 7807 problem details, extended with a stable machine-readable `code` and a
+  `retryable` hint. Returned for every non-2xx response.
+additionalProperties: true
+required:
+  - type
+  - title
+  - status
+  - code
+properties:
+  type:
+    type: string
+    format: uri-reference
+    default: "about:blank"
+    description: A URI reference identifying the problem type.
+  title:
+    type: string
+    description: Short, human-readable summary of the problem type.
+  status:
+    type: integer
+    minimum: 100
+    maximum: 599
+    description: The HTTP status code for this occurrence.
+  detail:
+    type: string
+    description: Human-readable explanation specific to this occurrence.
+  instance:
+    type: string
+    format: uri-reference
+    description: A URI reference identifying the specific occurrence.
+  code:
+    type: string
+    description: >-
+      Stable, machine-readable error code (open set). Examples:
+      `registration_conflict`, `invalid_signature`, `civ_not_found`,
+      `idempotency_conflict`, `rate_limited`, `validation_failed`.
+    examples:
+      - "validation_failed"
+  retryable:
+    type: boolean
+    description: >-
+      Whether retrying the same request (respecting backoff) may succeed. False
+      for deterministic client errors; true for transient/server conditions.
+  traceId:
+    type: string
+    description: Correlates this response with server-side traces (W3C trace-id).
+  errors:
+    type: array
+    description: Optional field-level validation errors.
+    items:
+      type: object
+      additionalProperties: true
+      properties:
+        pointer:
+          type: string
+          description: JSON Pointer to the offending field.
+        detail:
+          type: string

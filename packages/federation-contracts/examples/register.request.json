@@ -1,0 +1,12 @@
+{
+  "onboardingToken": "onb_live_9f3a2b1c",
+  "displayName": "Republic of Aurora",
+  "capabilities": {
+    "protocolVersion": "1.0.0",
+    "supportedInteractionKinds": ["contact", "message"],
+    "maxEventBatchSize": 200,
+    "features": ["public-events"]
+  },
+  "publicKey": "MCowBQYDK2VwAyEA...",
+  "contact": "ops@aurora.example"
+}

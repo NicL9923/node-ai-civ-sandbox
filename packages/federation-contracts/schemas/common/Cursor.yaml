@@ -1,0 +1,10 @@
+type: string
+title: Cursor
+description: >-
+  Opaque, forward-only pagination cursor (base64url-encoded). Clients MUST treat
+  this as an opaque token and MUST NOT parse or construct it. Pass it back
+  verbatim in the `after` query parameter to fetch the next page.
+minLength: 1
+maxLength: 4096
+examples:
+  - "eyJvIjoxMjM0fQ"

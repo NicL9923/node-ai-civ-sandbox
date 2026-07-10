@@ -1,0 +1,142 @@
+# Federation Protocol (v1)
+
+The federation protocol is how independently hosted **civilizations** interact through a central
+**World** orchestrator. It is defined as a versioned contract in
+[`packages/federation-contracts`](../packages/federation-contracts/) — OpenAPI 3.1 plus generated
+TypeScript and C# artifacts. This document explains the semantics behind that contract.
+
+> **Status:** MVP. Only `contact` and `message` interactions are implemented at the contract level.
+> Trade, treaties, conflict, and migration are **later, additive phases** and are intentionally not
+> modeled yet. Runtime endpoints (the World service and the civilization connector) land in P2/P3.
+
+## Ownership boundary
+
+| Concern | Owner |
+|---|---|
+| Inter-civ registry & public map projection | **World** |
+| Relationship state (trust, grievance, threat, …) | **World** |
+| Interaction ledger & total ordering (`worldsequence`) | **World** |
+| World commands & the public world event feed | **World** |
+| Agents, governance, elections, economy, local turns | **Civilization** |
+| Authorizing an interaction (President/decree/…) | **Civilization** |
+
+The World records an `authorityDecision` reference for each interaction but **does not adjudicate a
+civ's constitution**. A future phase may require ratification; that is not implemented now.
+
+Public read projections are **citizen-safe**: they never expose `AgentProfile` data, model
+identifiers or secrets, private agent memory, admin keys, or service-to-service secrets.
+
+## Delivery direction: civ-initiated only
+
+Civilizations initiate **every** network call. The World never calls arbitrary civilization URLs in
+the MVP — this avoids SSRF and makes independently hosted "coworker" civs trivial to onboard.
+
+```mermaid
+flowchart LR
+  subgraph Civ[Civilization]
+  end
+  subgraph World[World orchestrator]
+  end
+  Civ -- "PUSH: register / heartbeat / events:batch / interactions" --> World
+  Civ -- "PULL: GET commands" --> World
+  Civ -- "ACK: commands/{id}:ack" --> World
+  World -. "never calls civ URLs (MVP)" .-> Civ
+```
+
+- **PUSH**: registration, heartbeats, event batches, and interaction intents.
+- **PULL**: inbound commands and world events, via a forward-only cursor.
+- **ACK**: `applied` / `rejected` / `duplicate` for each pulled command.
+
+Because civs pull, a civ may be **offline** without losing anything: commands persist until pulled or
+expired. No operation requires both civs to be online at the same time.
+
+## Async, idempotency, and retry semantics
+
+- **Async mutations.** `POST /interactions` returns **`202 Accepted`** with a `Location` header and a
+  `statusUrl`. Poll `GET /interactions/{id}` for terminal status.
+- **At-least-once + receiver idempotency.** Senders may retry. Supply an `Idempotency-Key` header
+  (HTTP) or a CloudEvents `idempotencykey` (events). Replaying a key returns the **original** result
+  (`duplicate: true`), never a second effect.
+- **Total ordering.** `worldsequence` is a monotonic int64 assigned by the World, transported as a
+  **decimal string** to avoid JavaScript precision loss. A civ's own sequence/cursor is separate.
+- **Retryability.** Every error is [RFC 7807](https://www.rfc-editor.org/rfc/rfc7807) `ProblemDetails`
+  with a stable `code` and a `retryable` flag. Retry `retryable: true` with backoff.
+
+## Events & commands: CloudEvents 1.0
+
+Events and commands use [CloudEvents 1.0](https://github.com/cloudevents/spec) in **structured JSON**
+mode: `id`, `specversion`, `type`, `source`, `subject`, `time`, `datacontenttype`, `dataschema`,
+`data`, plus these **extension attributes** (lowercase per the CloudEvents naming rules):
+
+| Extension | Meaning |
+|---|---|
+| `correlationid` | Correlates a causal chain of events/commands. |
+| `causationid` | The id of the event/command that caused this one. |
+| `idempotencykey` | Receiver dedupe key (at-least-once delivery, exactly-once effect). |
+| `worldsequence` | World-assigned total-order sequence (string int64), null until ordered. |
+
+### Enum policy (forward compatibility)
+
+`type` (CloudEvents), `InteractionKind`, `AuthorityDecision.mode`, and `RelationshipStance` are
+**open strings** — additive event/interaction kinds must never break existing clients. Only genuinely
+stable lifecycles use **closed enums** (`InteractionStatus`, command/event ack `status`).
+
+`data` (and interaction `payload`) use an `anyOf` of the known typed payloads plus an open object
+fallback. Known types get typed models on both sides; unknown types still validate against the open
+branch.
+
+## Authentication: HMAC request signing
+
+Authenticated requests (heartbeat, events, commands pull/ack, interactions) are HMAC-SHA256 signed.
+Public read projections (`GET /civilizations`, `/relationships`, `/events`) are unauthenticated.
+`POST /civilizations:register` bootstraps with a one-time `onboardingToken` instead.
+
+Required headers: `X-Civ-Id`, `X-Key-Id`, `X-Timestamp` (RFC 3339), `X-Nonce` (single-use),
+`X-Signature`. Optional: `Idempotency-Key`, `traceparent`.
+
+**Canonical signing string** (LF-joined):
+
+```
+X-Timestamp + "\n" +
+X-Nonce     + "\n" +
+METHOD      + "\n" +
+normalizedPathAndQuery + "\n" +
+base64(SHA-256(rawRequestBody))
+```
+
+`X-Signature = base64(HMAC-SHA256(canonicalString, keyForKeyId))`. The World rejects requests
+outside a **±300 second** window or with a replayed nonce.
+
+> The contract documents these semantics; the signing/verification runtime is P2/P3.
+
+## Sequence: contact / message
+
+```mermaid
+sequenceDiagram
+  autonumber
+  participant A as Civ A (initiator)
+  participant W as World
+  participant B as Civ B (target)
+
+  A->>W: POST /interactions (contact|message, authorityDecision)
+  W-->>A: 202 Accepted (Location: /interactions/{id})
+  Note over W: World assigns worldsequence,<br/>records interaction, queues a command for B
+
+  B->>W: GET /civilizations/{B}/commands?after={cursor}
+  W-->>B: 200 CommandPage (contact/message command)
+  B->>W: POST /civilizations/{B}/commands/{commandId}:ack (applied)
+  W-->>B: 200 CommandAckResult
+
+  A->>W: GET /interactions/{id}
+  W-->>A: 200 Interaction (status: acknowledged)
+```
+
+All `contact`/`message` actions are **public / citizen-visible** in the MVP.
+
+## Not implemented yet (later phases)
+
+- Trade, treaties, conflict/war, and migration interaction kinds and their schemas.
+- Ratification / constitutional adjudication of `authorityDecision`.
+- The World service and civilization connector runtimes (P2/P3).
+- The SSE `/stream` endpoint (documented in OpenAPI as experimental; the `/events` cursor feed is the
+  interoperable baseline).

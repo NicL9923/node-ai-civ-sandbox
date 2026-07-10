@@ -1,2 +1,3 @@
 <Solution>
+  <Project Path="packages/federation-contracts/csharp/FederationContracts.csproj" />
 </Solution>

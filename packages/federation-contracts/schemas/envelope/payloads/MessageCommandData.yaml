@@ -1,0 +1,25 @@
+type: object
+title: MessageCommandData
+description: >-
+  `data` payload for a world command of type `world.civilization.message.v1`,
+  delivering a public message from one civ to another.
+required:
+  - interactionId
+  - fromCiv
+  - body
+properties:
+  interactionId:
+    type: string
+  fromCiv:
+    type: string
+  fromDisplayName:
+    type: string
+  subject:
+    type: string
+  body:
+    type: string
+  inReplyTo:
+    description: Optional interactionId this message replies to.
+    oneOf:
+      - type: string
+      - type: "null"

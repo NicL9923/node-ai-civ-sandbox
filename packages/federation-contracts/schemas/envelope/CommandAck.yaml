@@ -1,0 +1,26 @@
+type: object
+title: CommandAck
+description: >-
+  A civ's acknowledgment that it has processed a pulled command. Idempotent:
+  re-acking the same command returns the original result with `duplicate` true.
+required:
+  - status
+properties:
+  status:
+    type: string
+    description: Terminal outcome of applying the command.
+    enum:
+      - applied
+      - rejected
+      - duplicate
+  detail:
+    type: string
+    description: Optional human-readable note about the outcome.
+  problem:
+    description: Populated when `status` is `rejected`.
+    oneOf:
+      - $ref: ../common/ProblemDetails.yaml
+      - type: "null"
+  appliedAt:
+    type: string
+    format: date-time

@@ -1,0 +1,43 @@
+type: object
+title: InteractionRequest
+description: >-
+  A President-authorized intent to `contact` or `message` another civilization.
+  Submitted by the source civ; the World queues it as a command for the target
+  to pull. Idempotent via the `Idempotency-Key` header (and optional
+  `idempotencyKey` field). All contact/message actions are public in MVP.
+required:
+  - kind
+  - source
+  - target
+  - authorityDecision
+properties:
+  kind:
+    $ref: ./InteractionKind.yaml
+  source:
+    type: string
+    description: Source civ id. MUST match the authenticated `X-Civ-Id`.
+  target:
+    type: string
+    description: Target civ id.
+  authorityDecision:
+    $ref: ./AuthorityDecision.yaml
+  publicNarrative:
+    type: string
+    description: Citizen-visible narrative describing the action.
+  payload:
+    description: >-
+      Kind-specific payload. For `contact` use ContactIntentData; for `message`
+      use MessageIntentData. The open `anyOf` branch keeps additive kinds from
+      breaking existing clients.
+    anyOf:
+      - $ref: ./ContactIntentData.yaml
+      - $ref: ./MessageIntentData.yaml
+      - type: object
+        additionalProperties: true
+  idempotencyKey:
+    type: string
+    description: Optional client idempotency key (mirrors the Idempotency-Key header).
+  expiresAt:
+    type: string
+    format: date-time
+    description: Optional expiry; the intent is abandoned if undelivered by then.

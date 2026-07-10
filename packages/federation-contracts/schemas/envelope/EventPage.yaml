@@ -1,0 +1,15 @@
+type: object
+title: EventPage
+description: A cursor-paginated page of public world events.
+required:
+  - items
+properties:
+  items:
+    type: array
+    items:
+      $ref: ./CloudEvent.yaml
+  nextCursor:
+    description: Cursor to pass as `after` for the next page, or null when caught up.
+    oneOf:
+      - $ref: ../common/Cursor.yaml
+      - type: "null"

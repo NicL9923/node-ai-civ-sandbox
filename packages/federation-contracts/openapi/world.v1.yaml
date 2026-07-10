@@ -1,0 +1,575 @@
+openapi: 3.1.0
+info:
+  title: World Federation API
+  version: 1.0.0
+  summary: World <-> Civilization federation protocol (v1).
+  description: |
+    The **World** is an orchestrator that owns the inter-civilization registry, public
+    map projection, relationship state, the interaction ledger, world commands, and world
+    events. **Civilizations** own their agents, governance, and local state.
+
+    ## Delivery direction (civ-initiated only)
+    Civilizations initiate all network calls. Civs **push** registration, heartbeats, events,
+    and interaction intents to the World, and **pull** commands from the World, then **ack**
+    them. The World never calls arbitrary civilization URLs in the MVP — this avoids SSRF and
+    lets independently hosted civs onboard easily.
+
+    ## Semantics
+    - **Async mutations** (interactions) return `202 Accepted` with a `Location`/status link.
+    - **At-least-once** delivery with **receiver idempotency**: replaying an `Idempotency-Key`
+      (or CloudEvents `idempotencykey`) returns the original result, never a duplicate.
+    - **`worldsequence`** is a World-assigned int64 (string-encoded) total order for inter-civ
+      events. A civ's own sequence/cursor is separate.
+    - Civs may be offline; commands persist until pulled or expired. No operation requires both
+      civs online simultaneously.
+
+    ## MVP scope
+    Interactions are limited to `contact` and `message`. Trade, treaties, conflict, and
+    migration are later, additive protocol work and are intentionally not modeled here.
+
+    ## Auth
+    Authenticated requests are HMAC-SHA256 signed (see `docs/protocol.md`). See the `civHmac`
+    security scheme for the required headers and canonical signing string.
+  license:
+    name: MIT
+    identifier: MIT
+
+servers:
+  - url: https://world.example.com/world/v1
+    description: World API v1 base URL (path prefix /world/v1).
+
+tags:
+  - name: civilizations
+    description: Onboarding, liveness, and public map projections.
+  - name: commands
+    description: World-originated commands that civs pull and ack.
+  - name: events
+    description: Civ-originated event ingestion and the public world event feed.
+  - name: interactions
+    description: President-authorized inter-civ contact/message intents.
+  - name: relationships
+    description: Public relationship projections.
+
+security:
+  - civHmac: []
+
+paths:
+  /civilizations:register:
+    post:
+      tags: [civilizations]
+      operationId: registerCivilization
+      summary: Register (onboard) a civilization.
+      description: |
+        One-time onboarding using an out-of-band `onboardingToken`. Idempotent when an
+        `Idempotency-Key` header is supplied: replaying the same key returns the original
+        registration (with `duplicate: true`). Bootstrap endpoint — not HMAC-signed.
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/Traceparent'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegistrationRequest'
+      responses:
+        '201':
+          description: Civilization registered (or idempotent replay).
+          headers:
+            Location:
+              $ref: '#/components/headers/Location'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RegistrationResponse'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /civilizations/{civId}/heartbeat:
+    post:
+      tags: [civilizations]
+      operationId: heartbeatCivilization
+      summary: Report liveness and refresh the public projection.
+      description: Liveness signal carrying a compact public projection and pull hints.
+      parameters:
+        - $ref: '#/components/parameters/CivId'
+        - $ref: '#/components/parameters/Traceparent'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Heartbeat'
+      responses:
+        '200':
+          description: Heartbeat accepted.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HeartbeatAck'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /civilizations:
+    get:
+      tags: [civilizations]
+      operationId: listCivilizations
+      summary: List public civilization projections.
+      description: Cursor-paginated public map projection of all registered civilizations.
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/After'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: A page of public civilization projections.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CivilizationListPage'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /civilizations/{civId}:
+    get:
+      tags: [civilizations]
+      operationId: getCivilization
+      summary: Get a single public civilization projection.
+      description: Returns the citizen-safe public projection for one civilization.
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/CivId'
+      responses:
+        '200':
+          description: The public projection for the civilization.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PublicProjection'
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /civilizations/{civId}/events:batch:
+    post:
+      tags: [events]
+      operationId: ingestEventBatch
+      summary: Push a batch of civ-originated events.
+      description: |
+        At-least-once batch of civ-originated CloudEvents. Deduplicated per event by the
+        CloudEvents `idempotencykey` (falling back to `source` + `id`). Returns one result
+        per submitted event.
+      parameters:
+        - $ref: '#/components/parameters/CivId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/Traceparent'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EventBatch'
+      responses:
+        '200':
+          description: Batch processed; see per-event results.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EventBatchResult'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /civilizations/{civId}/commands:
+    get:
+      tags: [commands]
+      operationId: pullCommands
+      summary: Pull inbound commands and world events.
+      description: |
+        Civs pull queued commands (and world events surfaced as commands) using a forward-only
+        cursor. Commands persist until acked or expired, so an offline civ misses nothing.
+      parameters:
+        - $ref: '#/components/parameters/CivId'
+        - $ref: '#/components/parameters/After'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: A page of commands to apply.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommandPage'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /civilizations/{civId}/commands/{commandId}:ack:
+    post:
+      tags: [commands]
+      operationId: ackCommand
+      summary: Acknowledge a pulled command.
+      description: |
+        Report `applied`, `rejected`, or `duplicate` for a pulled command. Idempotent:
+        re-acking returns the original result with `duplicate: true`.
+      parameters:
+        - $ref: '#/components/parameters/CivId'
+        - $ref: '#/components/parameters/CommandId'
+        - $ref: '#/components/parameters/Traceparent'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CommandAck'
+      responses:
+        '200':
+          description: Acknowledgment recorded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommandAckResult'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /interactions:
+    post:
+      tags: [interactions]
+      operationId: submitInteraction
+      summary: Submit a President-authorized contact/message intent.
+      description: |
+        The source civ submits a `contact` or `message` intent. Processing is asynchronous:
+        the World returns `202 Accepted` with a `Location`/status link and queues a command for
+        the target civ to pull. Idempotent via `Idempotency-Key`.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/Traceparent'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InteractionRequest'
+      responses:
+        '202':
+          description: Intent accepted for asynchronous processing.
+          headers:
+            Location:
+              $ref: '#/components/headers/Location'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Accepted'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /interactions/{interactionId}:
+    get:
+      tags: [interactions]
+      operationId: getInteraction
+      summary: Get the status of an interaction.
+      description: Returns the interaction record and its current lifecycle status.
+      parameters:
+        - $ref: '#/components/parameters/InteractionId'
+      responses:
+        '200':
+          description: The interaction record and current status.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Interaction'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /relationships:
+    get:
+      tags: [relationships]
+      operationId: listRelationships
+      summary: List relationships or look up a single pair.
+      description: |
+        Public relationship projection. Without `civA`/`civB`, returns a cursor-paginated list.
+        With both `civA` and `civB`, returns the single relationship for that pair as a
+        one-item page.
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/After'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/CivAQuery'
+        - $ref: '#/components/parameters/CivBQuery'
+      responses:
+        '200':
+          description: A page of relationship projections.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RelationshipPage'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /events:
+    get:
+      tags: [events]
+      operationId: listWorldEvents
+      summary: Read the public world event feed.
+      description: Cursor-paginated feed of public world events (CloudEvents).
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/After'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: A page of public world events.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EventPage'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /stream:
+    get:
+      tags: [events]
+      operationId: streamWorldEvents
+      summary: Subscribe to the public world event stream (SSE).
+      description: |
+        **Experimental / not code-generated.** Server-Sent Events (`text/event-stream`) feed of
+        public world events. Each SSE `data:` frame is a CloudEvent (see the `CloudEvent` schema).
+        Provided for documentation; the `/events` cursor feed is the interoperable baseline.
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/After'
+      responses:
+        '200':
+          description: An open SSE stream of CloudEvents.
+          content:
+            text/event-stream:
+              schema:
+                $ref: '#/components/schemas/CloudEvent'
+        '500': { $ref: '#/components/responses/InternalError' }
+
+components:
+  securitySchemes:
+    civHmac:
+      type: apiKey
+      in: header
+      name: X-Signature
+      description: |
+        HMAC-SHA256 request signing. Every authenticated request MUST include these headers:
+        `X-Civ-Id`, `X-Key-Id`, `X-Timestamp` (RFC 3339), `X-Nonce` (single-use), and
+        `X-Signature`. Optional: `Idempotency-Key`, `traceparent`.
+
+        Canonical signing string (LF-joined):
+        `X-Timestamp + "\n" + X-Nonce + "\n" + METHOD + "\n" + normalizedPathAndQuery + "\n" +
+        base64(SHA-256(rawBody))`.
+
+        `X-Signature = base64(HMAC-SHA256(canonicalString, keyForKeyId))`. The World rejects
+        requests outside a ±300s window or with a replayed nonce. Full details in
+        `docs/protocol.md`.
+
+  parameters:
+    CivId:
+      name: civId
+      in: path
+      required: true
+      description: World-assigned civilization id.
+      schema:
+        type: string
+    CommandId:
+      name: commandId
+      in: path
+      required: true
+      description: World-assigned command id.
+      schema:
+        type: string
+    InteractionId:
+      name: interactionId
+      in: path
+      required: true
+      description: Interaction id.
+      schema:
+        type: string
+    After:
+      name: after
+      in: query
+      required: false
+      description: Opaque forward-only pagination cursor from a previous response.
+      schema:
+        $ref: '#/components/schemas/Cursor'
+    Limit:
+      name: limit
+      in: query
+      required: false
+      description: Maximum items to return (server may return fewer).
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 200
+        default: 50
+    CivAQuery:
+      name: civA
+      in: query
+      required: false
+      description: First civ id for a relationship pair lookup (requires civB).
+      schema:
+        type: string
+    CivBQuery:
+      name: civB
+      in: query
+      required: false
+      description: Second civ id for a relationship pair lookup (requires civA).
+      schema:
+        type: string
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: false
+      description: |
+        Client-generated key for idempotent mutations. Replaying the same key returns the
+        original result rather than performing the operation again.
+      schema:
+        type: string
+        maxLength: 255
+    Traceparent:
+      name: traceparent
+      in: header
+      required: false
+      description: W3C Trace Context header for distributed tracing.
+      schema:
+        type: string
+
+  headers:
+    Location:
+      description: URL of the created or queued resource / its status endpoint.
+      schema:
+        type: string
+        format: uri-reference
+
+  responses:
+    BadRequest:
+      description: The request was malformed or failed validation.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetails'
+    Unauthorized:
+      description: Missing or invalid HMAC signature / authentication.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetails'
+    NotFound:
+      description: The referenced resource does not exist.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetails'
+    Conflict:
+      description: The request conflicts with current state or an idempotency key.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetails'
+    TooManyRequests:
+      description: Rate limit exceeded; retry after backoff.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetails'
+    InternalError:
+      description: An unexpected server error occurred.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetails'
+
+  schemas:
+    # --- common ---
+    Cursor:
+      $ref: ./../schemas/common/Cursor.yaml
+    WorldSequence:
+      $ref: ./../schemas/common/WorldSequence.yaml
+    ProblemDetails:
+      $ref: ./../schemas/common/ProblemDetails.yaml
+    Accepted:
+      $ref: ./../schemas/common/Accepted.yaml
+    # --- civilization ---
+    Capabilities:
+      $ref: ./../schemas/civilization/Capabilities.yaml
+    Leader:
+      $ref: ./../schemas/civilization/Leader.yaml
+    EconomySummary:
+      $ref: ./../schemas/civilization/EconomySummary.yaml
+    PublicProjection:
+      $ref: ./../schemas/civilization/PublicProjection.yaml
+    RegistrationRequest:
+      $ref: ./../schemas/civilization/RegistrationRequest.yaml
+    RegistrationResponse:
+      $ref: ./../schemas/civilization/RegistrationResponse.yaml
+    Heartbeat:
+      $ref: ./../schemas/civilization/Heartbeat.yaml
+    HeartbeatAck:
+      $ref: ./../schemas/civilization/HeartbeatAck.yaml
+    CivilizationListPage:
+      $ref: ./../schemas/civilization/CivilizationListPage.yaml
+    # --- relationship ---
+    RelationshipStance:
+      $ref: ./../schemas/relationship/RelationshipStance.yaml
+    CivPair:
+      $ref: ./../schemas/relationship/CivPair.yaml
+    Relationship:
+      $ref: ./../schemas/relationship/Relationship.yaml
+    RelationshipPage:
+      $ref: ./../schemas/relationship/RelationshipPage.yaml
+    # --- interaction ---
+    InteractionKind:
+      $ref: ./../schemas/interaction/InteractionKind.yaml
+    InteractionStatus:
+      $ref: ./../schemas/interaction/InteractionStatus.yaml
+    AuthorityDecision:
+      $ref: ./../schemas/interaction/AuthorityDecision.yaml
+    ContactIntentData:
+      $ref: ./../schemas/interaction/ContactIntentData.yaml
+    MessageIntentData:
+      $ref: ./../schemas/interaction/MessageIntentData.yaml
+    InteractionRequest:
+      $ref: ./../schemas/interaction/InteractionRequest.yaml
+    Interaction:
+      $ref: ./../schemas/interaction/Interaction.yaml
+    # --- envelope ---
+    CloudEvent:
+      $ref: ./../schemas/envelope/CloudEvent.yaml
+    Command:
+      $ref: ./../schemas/envelope/Command.yaml
+    CommandPage:
+      $ref: ./../schemas/envelope/CommandPage.yaml
+    CommandAck:
+      $ref: ./../schemas/envelope/CommandAck.yaml
+    CommandAckResult:
+      $ref: ./../schemas/envelope/CommandAckResult.yaml
+    EventBatch:
+      $ref: ./../schemas/envelope/EventBatch.yaml
+    EventBatchItemResult:
+      $ref: ./../schemas/envelope/EventBatchItemResult.yaml
+    EventBatchResult:
+      $ref: ./../schemas/envelope/EventBatchResult.yaml
+    EventPage:
+      $ref: ./../schemas/envelope/EventPage.yaml
+    ContactCommandData:
+      $ref: ./../schemas/envelope/payloads/ContactCommandData.yaml
+    MessageCommandData:
+      $ref: ./../schemas/envelope/payloads/MessageCommandData.yaml

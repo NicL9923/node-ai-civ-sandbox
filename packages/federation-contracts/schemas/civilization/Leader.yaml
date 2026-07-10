@@ -1,0 +1,22 @@
+type: object
+title: Leader
+description: >-
+  The civilization's current head of state (President) as a citizen-safe public
+  reference. Deliberately does NOT expose the internal agent id or AgentProfile.
+required:
+  - ref
+  - name
+properties:
+  ref:
+    type: string
+    description: Opaque, civ-scoped reference to the leader (not the internal agent id).
+  name:
+    type: string
+    description: Public display name of the current leader.
+  title:
+    type: string
+    default: President
+  termNumber:
+    type: integer
+    minimum: 0
+    description: Sequential term number of the current administration.

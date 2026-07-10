@@ -1,0 +1,9 @@
+{
+  "civId": "civ_aurora",
+  "keyId": "key_01",
+  "protocolVersion": "1.0.0",
+  "worldBaseUrl": "https://world.example.com/world/v1",
+  "commandsCursor": null,
+  "registeredAt": "2026-07-10T18:00:00Z",
+  "duplicate": false
+}

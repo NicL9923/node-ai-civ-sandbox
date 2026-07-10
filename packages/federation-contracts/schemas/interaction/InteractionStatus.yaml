@@ -1,0 +1,14 @@
+type: string
+title: InteractionStatus
+description: >-
+  Lifecycle state of an interaction. Unlike InteractionKind, this is a STABLE,
+  CLOSED enum: the World owns this lifecycle and new kinds reuse it.
+enum:
+  - received
+  - authorized
+  - queued
+  - delivered
+  - acknowledged
+  - rejected
+  - expired
+  - failed

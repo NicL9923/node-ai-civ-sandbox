@@ -9,6 +9,10 @@ on:
       - "package.json"
       - "package-lock.json"
       - ".npmrc"
+      - ".config/**"
+      - "global.json"
+      - "Directory.Build.props"
+      - "AiCivilization.slnx"
       - ".github/workflows/ci.yml"
   pull_request:
     paths:
@@ -17,6 +21,10 @@ on:
       - "package.json"
       - "package-lock.json"
       - ".npmrc"
+      - ".config/**"
+      - "global.json"
+      - "Directory.Build.props"
+      - "AiCivilization.slnx"
       - ".github/workflows/ci.yml"
 
 jobs:
@@ -36,3 +44,35 @@ jobs:
         run: npm run build
       - name: Test civilization
         run: npm test
+
+  contracts:
+    name: Contracts (lint, drift, tests)
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+      - name: Install (workspace)
+        run: npm ci
+      - name: Restore .NET tools (Kiota)
+        run: dotnet tool restore
+      - name: Lint OpenAPI
+        run: npm run lint:contracts
+      - name: Check contract drift (regenerate + diff)
+        run: npm run check:contracts
+      - name: Typecheck contracts
+        run: npm run typecheck:contracts
+      - name: Test contracts
+        run: npm run test:contracts
+      - name: Build generated C# client
+        run: dotnet build packages/federation-contracts/csharp/FederationContracts.csproj -c Release

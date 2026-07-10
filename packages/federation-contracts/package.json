@@ -1,0 +1,44 @@
+{
+  "name": "@ai-civ/federation-contracts",
+  "version": "0.1.0",
+  "description": "Versioned World <-> Civilization federation protocol: the single contract source of truth (OpenAPI 3.1 + generated TypeScript/C# artifacts).",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "exports": {
+    ".": {
+      "types": "./generated/ts/index.ts"
+    },
+    "./openapi": "./openapi/world.v1.bundled.json",
+    "./client": {
+      "types": "./generated/ts/client.ts"
+    }
+  },
+  "files": [
+    "openapi",
+    "schemas",
+    "generated/ts"
+  ],
+  "engines": {
+    "node": ">=22 <25"
+  },
+  "scripts": {
+    "lint": "redocly lint openapi/world.v1.yaml",
+    "bundle": "redocly bundle openapi/world.v1.yaml -o openapi/world.v1.bundled.json",
+    "generate": "node scripts/generate.mjs",
+    "check": "node scripts/check-drift.mjs",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "build": "npm run lint && npm run check && npm run test"
+  },
+  "dependencies": {
+    "openapi-fetch": "^0.13.0"
+  },
+  "devDependencies": {
+    "@redocly/cli": "^1.25.0",
+    "ajv": "^8.17.1",
+    "ajv-formats": "^3.0.1",
+    "openapi-typescript": "^7.4.0",
+    "vitest": "^4.1.9"
+  }
+}

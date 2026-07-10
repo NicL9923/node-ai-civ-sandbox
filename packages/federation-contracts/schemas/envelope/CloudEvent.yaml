@@ -1,0 +1,79 @@
+type: object
+title: CloudEvent
+description: >-
+  A CloudEvents 1.0 event in structured JSON mode, extended with federation
+  attributes. Used for civ-originated domain events (events:batch) and, via
+  Command, for world-originated commands.
+
+  Enum policy: `type` is an OPEN string (reverse-DNS versioned name) so additive
+  event/command types never break existing clients. Concrete payload schemas for
+  known `type`s live under schemas/envelope/payloads and are referenced by
+  examples; `data` is intentionally permissive at the envelope level to preserve
+  forward compatibility.
+required:
+  - id
+  - specversion
+  - type
+  - source
+properties:
+  id:
+    type: string
+    description: Producer-scoped unique id. Together with `source` it dedupes events.
+  specversion:
+    type: string
+    const: "1.0"
+    description: CloudEvents spec version. Always "1.0".
+  type:
+    type: string
+    description: >-
+      Event/command type in reverse-DNS, versioned form. Open set. Examples:
+      `world.civilization.contact.v1`, `world.civilization.message.v1`,
+      `civ.agent.acted.v1`.
+    examples: ["world.civilization.message.v1"]
+  source:
+    type: string
+    format: uri-reference
+    description: Context in which the event happened (e.g. `/civilizations/{civId}`).
+  subject:
+    type: string
+    description: Subject of the event within the source context.
+  time:
+    type: string
+    format: date-time
+    description: Timestamp of when the occurrence happened.
+  datacontenttype:
+    type: string
+    default: application/json
+  dataschema:
+    type: string
+    format: uri-reference
+    description: Identifies the schema that `data` adheres to (e.g. a payload $id).
+  data:
+    description: >-
+      Type-specific payload. Known command types use ContactCommandData or
+      MessageCommandData; other types (e.g. civ domain events) use the open
+      object form. The open `anyOf` branch preserves forward compatibility — a
+      new payload shape validates against it without breaking existing clients.
+    anyOf:
+      - $ref: ./payloads/ContactCommandData.yaml
+      - $ref: ./payloads/MessageCommandData.yaml
+      - type: object
+        additionalProperties: true
+  correlationid:
+    type: string
+    description: CloudEvents extension — correlates a causal chain of events/commands.
+  causationid:
+    type: string
+    description: CloudEvents extension — the id of the event/command that caused this one.
+  idempotencykey:
+    type: string
+    description: >-
+      CloudEvents extension — receiver dedupe key. Replaying the same key returns
+      the original result (at-least-once delivery, exactly-once effect).
+  worldsequence:
+    description: >-
+      CloudEvents extension — World-assigned total-order sequence (string int64).
+      Null until the World has ordered the event into the ledger.
+    oneOf:
+      - $ref: ../common/WorldSequence.yaml
+      - type: "null"

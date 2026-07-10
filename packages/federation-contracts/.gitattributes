@@ -1,0 +1,5 @@
+# Deterministic, cross-platform line endings for the federation contracts.
+# Generators (Kiota on Windows, openapi-typescript/Redocly on any OS) may emit
+# CRLF or LF; forcing LF keeps generated output identical across the Windows +
+# Linux CI drift matrix. `text=auto` still auto-detects and preserves binaries.
+* text=auto eol=lf

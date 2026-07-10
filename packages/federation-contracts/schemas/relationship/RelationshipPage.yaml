@@ -1,0 +1,15 @@
+type: object
+title: RelationshipPage
+description: A cursor-paginated page of public relationship projections.
+required:
+  - items
+properties:
+  items:
+    type: array
+    items:
+      $ref: ./Relationship.yaml
+  nextCursor:
+    description: Cursor for the next page, or null when this is the last page.
+    oneOf:
+      - $ref: ../common/Cursor.yaml
+      - type: "null"

@@ -1,0 +1,18 @@
+type: object
+title: MessageIntentData
+description: Typed payload for a `message` interaction — a public message to another civ.
+required:
+  - body
+properties:
+  body:
+    type: string
+    maxLength: 8000
+    description: The message body.
+  subject:
+    type: string
+    maxLength: 200
+  inReplyTo:
+    description: Optional interactionId this message replies to.
+    oneOf:
+      - type: string
+      - type: "null"

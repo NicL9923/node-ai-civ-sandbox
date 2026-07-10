@@ -1,0 +1,16 @@
+type: object
+title: EventBatchResult
+description: The World's response to an event batch — one result per submitted event.
+required:
+  - results
+properties:
+  acceptedCount:
+    type: integer
+    minimum: 0
+  duplicateCount:
+    type: integer
+    minimum: 0
+  results:
+    type: array
+    items:
+      $ref: ./EventBatchItemResult.yaml

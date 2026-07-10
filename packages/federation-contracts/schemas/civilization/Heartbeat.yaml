@@ -1,0 +1,20 @@
+type: object
+title: Heartbeat
+description: >-
+  Liveness signal pushed by a civ. Carries a compact public projection and,
+  optionally, refreshed capabilities and the last processed world cursor.
+required:
+  - projection
+properties:
+  projection:
+    $ref: ./PublicProjection.yaml
+  capabilities:
+    description: Optional capability refresh.
+    oneOf:
+      - $ref: ./Capabilities.yaml
+      - type: "null"
+  lastProcessedWorldCursor:
+    description: The last world command/event cursor the civ has processed.
+    oneOf:
+      - $ref: ../common/Cursor.yaml
+      - type: "null"

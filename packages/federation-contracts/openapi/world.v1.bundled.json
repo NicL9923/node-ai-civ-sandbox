@@ -1,0 +1,2032 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "World Federation API",
+    "version": "1.0.0",
+    "summary": "World <-> Civilization federation protocol (v1).",
+    "description": "The **World** is an orchestrator that owns the inter-civilization registry, public\nmap projection, relationship state, the interaction ledger, world commands, and world\nevents. **Civilizations** own their agents, governance, and local state.\n\n## Delivery direction (civ-initiated only)\nCivilizations initiate all network calls. Civs **push** registration, heartbeats, events,\nand interaction intents to the World, and **pull** commands from the World, then **ack**\nthem. The World never calls arbitrary civilization URLs in the MVP — this avoids SSRF and\nlets independently hosted civs onboard easily.\n\n## Semantics\n- **Async mutations** (interactions) return `202 Accepted` with a `Location`/status link.\n- **At-least-once** delivery with **receiver idempotency**: replaying an `Idempotency-Key`\n  (or CloudEvents `idempotencykey`) returns the original result, never a duplicate.\n- **`worldsequence`** is a World-assigned int64 (string-encoded) total order for inter-civ\n  events. A civ's own sequence/cursor is separate.\n- Civs may be offline; commands persist until pulled or expired. No operation requires both\n  civs online simultaneously.\n\n## MVP scope\nInteractions are limited to `contact` and `message`. Trade, treaties, conflict, and\nmigration are later, additive protocol work and are intentionally not modeled here.\n\n## Auth\nAuthenticated requests are HMAC-SHA256 signed (see `docs/protocol.md`). See the `civHmac`\nsecurity scheme for the required headers and canonical signing string.\n",
+    "license": {
+      "name": "MIT",
+      "identifier": "MIT"
+    }
+  },
+  "servers": [
+    {
+      "url": "https://world.example.com/world/v1",
+      "description": "World API v1 base URL (path prefix /world/v1)."
+    }
+  ],
+  "security": [
+    {
+      "civHmac": []
+    }
+  ],
+  "tags": [
+    {
+      "name": "civilizations",
+      "description": "Onboarding, liveness, and public map projections."
+    },
+    {
+      "name": "commands",
+      "description": "World-originated commands that civs pull and ack."
+    },
+    {
+      "name": "events",
+      "description": "Civ-originated event ingestion and the public world event feed."
+    },
+    {
+      "name": "interactions",
+      "description": "President-authorized inter-civ contact/message intents."
+    },
+    {
+      "name": "relationships",
+      "description": "Public relationship projections."
+    }
+  ],
+  "paths": {
+    "/civilizations:register": {
+      "post": {
+        "tags": [
+          "civilizations"
+        ],
+        "operationId": "registerCivilization",
+        "summary": "Register (onboard) a civilization.",
+        "description": "One-time onboarding using an out-of-band `onboardingToken`. Idempotent when an\n`Idempotency-Key` header is supplied: replaying the same key returns the original\nregistration (with `duplicate: true`). Bootstrap endpoint — not HMAC-signed.\n",
+        "security": [],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          },
+          {
+            "$ref": "#/components/parameters/Traceparent"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegistrationRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Civilization registered (or idempotent replay).",
+            "headers": {
+              "Location": {
+                "$ref": "#/components/headers/Location"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegistrationResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/civilizations/{civId}/heartbeat": {
+      "post": {
+        "tags": [
+          "civilizations"
+        ],
+        "operationId": "heartbeatCivilization",
+        "summary": "Report liveness and refresh the public projection.",
+        "description": "Liveness signal carrying a compact public projection and pull hints.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CivId"
+          },
+          {
+            "$ref": "#/components/parameters/Traceparent"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Heartbeat"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Heartbeat accepted.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HeartbeatAck"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/civilizations": {
+      "get": {
+        "tags": [
+          "civilizations"
+        ],
+        "operationId": "listCivilizations",
+        "summary": "List public civilization projections.",
+        "description": "Cursor-paginated public map projection of all registered civilizations.",
+        "security": [],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/After"
+          },
+          {
+            "$ref": "#/components/parameters/Limit"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of public civilization projections.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CivilizationListPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/civilizations/{civId}": {
+      "get": {
+        "tags": [
+          "civilizations"
+        ],
+        "operationId": "getCivilization",
+        "summary": "Get a single public civilization projection.",
+        "description": "Returns the citizen-safe public projection for one civilization.",
+        "security": [],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CivId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The public projection for the civilization.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicProjection"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/civilizations/{civId}/events:batch": {
+      "post": {
+        "tags": [
+          "events"
+        ],
+        "operationId": "ingestEventBatch",
+        "summary": "Push a batch of civ-originated events.",
+        "description": "At-least-once batch of civ-originated CloudEvents. Deduplicated per event by the\nCloudEvents `idempotencykey` (falling back to `source` + `id`). Returns one result\nper submitted event.\n",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CivId"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          },
+          {
+            "$ref": "#/components/parameters/Traceparent"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EventBatch"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Batch processed; see per-event results.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EventBatchResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/civilizations/{civId}/commands": {
+      "get": {
+        "tags": [
+          "commands"
+        ],
+        "operationId": "pullCommands",
+        "summary": "Pull inbound commands and world events.",
+        "description": "Civs pull queued commands (and world events surfaced as commands) using a forward-only\ncursor. Commands persist until acked or expired, so an offline civ misses nothing.\n",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CivId"
+          },
+          {
+            "$ref": "#/components/parameters/After"
+          },
+          {
+            "$ref": "#/components/parameters/Limit"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of commands to apply.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommandPage"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/civilizations/{civId}/commands/{commandId}:ack": {
+      "post": {
+        "tags": [
+          "commands"
+        ],
+        "operationId": "ackCommand",
+        "summary": "Acknowledge a pulled command.",
+        "description": "Report `applied`, `rejected`, or `duplicate` for a pulled command. Idempotent:\nre-acking returns the original result with `duplicate: true`.\n",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CivId"
+          },
+          {
+            "$ref": "#/components/parameters/CommandId"
+          },
+          {
+            "$ref": "#/components/parameters/Traceparent"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CommandAck"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Acknowledgment recorded.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommandAckResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/interactions": {
+      "post": {
+        "tags": [
+          "interactions"
+        ],
+        "operationId": "submitInteraction",
+        "summary": "Submit a President-authorized contact/message intent.",
+        "description": "The source civ submits a `contact` or `message` intent. Processing is asynchronous:\nthe World returns `202 Accepted` with a `Location`/status link and queues a command for\nthe target civ to pull. Idempotent via `Idempotency-Key`.\n",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          },
+          {
+            "$ref": "#/components/parameters/Traceparent"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InteractionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Intent accepted for asynchronous processing.",
+            "headers": {
+              "Location": {
+                "$ref": "#/components/headers/Location"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Accepted"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/interactions/{interactionId}": {
+      "get": {
+        "tags": [
+          "interactions"
+        ],
+        "operationId": "getInteraction",
+        "summary": "Get the status of an interaction.",
+        "description": "Returns the interaction record and its current lifecycle status.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/InteractionId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The interaction record and current status.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Interaction"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/relationships": {
+      "get": {
+        "tags": [
+          "relationships"
+        ],
+        "operationId": "listRelationships",
+        "summary": "List relationships or look up a single pair.",
+        "description": "Public relationship projection. Without `civA`/`civB`, returns a cursor-paginated list.\nWith both `civA` and `civB`, returns the single relationship for that pair as a\none-item page.\n",
+        "security": [],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/After"
+          },
+          {
+            "$ref": "#/components/parameters/Limit"
+          },
+          {
+            "$ref": "#/components/parameters/CivAQuery"
+          },
+          {
+            "$ref": "#/components/parameters/CivBQuery"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of relationship projections.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RelationshipPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/events": {
+      "get": {
+        "tags": [
+          "events"
+        ],
+        "operationId": "listWorldEvents",
+        "summary": "Read the public world event feed.",
+        "description": "Cursor-paginated feed of public world events (CloudEvents).",
+        "security": [],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/After"
+          },
+          {
+            "$ref": "#/components/parameters/Limit"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of public world events.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EventPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/stream": {
+      "get": {
+        "tags": [
+          "events"
+        ],
+        "operationId": "streamWorldEvents",
+        "summary": "Subscribe to the public world event stream (SSE).",
+        "description": "**Experimental / not code-generated.** Server-Sent Events (`text/event-stream`) feed of\npublic world events. Each SSE `data:` frame is a CloudEvent (see the `CloudEvent` schema).\nProvided for documentation; the `/events` cursor feed is the interoperable baseline.\n",
+        "security": [],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/After"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "An open SSE stream of CloudEvents.",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/CloudEvent"
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "civHmac": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-Signature",
+        "description": "HMAC-SHA256 request signing. Every authenticated request MUST include these headers:\n`X-Civ-Id`, `X-Key-Id`, `X-Timestamp` (RFC 3339), `X-Nonce` (single-use), and\n`X-Signature`. Optional: `Idempotency-Key`, `traceparent`.\n\nCanonical signing string (LF-joined):\n`X-Timestamp + \"\\n\" + X-Nonce + \"\\n\" + METHOD + \"\\n\" + normalizedPathAndQuery + \"\\n\" +\nbase64(SHA-256(rawBody))`.\n\n`X-Signature = base64(HMAC-SHA256(canonicalString, keyForKeyId))`. The World rejects\nrequests outside a ±300s window or with a replayed nonce. Full details in\n`docs/protocol.md`.\n"
+      }
+    },
+    "parameters": {
+      "CivId": {
+        "name": "civId",
+        "in": "path",
+        "required": true,
+        "description": "World-assigned civilization id.",
+        "schema": {
+          "type": "string"
+        }
+      },
+      "CommandId": {
+        "name": "commandId",
+        "in": "path",
+        "required": true,
+        "description": "World-assigned command id.",
+        "schema": {
+          "type": "string"
+        }
+      },
+      "InteractionId": {
+        "name": "interactionId",
+        "in": "path",
+        "required": true,
+        "description": "Interaction id.",
+        "schema": {
+          "type": "string"
+        }
+      },
+      "After": {
+        "name": "after",
+        "in": "query",
+        "required": false,
+        "description": "Opaque forward-only pagination cursor from a previous response.",
+        "schema": {
+          "$ref": "#/components/schemas/Cursor"
+        }
+      },
+      "Limit": {
+        "name": "limit",
+        "in": "query",
+        "required": false,
+        "description": "Maximum items to return (server may return fewer).",
+        "schema": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 200,
+          "default": 50
+        }
+      },
+      "CivAQuery": {
+        "name": "civA",
+        "in": "query",
+        "required": false,
+        "description": "First civ id for a relationship pair lookup (requires civB).",
+        "schema": {
+          "type": "string"
+        }
+      },
+      "CivBQuery": {
+        "name": "civB",
+        "in": "query",
+        "required": false,
+        "description": "Second civ id for a relationship pair lookup (requires civA).",
+        "schema": {
+          "type": "string"
+        }
+      },
+      "IdempotencyKey": {
+        "name": "Idempotency-Key",
+        "in": "header",
+        "required": false,
+        "description": "Client-generated key for idempotent mutations. Replaying the same key returns the\noriginal result rather than performing the operation again.\n",
+        "schema": {
+          "type": "string",
+          "maxLength": 255
+        }
+      },
+      "Traceparent": {
+        "name": "traceparent",
+        "in": "header",
+        "required": false,
+        "description": "W3C Trace Context header for distributed tracing.",
+        "schema": {
+          "type": "string"
+        }
+      }
+    },
+    "headers": {
+      "Location": {
+        "description": "URL of the created or queued resource / its status endpoint.",
+        "schema": {
+          "type": "string",
+          "format": "uri-reference"
+        }
+      }
+    },
+    "responses": {
+      "BadRequest": {
+        "description": "The request was malformed or failed validation.",
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetails"
+            }
+          }
+        }
+      },
+      "Unauthorized": {
+        "description": "Missing or invalid HMAC signature / authentication.",
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetails"
+            }
+          }
+        }
+      },
+      "NotFound": {
+        "description": "The referenced resource does not exist.",
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetails"
+            }
+          }
+        }
+      },
+      "Conflict": {
+        "description": "The request conflicts with current state or an idempotency key.",
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetails"
+            }
+          }
+        }
+      },
+      "TooManyRequests": {
+        "description": "Rate limit exceeded; retry after backoff.",
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetails"
+            }
+          }
+        }
+      },
+      "InternalError": {
+        "description": "An unexpected server error occurred.",
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetails"
+            }
+          }
+        }
+      }
+    },
+    "schemas": {
+      "Cursor": {
+        "type": "string",
+        "title": "Cursor",
+        "description": "Opaque, forward-only pagination cursor (base64url-encoded). Clients MUST treat this as an opaque token and MUST NOT parse or construct it. Pass it back verbatim in the `after` query parameter to fetch the next page.",
+        "minLength": 1,
+        "maxLength": 4096,
+        "examples": [
+          "eyJvIjoxMjM0fQ"
+        ]
+      },
+      "WorldSequence": {
+        "type": "string",
+        "title": "WorldSequence",
+        "description": "Monotonic int64 total-order sequence number assigned by the World for inter-civ events. Transported as a decimal string (not a JSON number) to avoid precision loss for values greater than 2^53 in JavaScript and other IEEE-754 runtimes. A civ's own local sequence/cursor is separate from this value.",
+        "pattern": "^[0-9]+$",
+        "examples": [
+          "1",
+          "9007199254740993"
+        ]
+      },
+      "ProblemDetails": {
+        "type": "object",
+        "title": "ProblemDetails",
+        "description": "RFC 7807 problem details, extended with a stable machine-readable `code` and a `retryable` hint. Returned for every non-2xx response.",
+        "additionalProperties": true,
+        "required": [
+          "type",
+          "title",
+          "status",
+          "code"
+        ],
+        "properties": {
+          "type": {
+            "type": "string",
+            "format": "uri-reference",
+            "default": "about:blank",
+            "description": "A URI reference identifying the problem type."
+          },
+          "title": {
+            "type": "string",
+            "description": "Short, human-readable summary of the problem type."
+          },
+          "status": {
+            "type": "integer",
+            "minimum": 100,
+            "maximum": 599,
+            "description": "The HTTP status code for this occurrence."
+          },
+          "detail": {
+            "type": "string",
+            "description": "Human-readable explanation specific to this occurrence."
+          },
+          "instance": {
+            "type": "string",
+            "format": "uri-reference",
+            "description": "A URI reference identifying the specific occurrence."
+          },
+          "code": {
+            "type": "string",
+            "description": "Stable, machine-readable error code (open set). Examples: `registration_conflict`, `invalid_signature`, `civ_not_found`, `idempotency_conflict`, `rate_limited`, `validation_failed`.",
+            "examples": [
+              "validation_failed"
+            ]
+          },
+          "retryable": {
+            "type": "boolean",
+            "description": "Whether retrying the same request (respecting backoff) may succeed. False for deterministic client errors; true for transient/server conditions."
+          },
+          "traceId": {
+            "type": "string",
+            "description": "Correlates this response with server-side traces (W3C trace-id)."
+          },
+          "errors": {
+            "type": "array",
+            "description": "Optional field-level validation errors.",
+            "items": {
+              "type": "object",
+              "additionalProperties": true,
+              "properties": {
+                "pointer": {
+                  "type": "string",
+                  "description": "JSON Pointer to the offending field."
+                },
+                "detail": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      "Accepted": {
+        "type": "object",
+        "title": "Accepted",
+        "description": "Standard body for an asynchronously accepted mutation (HTTP 202). The `statusUrl` points at the resource that will reflect terminal status. On an idempotent replay, `duplicate` is true and the same `resourceId`/`statusUrl` are returned.",
+        "required": [
+          "status",
+          "statusUrl"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "accepted"
+            ],
+            "description": "Always `accepted` for a 202 response."
+          },
+          "resourceId": {
+            "type": "string",
+            "description": "Identifier of the created/queued resource (e.g. interactionId)."
+          },
+          "statusUrl": {
+            "type": "string",
+            "format": "uri-reference",
+            "description": "URL to poll for terminal status (mirrors the Location header)."
+          },
+          "duplicate": {
+            "type": "boolean",
+            "default": false,
+            "description": "True when this response is an idempotent replay of a prior request."
+          }
+        }
+      },
+      "Capabilities": {
+        "type": "object",
+        "title": "Capabilities",
+        "description": "Capabilities a civilization advertises at registration and refreshes on heartbeat. Forward-compatible: unknown fields are ignored by the World.",
+        "required": [
+          "protocolVersion",
+          "supportedInteractionKinds"
+        ],
+        "properties": {
+          "protocolVersion": {
+            "type": "string",
+            "description": "SemVer of the world protocol the civ implements (e.g. \"1.0.0\").",
+            "examples": [
+              "1.0.0"
+            ]
+          },
+          "supportedInteractionKinds": {
+            "type": "array",
+            "description": "Interaction kinds the civ can receive. Open set (see InteractionKind).",
+            "items": {
+              "$ref": "#/components/schemas/InteractionKind"
+            }
+          },
+          "maxEventBatchSize": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Largest event batch the civ intends to push in one request."
+          },
+          "features": {
+            "type": "array",
+            "description": "Optional named feature flags. Open set of strings.",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "Leader": {
+        "type": "object",
+        "title": "Leader",
+        "description": "The civilization's current head of state (President) as a citizen-safe public reference. Deliberately does NOT expose the internal agent id or AgentProfile.",
+        "required": [
+          "ref",
+          "name"
+        ],
+        "properties": {
+          "ref": {
+            "type": "string",
+            "description": "Opaque, civ-scoped reference to the leader (not the internal agent id)."
+          },
+          "name": {
+            "type": "string",
+            "description": "Public display name of the current leader."
+          },
+          "title": {
+            "type": "string",
+            "default": "President"
+          },
+          "termNumber": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Sequential term number of the current administration."
+          }
+        }
+      },
+      "EconomySummary": {
+        "type": "object",
+        "title": "EconomySummary",
+        "description": "Safe, aggregate economy summary for public projection. Contains only civ-level aggregates — never per-agent balances or private ledgers.",
+        "properties": {
+          "treasury": {
+            "type": "number",
+            "description": "Public treasury balance."
+          },
+          "currency": {
+            "type": "string",
+            "default": "credits",
+            "description": "Unit label for economic values."
+          }
+        }
+      },
+      "PublicProjection": {
+        "type": "object",
+        "title": "PublicProjection",
+        "description": "Compact, citizen-safe public projection of a civilization, returned by the list/get map endpoints and echoed on heartbeat. This schema is the public contract boundary: it MUST NOT include AgentProfile data, model identifiers or secrets, private agent memory, admin keys, or service-to-service secrets.",
+        "required": [
+          "civId",
+          "displayName",
+          "protocolVersion",
+          "turn",
+          "running",
+          "population",
+          "updatedAt"
+        ],
+        "properties": {
+          "civId": {
+            "type": "string",
+            "description": "Stable World-assigned civilization id."
+          },
+          "displayName": {
+            "type": "string",
+            "description": "Public display name of the civilization."
+          },
+          "protocolVersion": {
+            "type": "string",
+            "description": "Protocol version the civ currently implements."
+          },
+          "turn": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "The civ's current local turn number."
+          },
+          "running": {
+            "type": "boolean",
+            "description": "Whether the civ's simulation is actively advancing."
+          },
+          "population": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Number of active citizen agents."
+          },
+          "president": {
+            "description": "Current head of state, or null during an interregnum.",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Leader"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "economy": {
+            "description": "Safe aggregate economy summary.",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/EconomySummary"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "lastProcessedWorldCursor": {
+            "description": "The last world command/event cursor the civ has processed.",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Cursor"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "etag": {
+            "type": "string",
+            "description": "Opaque version tag for optimistic concurrency / caching."
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When this projection was last updated by the civ."
+          }
+        }
+      },
+      "RegistrationRequest": {
+        "type": "object",
+        "title": "RegistrationRequest",
+        "description": "One-time civilization onboarding. Idempotent when accompanied by an `Idempotency-Key` header: replaying the same key returns the original registration result rather than creating a duplicate.",
+        "required": [
+          "onboardingToken",
+          "displayName",
+          "capabilities"
+        ],
+        "properties": {
+          "onboardingToken": {
+            "type": "string",
+            "description": "One-time onboarding token issued out-of-band by a World operator."
+          },
+          "displayName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120,
+            "description": "Requested public display name."
+          },
+          "capabilities": {
+            "$ref": "#/components/schemas/Capabilities"
+          },
+          "publicKey": {
+            "type": "string",
+            "description": "Optional civ-provided public key material or key-id hint to assist S2S HMAC key provisioning. The signing secret itself is exchanged out-of-band."
+          },
+          "contact": {
+            "type": "string",
+            "description": "Optional operator contact handle for onboarding follow-up."
+          }
+        }
+      },
+      "RegistrationResponse": {
+        "type": "object",
+        "title": "RegistrationResponse",
+        "description": "Result of civilization onboarding. On an idempotent replay, `duplicate` is true and the original civId/keyId are returned.",
+        "required": [
+          "civId",
+          "keyId",
+          "protocolVersion",
+          "registeredAt"
+        ],
+        "properties": {
+          "civId": {
+            "type": "string",
+            "description": "Stable World-assigned civilization id. Use as `X-Civ-Id`."
+          },
+          "keyId": {
+            "type": "string",
+            "description": "Identifier for the S2S HMAC signing key (`X-Key-Id`). The secret itself is delivered out-of-band and is NEVER returned in this response."
+          },
+          "protocolVersion": {
+            "type": "string",
+            "description": "Protocol version the World expects this civ to speak."
+          },
+          "worldBaseUrl": {
+            "type": "string",
+            "format": "uri",
+            "description": "Base URL the civ should use for all subsequent World calls."
+          },
+          "commandsCursor": {
+            "description": "Starting cursor for pulling commands (null to start from the beginning).",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Cursor"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "registeredAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "duplicate": {
+            "type": "boolean",
+            "default": false,
+            "description": "True when this response is an idempotent replay of a prior registration."
+          }
+        }
+      },
+      "Heartbeat": {
+        "type": "object",
+        "title": "Heartbeat",
+        "description": "Liveness signal pushed by a civ. Carries a compact public projection and, optionally, refreshed capabilities and the last processed world cursor.",
+        "required": [
+          "projection"
+        ],
+        "properties": {
+          "projection": {
+            "$ref": "#/components/schemas/PublicProjection"
+          },
+          "capabilities": {
+            "description": "Optional capability refresh.",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Capabilities"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "lastProcessedWorldCursor": {
+            "description": "The last world command/event cursor the civ has processed.",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Cursor"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "HeartbeatAck": {
+        "type": "object",
+        "title": "HeartbeatAck",
+        "description": "World's response to a heartbeat, including pull hints.",
+        "required": [
+          "civId",
+          "serverTime"
+        ],
+        "properties": {
+          "civId": {
+            "type": "string"
+          },
+          "serverTime": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Authoritative server time (useful for clock-skew estimation)."
+          },
+          "nextHeartbeatInSeconds": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Suggested delay before the next heartbeat."
+          },
+          "pendingCommandCount": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Number of commands currently queued for this civ to pull."
+          },
+          "commandsCursor": {
+            "description": "Cursor the civ should use for its next commands pull.",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Cursor"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "CivilizationListPage": {
+        "type": "object",
+        "title": "CivilizationListPage",
+        "description": "A cursor-paginated page of public civilization projections.",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PublicProjection"
+            }
+          },
+          "nextCursor": {
+            "description": "Cursor for the next page, or null when this is the last page.",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Cursor"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "RelationshipStance": {
+        "type": "string",
+        "title": "RelationshipStance",
+        "description": "Coarse public stance label between two civilizations. Open set for forward compatibility; known values are listed below. Clients MUST tolerate unknown values.",
+        "examples": [
+          "neutral"
+        ],
+        "x-known-values": [
+          "allied",
+          "friendly",
+          "neutral",
+          "wary",
+          "hostile"
+        ]
+      },
+      "CivPair": {
+        "type": "object",
+        "title": "CivPair",
+        "description": "An unordered pair of civilization ids. The World canonicalizes the ordering such that `civA` <= `civB` lexicographically.",
+        "required": [
+          "civA",
+          "civB"
+        ],
+        "properties": {
+          "civA": {
+            "type": "string"
+          },
+          "civB": {
+            "type": "string"
+          }
+        }
+      },
+      "Relationship": {
+        "type": "object",
+        "title": "Relationship",
+        "description": "Public projection of the relationship state between two civilizations. Numeric dimensions use fixed, documented ranges so clients can render them without server-specific scaling.",
+        "required": [
+          "pair",
+          "trust",
+          "grievance",
+          "threat",
+          "familiarity",
+          "interdependence",
+          "stance",
+          "version",
+          "updatedAt"
+        ],
+        "properties": {
+          "pair": {
+            "$ref": "#/components/schemas/CivPair"
+          },
+          "trust": {
+            "type": "number",
+            "minimum": -1,
+            "maximum": 1,
+            "description": "Net trust, from -1 (total distrust) to 1 (full trust)."
+          },
+          "grievance": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 100,
+            "description": "Accumulated grievance, 0 (none) to 100 (maximal)."
+          },
+          "threat": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 100,
+            "description": "Perceived threat, 0 (none) to 100 (existential)."
+          },
+          "familiarity": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "description": "How well the civs know each other, 0 (strangers) to 1."
+          },
+          "interdependence": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "description": "Mutual reliance, 0 (independent) to 1 (highly interdependent)."
+          },
+          "stance": {
+            "$ref": "#/components/schemas/RelationshipStance"
+          },
+          "narrativeSummary": {
+            "type": "string",
+            "description": "Short, citizen-visible narrative describing the relationship."
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Monotonically increasing version for optimistic concurrency."
+          },
+          "etag": {
+            "type": "string",
+            "description": "Opaque version tag mirroring `version` for HTTP caching."
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "RelationshipPage": {
+        "type": "object",
+        "title": "RelationshipPage",
+        "description": "A cursor-paginated page of public relationship projections.",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Relationship"
+            }
+          },
+          "nextCursor": {
+            "description": "Cursor for the next page, or null when this is the last page.",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Cursor"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "InteractionKind": {
+        "type": "string",
+        "title": "InteractionKind",
+        "description": "Kind of inter-civilization interaction. Open set for forward compatibility. MVP defines only `contact` and `message`; trade, treaty, conflict, and migration are later additive kinds. Clients MUST tolerate unknown values and MUST NOT treat this as a closed enum.",
+        "examples": [
+          "contact",
+          "message"
+        ],
+        "x-known-values": [
+          "contact",
+          "message"
+        ]
+      },
+      "InteractionStatus": {
+        "type": "string",
+        "title": "InteractionStatus",
+        "description": "Lifecycle state of an interaction. Unlike InteractionKind, this is a STABLE, CLOSED enum: the World owns this lifecycle and new kinds reuse it.",
+        "enum": [
+          "received",
+          "authorized",
+          "queued",
+          "delivered",
+          "acknowledged",
+          "rejected",
+          "expired",
+          "failed"
+        ]
+      },
+      "AuthorityDecision": {
+        "type": "object",
+        "title": "AuthorityDecision",
+        "description": "Reference to the source civ's internal authorization for an interaction. The World RECORDS this reference for auditability but does NOT adjudicate a civ's constitution or verify the decision. A future protocol version may require ratification; that is intentionally not modeled here.",
+        "required": [
+          "mode"
+        ],
+        "properties": {
+          "mode": {
+            "type": "string",
+            "description": "How the action was authorized. Open set; known values: `president`, `decree`, `referendum`, `delegated`.",
+            "examples": [
+              "president"
+            ]
+          },
+          "ref": {
+            "type": "string",
+            "description": "Opaque, civ-scoped reference to the authorizing decision or record."
+          },
+          "authorizedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "ContactIntentData": {
+        "type": "object",
+        "title": "ContactIntentData",
+        "description": "Typed payload for a `contact` interaction — an initial diplomatic hail.",
+        "required": [
+          "greeting"
+        ],
+        "properties": {
+          "greeting": {
+            "type": "string",
+            "maxLength": 2000,
+            "description": "The opening message from the initiating civilization."
+          },
+          "purpose": {
+            "type": "string",
+            "description": "Optional stated purpose of contact (open string)."
+          }
+        }
+      },
+      "MessageIntentData": {
+        "type": "object",
+        "title": "MessageIntentData",
+        "description": "Typed payload for a `message` interaction — a public message to another civ.",
+        "required": [
+          "body"
+        ],
+        "properties": {
+          "body": {
+            "type": "string",
+            "maxLength": 8000,
+            "description": "The message body."
+          },
+          "subject": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "inReplyTo": {
+            "description": "Optional interactionId this message replies to.",
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "InteractionRequest": {
+        "type": "object",
+        "title": "InteractionRequest",
+        "description": "A President-authorized intent to `contact` or `message` another civilization. Submitted by the source civ; the World queues it as a command for the target to pull. Idempotent via the `Idempotency-Key` header (and optional `idempotencyKey` field). All contact/message actions are public in MVP.",
+        "required": [
+          "kind",
+          "source",
+          "target",
+          "authorityDecision"
+        ],
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/InteractionKind"
+          },
+          "source": {
+            "type": "string",
+            "description": "Source civ id. MUST match the authenticated `X-Civ-Id`."
+          },
+          "target": {
+            "type": "string",
+            "description": "Target civ id."
+          },
+          "authorityDecision": {
+            "$ref": "#/components/schemas/AuthorityDecision"
+          },
+          "publicNarrative": {
+            "type": "string",
+            "description": "Citizen-visible narrative describing the action."
+          },
+          "payload": {
+            "description": "Kind-specific payload. For `contact` use ContactIntentData; for `message` use MessageIntentData. The open `anyOf` branch keeps additive kinds from breaking existing clients.",
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ContactIntentData"
+              },
+              {
+                "$ref": "#/components/schemas/MessageIntentData"
+              },
+              {
+                "type": "object",
+                "additionalProperties": true
+              }
+            ]
+          },
+          "idempotencyKey": {
+            "type": "string",
+            "description": "Optional client idempotency key (mirrors the Idempotency-Key header)."
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Optional expiry; the intent is abandoned if undelivered by then."
+          }
+        }
+      },
+      "Interaction": {
+        "type": "object",
+        "title": "Interaction",
+        "description": "The World's record and current status of a submitted interaction.",
+        "required": [
+          "interactionId",
+          "kind",
+          "source",
+          "target",
+          "status",
+          "public",
+          "createdAt"
+        ],
+        "properties": {
+          "interactionId": {
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/InteractionKind"
+          },
+          "source": {
+            "type": "string"
+          },
+          "target": {
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/InteractionStatus"
+          },
+          "authorityDecision": {
+            "$ref": "#/components/schemas/AuthorityDecision"
+          },
+          "publicNarrative": {
+            "type": "string"
+          },
+          "payload": {
+            "description": "The kind-specific payload as submitted (see InteractionRequest.payload).",
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ContactIntentData"
+              },
+              {
+                "$ref": "#/components/schemas/MessageIntentData"
+              },
+              {
+                "type": "object",
+                "additionalProperties": true
+              }
+            ]
+          },
+          "public": {
+            "type": "boolean",
+            "description": "Whether this interaction is citizen-visible (always true in MVP)."
+          },
+          "worldsequence": {
+            "description": "World total-order sequence, assigned once ordered into the ledger.",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/WorldSequence"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "correlationId": {
+            "type": "string",
+            "description": "Correlation id linking related interactions/commands/events."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "expiresAt": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "problem": {
+            "description": "Populated when status is `rejected` or `failed`.",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ProblemDetails"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "CloudEvent": {
+        "type": "object",
+        "title": "CloudEvent",
+        "description": "A CloudEvents 1.0 event in structured JSON mode, extended with federation attributes. Used for civ-originated domain events (events:batch) and, via Command, for world-originated commands.\nEnum policy: `type` is an OPEN string (reverse-DNS versioned name) so additive event/command types never break existing clients. Concrete payload schemas for known `type`s live under schemas/envelope/payloads and are referenced by examples; `data` is intentionally permissive at the envelope level to preserve forward compatibility.",
+        "required": [
+          "id",
+          "specversion",
+          "type",
+          "source"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Producer-scoped unique id. Together with `source` it dedupes events."
+          },
+          "specversion": {
+            "type": "string",
+            "const": "1.0",
+            "description": "CloudEvents spec version. Always \"1.0\"."
+          },
+          "type": {
+            "type": "string",
+            "description": "Event/command type in reverse-DNS, versioned form. Open set. Examples: `world.civilization.contact.v1`, `world.civilization.message.v1`, `civ.agent.acted.v1`.",
+            "examples": [
+              "world.civilization.message.v1"
+            ]
+          },
+          "source": {
+            "type": "string",
+            "format": "uri-reference",
+            "description": "Context in which the event happened (e.g. `/civilizations/{civId}`)."
+          },
+          "subject": {
+            "type": "string",
+            "description": "Subject of the event within the source context."
+          },
+          "time": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Timestamp of when the occurrence happened."
+          },
+          "datacontenttype": {
+            "type": "string",
+            "default": "application/json"
+          },
+          "dataschema": {
+            "type": "string",
+            "format": "uri-reference",
+            "description": "Identifies the schema that `data` adheres to (e.g. a payload $id)."
+          },
+          "data": {
+            "description": "Type-specific payload. Known command types use ContactCommandData or MessageCommandData; other types (e.g. civ domain events) use the open object form. The open `anyOf` branch preserves forward compatibility — a new payload shape validates against it without breaking existing clients.",
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ContactCommandData"
+              },
+              {
+                "$ref": "#/components/schemas/MessageCommandData"
+              },
+              {
+                "type": "object",
+                "additionalProperties": true
+              }
+            ]
+          },
+          "correlationid": {
+            "type": "string",
+            "description": "CloudEvents extension — correlates a causal chain of events/commands."
+          },
+          "causationid": {
+            "type": "string",
+            "description": "CloudEvents extension — the id of the event/command that caused this one."
+          },
+          "idempotencykey": {
+            "type": "string",
+            "description": "CloudEvents extension — receiver dedupe key. Replaying the same key returns the original result (at-least-once delivery, exactly-once effect)."
+          },
+          "worldsequence": {
+            "description": "CloudEvents extension — World-assigned total-order sequence (string int64). Null until the World has ordered the event into the ledger.",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/WorldSequence"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "Command": {
+        "title": "Command",
+        "description": "A world-originated command that a civ PULLs and then ACKs. A Command is a CloudEvent (so it carries the same envelope + extensions) plus command delivery metadata. The World never pushes commands to civ URLs; civs pull them from the commands feed.",
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/CloudEvent"
+          },
+          {
+            "type": "object",
+            "required": [
+              "commandid"
+            ],
+            "properties": {
+              "commandid": {
+                "type": "string",
+                "description": "World-assigned command id. Use this in the ack call."
+              },
+              "deliveredat": {
+                "type": "string",
+                "format": "date-time",
+                "description": "When the command became available to pull."
+              },
+              "expiresat": {
+                "type": "string",
+                "format": "date-time",
+                "description": "After this time an unacked command may be dropped by the World."
+              }
+            }
+          }
+        ]
+      },
+      "CommandPage": {
+        "type": "object",
+        "title": "CommandPage",
+        "description": "A cursor-paginated page of commands a civ pulls from the World.",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Command"
+            }
+          },
+          "nextCursor": {
+            "description": "Cursor to pass as `after` for the next pull, or null when caught up.",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Cursor"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "CommandAck": {
+        "type": "object",
+        "title": "CommandAck",
+        "description": "A civ's acknowledgment that it has processed a pulled command. Idempotent: re-acking the same command returns the original result with `duplicate` true.",
+        "required": [
+          "status"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "description": "Terminal outcome of applying the command.",
+            "enum": [
+              "applied",
+              "rejected",
+              "duplicate"
+            ]
+          },
+          "detail": {
+            "type": "string",
+            "description": "Optional human-readable note about the outcome."
+          },
+          "problem": {
+            "description": "Populated when `status` is `rejected`.",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ProblemDetails"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "appliedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "CommandAckResult": {
+        "type": "object",
+        "title": "CommandAckResult",
+        "description": "The World's response to a command acknowledgment.",
+        "required": [
+          "commandId",
+          "status"
+        ],
+        "properties": {
+          "commandId": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "applied",
+              "rejected",
+              "duplicate"
+            ]
+          },
+          "duplicate": {
+            "type": "boolean",
+            "default": false,
+            "description": "True if this ack was an idempotent replay of a prior ack."
+          },
+          "acknowledgedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "EventBatch": {
+        "type": "object",
+        "title": "EventBatch",
+        "description": "An at-least-once batch of civ-originated CloudEvents pushed to the World. Deduplicated per-event by the CloudEvents `idempotencykey` (falling back to `source` + `id`).",
+        "required": [
+          "events"
+        ],
+        "properties": {
+          "events": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 500,
+            "items": {
+              "$ref": "#/components/schemas/CloudEvent"
+            }
+          }
+        }
+      },
+      "EventBatchItemResult": {
+        "type": "object",
+        "title": "EventBatchItemResult",
+        "description": "Per-event result within an event batch response.",
+        "required": [
+          "id",
+          "status"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "The CloudEvent `id` echoed back."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "accepted",
+              "duplicate",
+              "rejected"
+            ]
+          },
+          "worldsequence": {
+            "description": "World total-order sequence assigned to an accepted event.",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/WorldSequence"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "problem": {
+            "description": "Populated when `status` is `rejected`.",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ProblemDetails"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "EventBatchResult": {
+        "type": "object",
+        "title": "EventBatchResult",
+        "description": "The World's response to an event batch — one result per submitted event.",
+        "required": [
+          "results"
+        ],
+        "properties": {
+          "acceptedCount": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "duplicateCount": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "results": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/EventBatchItemResult"
+            }
+          }
+        }
+      },
+      "EventPage": {
+        "type": "object",
+        "title": "EventPage",
+        "description": "A cursor-paginated page of public world events.",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CloudEvent"
+            }
+          },
+          "nextCursor": {
+            "description": "Cursor to pass as `after` for the next page, or null when caught up.",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Cursor"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "ContactCommandData": {
+        "type": "object",
+        "title": "ContactCommandData",
+        "description": "`data` payload for a world command of type `world.civilization.contact.v1`, delivered to the target civ when another civ initiates contact.",
+        "required": [
+          "interactionId",
+          "fromCiv"
+        ],
+        "properties": {
+          "interactionId": {
+            "type": "string",
+            "description": "The originating interaction id (use it to correlate replies)."
+          },
+          "fromCiv": {
+            "type": "string",
+            "description": "Civ id that initiated contact."
+          },
+          "fromDisplayName": {
+            "type": "string"
+          },
+          "greeting": {
+            "type": "string",
+            "description": "The opening greeting (mirrors ContactIntentData.greeting)."
+          },
+          "publicNarrative": {
+            "type": "string"
+          }
+        }
+      },
+      "MessageCommandData": {
+        "type": "object",
+        "title": "MessageCommandData",
+        "description": "`data` payload for a world command of type `world.civilization.message.v1`, delivering a public message from one civ to another.",
+        "required": [
+          "interactionId",
+          "fromCiv",
+          "body"
+        ],
+        "properties": {
+          "interactionId": {
+            "type": "string"
+          },
+          "fromCiv": {
+            "type": "string"
+          },
+          "fromDisplayName": {
+            "type": "string"
+          },
+          "subject": {
+            "type": "string"
+          },
+          "body": {
+            "type": "string"
+          },
+          "inReplyTo": {
+            "description": "Optional interactionId this message replies to.",
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      }
+    }
+  }
+}

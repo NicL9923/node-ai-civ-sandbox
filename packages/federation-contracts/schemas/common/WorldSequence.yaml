@@ -1,0 +1,11 @@
+type: string
+title: WorldSequence
+description: >-
+  Monotonic int64 total-order sequence number assigned by the World for
+  inter-civ events. Transported as a decimal string (not a JSON number) to avoid
+  precision loss for values greater than 2^53 in JavaScript and other IEEE-754
+  runtimes. A civ's own local sequence/cursor is separate from this value.
+pattern: "^[0-9]+$"
+examples:
+  - "1"
+  - "9007199254740993"

@@ -20,7 +20,12 @@
     "typecheck:civilization": "npm run typecheck:client -w apps/civilization",
     "dev:civilization": "npm run dev -w apps/civilization",
     "start:civilization": "npm run start -w apps/civilization",
-    "build:contracts": "echo \"[placeholder] packages/federation-contracts build lands in P1\"",
+    "build:contracts": "npm run build -w @ai-civ/federation-contracts",
+    "lint:contracts": "npm run lint -w @ai-civ/federation-contracts",
+    "generate:contracts": "npm run generate -w @ai-civ/federation-contracts",
+    "check:contracts": "npm run check -w @ai-civ/federation-contracts",
+    "typecheck:contracts": "npm run typecheck -w @ai-civ/federation-contracts",
+    "test:contracts": "npm run test -w @ai-civ/federation-contracts",
     "build:world": "echo \"[placeholder] apps/world-map build lands in P2\""
   }
 }

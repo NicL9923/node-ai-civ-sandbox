@@ -1,0 +1,58 @@
+type: object
+title: PublicProjection
+description: >-
+  Compact, citizen-safe public projection of a civilization, returned by the
+  list/get map endpoints and echoed on heartbeat. This schema is the public
+  contract boundary: it MUST NOT include AgentProfile data, model identifiers or
+  secrets, private agent memory, admin keys, or service-to-service secrets.
+required:
+  - civId
+  - displayName
+  - protocolVersion
+  - turn
+  - running
+  - population
+  - updatedAt
+properties:
+  civId:
+    type: string
+    description: Stable World-assigned civilization id.
+  displayName:
+    type: string
+    description: Public display name of the civilization.
+  protocolVersion:
+    type: string
+    description: Protocol version the civ currently implements.
+  turn:
+    type: integer
+    minimum: 0
+    description: The civ's current local turn number.
+  running:
+    type: boolean
+    description: Whether the civ's simulation is actively advancing.
+  population:
+    type: integer
+    minimum: 0
+    description: Number of active citizen agents.
+  president:
+    description: Current head of state, or null during an interregnum.
+    oneOf:
+      - $ref: ./Leader.yaml
+      - type: "null"
+  economy:
+    description: Safe aggregate economy summary.
+    oneOf:
+      - $ref: ./EconomySummary.yaml
+      - type: "null"
+  lastProcessedWorldCursor:
+    description: The last world command/event cursor the civ has processed.
+    oneOf:
+      - $ref: ../common/Cursor.yaml
+      - type: "null"
+  etag:
+    type: string
+    description: Opaque version tag for optimistic concurrency / caching.
+  updatedAt:
+    type: string
+    format: date-time
+    description: When this projection was last updated by the civ.

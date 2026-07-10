@@ -1,0 +1,26 @@
+type: object
+title: HeartbeatAck
+description: World's response to a heartbeat, including pull hints.
+required:
+  - civId
+  - serverTime
+properties:
+  civId:
+    type: string
+  serverTime:
+    type: string
+    format: date-time
+    description: Authoritative server time (useful for clock-skew estimation).
+  nextHeartbeatInSeconds:
+    type: integer
+    minimum: 1
+    description: Suggested delay before the next heartbeat.
+  pendingCommandCount:
+    type: integer
+    minimum: 0
+    description: Number of commands currently queued for this civ to pull.
+  commandsCursor:
+    description: Cursor the civ should use for its next commands pull.
+    oneOf:
+      - $ref: ../common/Cursor.yaml
+      - type: "null"

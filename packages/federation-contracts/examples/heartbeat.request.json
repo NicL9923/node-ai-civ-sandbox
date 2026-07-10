@@ -1,0 +1,21 @@
+{
+  "projection": {
+    "civId": "civ_aurora",
+    "displayName": "Republic of Aurora",
+    "protocolVersion": "1.0.0",
+    "turn": 42,
+    "running": true,
+    "population": 13,
+    "president": {
+      "ref": "leader_current",
+      "name": "Silas",
+      "title": "President",
+      "termNumber": 3
+    },
+    "economy": { "treasury": 1200, "currency": "credits" },
+    "lastProcessedWorldCursor": "eyJvIjo0Mn0",
+    "etag": "W/\"v42\"",
+    "updatedAt": "2026-07-10T18:01:00Z"
+  },
+  "lastProcessedWorldCursor": "eyJvIjo0Mn0"
+}

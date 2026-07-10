@@ -32,9 +32,33 @@ start:
 
 # --- Placeholders for future workstreams (do not implement here) ---
 
-# P1: build the cross-civilization federation contracts.
+# --- Federation contracts (P1: OpenAPI 3.1 -> generated TypeScript + C#) ---
+
+# Full contract quality gate: lint + drift check + tests.
 contracts:
-    @echo "[placeholder] packages/federation-contracts build lands in P1"
+    npm run build:contracts
+
+# Lint the OpenAPI document.
+contracts-lint:
+    npm run lint:contracts
+
+# Regenerate the bundle + TypeScript + C# artifacts.
+contracts-generate:
+    npm run generate:contracts
+
+# Fail if generated artifacts are out of date (CI drift gate).
+contracts-check:
+    npm run check:contracts
+
+# Run the schema/example validation tests.
+contracts-test:
+    npm run test:contracts
+
+# Build the generated C# client (proves it compiles).
+contracts-build-csharp:
+    dotnet build packages/federation-contracts/csharp/FederationContracts.csproj
+
+# --- Placeholder for the future world-map workstream (do not implement here) ---
 
 # P2: build the world-map app (web + service).
 world:
