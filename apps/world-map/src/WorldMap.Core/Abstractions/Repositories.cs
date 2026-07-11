@@ -68,16 +68,22 @@ public interface ICommandRepository
     Task<Command> EnqueueAsync(Command command, CancellationToken ct);
 
     /// <summary>
-    /// Compare-and-set the terminal ack outcome. Succeeds only if the command is not already acked;
-    /// returns the authoritative (post-transition or pre-existing) command and whether this call won.
+    /// Compare-and-set the terminal ack transition. Mutually exclusive with expiry: an ACK wins only
+    /// if the command is neither already acked nor already terminally expired. Returns the outcome and
+    /// the authoritative command.
     /// </summary>
     Task<CommandAckTransition> TryAckAsync(string targetCivId, string commandId, CommandAckStatus status, DateTimeOffset now, CancellationToken ct);
 
     /// <summary>Marks a command's ack propagation to its interaction as reconciled.</summary>
     Task MarkAckReconciledAsync(string targetCivId, string commandId, CancellationToken ct);
 
-    /// <summary>Marks an un-acked command expired (compare-and-set; no-op if already acked/expired).</summary>
-    Task MarkExpiredAsync(string targetCivId, string commandId, CancellationToken ct);
+    /// <summary>
+    /// Compare-and-set the terminal expiry transition. Wins only if the command is neither acked nor
+    /// already expired. Returns <c>true</c> only when THIS call performed the transition — so the
+    /// caller advances the linked interaction to expired only when expiry actually won (never when an
+    /// ACK already won the race).
+    /// </summary>
+    Task<bool> MarkExpiredAsync(string targetCivId, string commandId, CancellationToken ct);
 
     /// <summary>
     /// Non-expired, un-acked commands for a civ with sequence &gt; <paramref name="afterSequence"/>,
@@ -95,8 +101,25 @@ public interface ICommandRepository
     Task<IReadOnlyList<Command>> ListUnreconciledAsync(CancellationToken ct);
 }
 
+/// <summary>Outcome of a mutually-exclusive command terminal transition.</summary>
+public enum CommandAckOutcome
+{
+    /// <summary>This ACK won the terminal transition; the command is now acked.</summary>
+    Applied,
+
+    /// <summary>The command was already acked; a replay observes the same terminal outcome.</summary>
+    AlreadyAcked,
+
+    /// <summary>The command had already terminally expired; the ACK loses and is rejected.</summary>
+    Expired,
+}
+
 /// <summary>Result of a compare-and-set command ack transition.</summary>
-public readonly record struct CommandAckTransition(bool Won, Command Command);
+public readonly record struct CommandAckTransition(CommandAckOutcome Outcome, Command Command)
+{
+    /// <summary>True only when this call performed the winning ack transition.</summary>
+    public bool Won => Outcome == CommandAckOutcome.Applied;
+}
 
 /// <summary>
 /// The ordered public world-event ledger backing <c>/events</c> and the SSE stream.

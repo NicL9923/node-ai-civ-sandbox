@@ -72,6 +72,9 @@ public static class WorldMapInfrastructureServiceCollectionExtensions
         services.AddSingleton<IIdempotencyStore, InMemoryIdempotencyStore>();
         services.AddSingleton<IOnboardingTokenStore, InMemoryOnboardingTokenStore>();
         services.AddSingleton<IReadinessProbe, InMemoryReadinessProbe>();
+
+        // A single in-process instance is inherently the sole writer — the lease is always held.
+        services.AddSingleton(new WriterLeaseState(initiallyHeld: true));
     }
 
     private static void AddCosmos(IServiceCollection services, WorldMapOptions options)
@@ -114,5 +117,16 @@ public static class WorldMapInfrastructureServiceCollectionExtensions
         services.AddSingleton<IIdempotencyStore, CosmosIdempotencyStore>();
         services.AddSingleton<IOnboardingTokenStore, CosmosOnboardingTokenStore>();
         services.AddSingleton<IReadinessProbe, CosmosReadinessProbe>();
+
+        // Single-writer lease (fail-closed). When disabled, the instance is treated as always the
+        // writer (dev/first-run); when enabled, the lease worker maintains the held state and the
+        // readiness probe + maintenance worker gate on it.
+        var leaseEnabled = options.Storage.SingleWriterLease.Enabled;
+        services.AddSingleton(new WriterLeaseState(initiallyHeld: !leaseEnabled));
+        services.AddSingleton<IWriterLeaseStore, CosmosWriterLeaseStore>();
+        if (leaseEnabled)
+        {
+            services.AddHostedService<WriterLeaseWorker>();
+        }
     }
 }

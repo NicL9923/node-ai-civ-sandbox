@@ -51,6 +51,26 @@ public sealed class StorageOptions
     /// otherwise. Enable only for explicit dev/first-run provisioning.
     /// </summary>
     public bool BootstrapEnabled { get; set; }
+
+    /// <summary>Single-writer lease settings (Cosmos provider). Fail-closed defense for scale = 1.</summary>
+    public SingleWriterLeaseOptions SingleWriterLease { get; set; } = new();
+}
+
+/// <summary>
+/// Single-writer lease configuration. The World runs at App Service scale = 1 for the MVP; the lease
+/// ensures that if a second instance ever runs, only one acts as the writer and the other fails
+/// readiness. Not a scale-out sequencer.
+/// </summary>
+public sealed class SingleWriterLeaseOptions
+{
+    /// <summary>When true (default), a Cosmos instance must hold the writer lease to be ready/mutate.</summary>
+    public bool Enabled { get; set; } = true;
+
+    /// <summary>Lease duration; a holder that stops renewing loses the lease after this long.</summary>
+    public int LeaseDurationSeconds { get; set; } = 30;
+
+    /// <summary>How often the holder renews (should be well below the lease duration).</summary>
+    public int RenewIntervalSeconds { get; set; } = 10;
 }
 
 public sealed class OnboardingOptions
@@ -111,6 +131,21 @@ public sealed class EventOptions
 
     /// <summary>Maximum serialized bytes of a public event feed page.</summary>
     public int MaxPublicPageBytes { get; set; } = 262144;
+
+    /// <summary>
+    /// Maximum serialized bytes of a single accepted CloudEvent envelope (id/type/source/data/
+    /// extensions/etc.). Kept well under the Cosmos ~2 MB item limit so every persisted event fits.
+    /// </summary>
+    public int MaxEventBytes { get; set; } = 65536;
+
+    /// <summary>Maximum aggregate serialized bytes of an entire ingestion batch request.</summary>
+    public int MaxBatchBytes { get; set; } = 1048576;
+
+    /// <summary>Maximum characters for any single string envelope field (id/type/source/subject/ids).</summary>
+    public int MaxFieldChars { get; set; } = 1024;
+
+    /// <summary>Maximum number of additive CloudEvents extension attributes on one event.</summary>
+    public int MaxExtensions { get; set; } = 32;
 }
 
 public sealed class MaintenanceOptions

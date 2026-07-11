@@ -80,20 +80,21 @@ public sealed class RegistrationTests : WorldTestBase
     }
 
     [Fact]
-    public async Task Register_same_key_with_different_body_returns_409_idempotency_conflict()
+    public async Task Register_same_token_with_different_body_returns_409_registration_conflict()
     {
         var key = Guid.NewGuid().ToString("N");
 
         var first = await RegisterAsync(WorldAppFactory.PrimaryOnboardingToken, key, displayName: "Republic of Aurora");
         Assert.Equal(HttpStatusCode.Created, first.StatusCode);
 
-        // Same token + same Idempotency-Key but a DIFFERENT request body: the stored fingerprint
-        // no longer matches, so this is a hard idempotency conflict, not a replay.
-        var conflict = await RegisterAsync(WorldAppFactory.PrimaryOnboardingToken, key, displayName: "Totally Different Name");
+        // Same token but a DIFFERENT registration profile: registration is anchored to the token hash
+        // (independent of the HTTP Idempotency-Key), so a different fingerprint is a registration
+        // conflict and the existing civ is never mutated.
+        var conflict = await RegisterAsync(WorldAppFactory.PrimaryOnboardingToken, Guid.NewGuid().ToString("N"), displayName: "Totally Different Name");
 
         Assert.Equal(HttpStatusCode.Conflict, conflict.StatusCode);
         var problem = await ProblemBody.ReadAsync(conflict);
-        Assert.Equal("idempotency_conflict", problem.Code);
+        Assert.Equal("registration_conflict", problem.Code);
     }
 
     [Fact]

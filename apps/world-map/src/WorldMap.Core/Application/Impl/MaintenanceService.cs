@@ -77,9 +77,14 @@ public sealed class MaintenanceService(
         var count = 0;
         foreach (var command in await commands.ListExpirableAsync(now, ct))
         {
-            await commands.MarkExpiredAsync(command.TargetCivId, command.CommandId, ct);
+            // Only advance the linked interaction to expired when THIS call actually won the
+            // command's terminal expiry transition. If an ACK won the race concurrently,
+            // MarkExpiredAsync returns false and the interaction is reconciled by the ack path instead.
+            if (!await commands.MarkExpiredAsync(command.TargetCivId, command.CommandId, ct))
+            {
+                continue;
+            }
 
-            // A command expiring drives its linked interaction to a terminal expired state.
             if (command.InteractionId is not null)
             {
                 await AdvanceInteractionAsync(command.InteractionId, i => i.Expire(now), ct);

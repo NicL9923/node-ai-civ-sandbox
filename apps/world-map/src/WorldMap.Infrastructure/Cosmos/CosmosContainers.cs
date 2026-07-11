@@ -19,6 +19,9 @@ internal static class CosmosContainers
     /// <summary>Counter documents backing the atomic sequence/ordinal allocators (PK = stream name).</summary>
     public const string Sequences = "sequences";
 
+    /// <summary>Single-writer lease lock document (id = PK = <c>world-writer</c>).</summary>
+    public const string Lock = "lock";
+
     /// <summary>Uniform partition-key path used by every container (see <see cref="CosmosDoc{T}"/>).</summary>
     public const string PartitionKeyPath = "/pk";
 
@@ -45,6 +48,7 @@ internal static class CosmosContainers
         Nonces,
         Onboarding,
         Sequences,
+        Lock,
     ];
 }
 

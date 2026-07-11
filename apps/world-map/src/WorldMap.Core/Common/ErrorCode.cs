@@ -10,6 +10,7 @@ public enum ErrorCode
     // Generic
     InvalidRequest,
     ValidationFailed,
+    PayloadTooLarge,
     Unauthorized,
     AccessDenied,
     NotFound,

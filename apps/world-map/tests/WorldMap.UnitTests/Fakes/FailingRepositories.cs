@@ -68,7 +68,7 @@ internal sealed class ThrowOnceAfterCommandEnqueue(ICommandRepository inner) : I
         inner.TryAckAsync(targetCivId, commandId, status, now, ct);
     public Task MarkAckReconciledAsync(string targetCivId, string commandId, CancellationToken ct) =>
         inner.MarkAckReconciledAsync(targetCivId, commandId, ct);
-    public Task MarkExpiredAsync(string targetCivId, string commandId, CancellationToken ct) =>
+    public Task<bool> MarkExpiredAsync(string targetCivId, string commandId, CancellationToken ct) =>
         inner.MarkExpiredAsync(targetCivId, commandId, ct);
     public Task<IReadOnlyList<Command>> PullAsync(string targetCivId, long afterSequence, int limit, CancellationToken ct) =>
         inner.PullAsync(targetCivId, afterSequence, limit, ct);
@@ -84,9 +84,9 @@ internal sealed class ThrowOnceAfterTokenReserve(IOnboardingTokenStore inner) : 
 {
     private int _remaining = 1;
 
-    public async Task<bool> TryReserveAsync(string tokenHash, string civId, CancellationToken ct)
+    public async Task<OnboardingReservationOutcome> ReserveAsync(string tokenHash, string civId, string fingerprint, CancellationToken ct)
     {
-        var result = await inner.TryReserveAsync(tokenHash, civId, ct);
+        var result = await inner.ReserveAsync(tokenHash, civId, fingerprint, ct);
         if (Interlocked.Exchange(ref _remaining, 0) == 1)
         {
             throw new InjectedFailureException();

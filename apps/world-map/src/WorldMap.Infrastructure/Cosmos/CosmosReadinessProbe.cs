@@ -16,7 +16,7 @@ namespace WorldMap.Infrastructure.Cosmos;
 /// the opt-in <see cref="CosmosBootstrapper"/>'s job). Any Cosmos error is reported as
 /// <c>Ready=false</c> with a detail rather than thrown.</para>
 /// </summary>
-public sealed class CosmosReadinessProbe(CosmosClient client, IOptions<WorldMapOptions> options) : IReadinessProbe
+public sealed class CosmosReadinessProbe(CosmosClient client, IOptions<WorldMapOptions> options, WriterLeaseState leaseState) : IReadinessProbe
 {
     private readonly string _databaseName = options.Value.Storage.DatabaseName;
 
@@ -56,22 +56,46 @@ public sealed class CosmosReadinessProbe(CosmosClient client, IOptions<WorldMapO
                 return new ReadinessResult(false, $"Cosmos container '{name}' unavailable: {ex.StatusCode}.");
             }
 
-            // The schema must match what the runtime assumes: a uniform '/pk' partition key, and TTL
-            // enabled on the containers whose per-item expiry (nonce/idempotency) relies on it.
+            // The schema must match what the runtime assumes: a uniform '/pk' partition key, and a
+            // safe time-to-live posture per the container's role.
             if (properties.PartitionKeyPath != CosmosContainers.PartitionKeyPath)
             {
                 return new ReadinessResult(false,
                     $"Cosmos container '{name}' has partition key '{properties.PartitionKeyPath}', expected '{CosmosContainers.PartitionKeyPath}'.");
             }
 
-            if (CosmosContainers.TtlContainers.Contains(name) && properties.DefaultTimeToLive is null or 0)
+            if (CosmosContainers.TtlContainers.Contains(name))
             {
-                return new ReadinessResult(false, $"Cosmos container '{name}' requires time-to-live to be enabled.");
+                // Ephemeral containers (nonce/idempotency) rely on per-item TTL to self-purge — it must be enabled.
+                if (properties.DefaultTimeToLive is null or 0)
+                {
+                    return new ReadinessResult(false, $"Cosmos container '{name}' requires time-to-live to be enabled.");
+                }
+            }
+            else
+            {
+                // Durable containers must NOT carry a positive default TTL, which would silently delete data.
+                // Absent (null) or -1 (on, no blanket default) is required.
+                if (properties.DefaultTimeToLive is > 0)
+                {
+                    return new ReadinessResult(false,
+                        $"Cosmos container '{name}' has a destructive positive default time-to-live ({properties.DefaultTimeToLive}s); durable containers must have none or -1.");
+                }
             }
         }
 
-        return missing.Count == 0
-            ? new ReadinessResult(true, $"Cosmos database '{_databaseName}' and containers ready.")
-            : new ReadinessResult(false, $"Cosmos containers missing: {string.Join(", ", missing)}.");
+        if (missing.Count > 0)
+        {
+            return new ReadinessResult(false, $"Cosmos containers missing: {string.Join(", ", missing)}.");
+        }
+
+        // Fail closed: an instance that does not hold the single-writer lease must not be routed
+        // mutation traffic. (When the lease is disabled, the state is initialized held.)
+        if (!leaseState.IsHeld)
+        {
+            return new ReadinessResult(false, "This instance does not hold the single-writer lease.");
+        }
+
+        return new ReadinessResult(true, $"Cosmos database '{_databaseName}' and containers ready.");
     }
 }

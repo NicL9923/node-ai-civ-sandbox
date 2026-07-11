@@ -10,9 +10,11 @@ public abstract class WorldTestBase : IAsyncLifetime
     protected WorldAppFactory Factory { get; private set; } = null!;
     protected HttpClient Client { get; private set; } = null!;
 
+    protected virtual WorldAppFactory CreateFactory() => new();
+
     public Task InitializeAsync()
     {
-        Factory = new WorldAppFactory();
+        Factory = CreateFactory();
         Client = Factory.CreateClient();
         return Task.CompletedTask;
     }

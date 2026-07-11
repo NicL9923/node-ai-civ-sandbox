@@ -15,6 +15,7 @@ public static class ApiResults
     private static (int Status, string Code, bool Retryable) Map(ErrorCode code) => code switch
     {
         ErrorCode.ValidationFailed => (400, "validation_failed", false),
+        ErrorCode.PayloadTooLarge => (400, "payload_too_large", false),
         ErrorCode.InvalidRequest => (400, "invalid_request", false),
         ErrorCode.InvalidOnboardingToken => (400, "invalid_onboarding_token", false),
 

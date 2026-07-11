@@ -2,6 +2,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using WorldMap.Core.Abstractions;
 using WorldMap.Core.Application;
 using WorldMap.Core.Configuration;
 
@@ -10,10 +11,12 @@ namespace WorldMap.Api.Workers;
 /// <summary>
 /// Periodic maintenance worker: expires stale commands/interactions and (implicitly)
 /// keeps derived liveness current. Performs NO outbound civ calls — the World never
-/// initiates network calls to civilizations.
+/// initiates network calls to civilizations. Skips its sweep whenever this instance does not hold
+/// the single-writer lease, so background mutations run on at most one instance.
 /// </summary>
 public sealed class WorldMaintenanceWorker(
     IServiceScopeFactory scopeFactory,
+    WriterLeaseState leaseState,
     IOptions<WorldMapOptions> options,
     ILogger<WorldMaintenanceWorker> logger) : BackgroundService
 {
@@ -35,9 +38,17 @@ public sealed class WorldMaintenanceWorker(
         {
             try
             {
-                await using var scope = scopeFactory.CreateAsyncScope();
-                var maintenance = scope.ServiceProvider.GetRequiredService<IMaintenanceService>();
-                await maintenance.SweepAsync(stoppingToken);
+                // Only the single-writer lease holder runs mutations.
+                if (!leaseState.IsHeld)
+                {
+                    logger.LogDebug("Skipping maintenance sweep: this instance does not hold the single-writer lease.");
+                }
+                else
+                {
+                    await using var scope = scopeFactory.CreateAsyncScope();
+                    var maintenance = scope.ServiceProvider.GetRequiredService<IMaintenanceService>();
+                    await maintenance.SweepAsync(stoppingToken);
+                }
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {

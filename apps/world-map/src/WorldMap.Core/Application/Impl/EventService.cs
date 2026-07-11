@@ -69,9 +69,13 @@ public sealed class EventService(
 
         foreach (var evt in request.Events)
         {
-            // Producer-scoped dedupe identity: never the raw event id alone.
-            var producerKey = !string.IsNullOrEmpty(evt!.Idempotencykey) ? evt.Idempotencykey : $"{evt.Source}|{evt.Id}";
-            var dedupeKey = $"civ:{civId}:{Deterministic.ShortHash(producerKey!)}";
+            // Producer-scoped dedupe identity with an explicit namespace discriminator and a NUL
+            // separator, so an idempotency key can never collide with a source+id fallback (or with
+            // a crafted value that mimics the other form). Never the raw event id alone.
+            var rawIdentity = !string.IsNullOrEmpty(evt!.Idempotencykey)
+                ? $"idem\0{evt.Idempotencykey}"
+                : $"source-id\0{evt.Source}\0{evt.Id}";
+            var dedupeKey = $"civ:{civId}:{Deterministic.ShortHash(rawIdentity)}";
 
             var append = await worldEvents.AppendAsync(new WorldEvent
             {
@@ -192,6 +196,15 @@ public sealed class EventService(
             return ErrorResult.Create(ErrorCode.ValidationFailed, $"Event batch exceeds the maximum of {_options.Events.MaxBatchSize} events.");
         }
 
+        // Aggregate input size guard (before any per-event work or persistence).
+        var batchBytes = Utf8Bytes(request);
+        if (batchBytes > _options.Events.MaxBatchBytes)
+        {
+            return ErrorResult.Create(ErrorCode.PayloadTooLarge,
+                $"Event batch is {batchBytes} bytes, exceeding the maximum of {_options.Events.MaxBatchBytes}.",
+                errors: [new FieldError("/events", "batch is too large.")]);
+        }
+
         for (var i = 0; i < request.Events.Count; i++)
         {
             var evt = request.Events[i];
@@ -224,8 +237,81 @@ public sealed class EventService(
                 return ErrorResult.Create(ErrorCode.ValidationFailed, "Event data must be a JSON object when present.",
                     errors: [new FieldError($"/events/{i}/data", "data must be an object.")]);
             }
+
+            if (SizeError(evt, i) is { } sizeError)
+            {
+                return sizeError;
+            }
         }
 
         return null;
     }
+
+    /// <summary>
+    /// Bounds a single event's field lengths, extension count, full accepted envelope size, and the
+    /// size of its derived public projection — all measured BEFORE any sequence allocation or
+    /// persistence, so an oversized event is rejected with zero side effects and every event that is
+    /// accepted is guaranteed to fit the Cosmos item and public feed/SSE budgets.
+    /// </summary>
+    private ErrorInfo? SizeError(CloudEventDto evt, int index)
+    {
+        var opts = _options.Events;
+
+        foreach (var (field, value) in new[]
+                 {
+                     ("id", evt.Id), ("type", evt.Type), ("source", evt.Source), ("subject", evt.Subject),
+                     ("correlationid", evt.Correlationid), ("causationid", evt.Causationid), ("idempotencykey", evt.Idempotencykey),
+                 })
+        {
+            if (value is not null && value.Length > opts.MaxFieldChars)
+            {
+                return ErrorResult.Create(ErrorCode.PayloadTooLarge,
+                    $"Event field '{field}' exceeds {opts.MaxFieldChars} characters.",
+                    errors: [new FieldError($"/events/{index}/{field}", "field is too long.")]);
+            }
+        }
+
+        if (evt.Extensions is { } ext && ext.Count > opts.MaxExtensions)
+        {
+            return ErrorResult.Create(ErrorCode.PayloadTooLarge,
+                $"Event has {ext.Count} extension attributes, exceeding the maximum of {opts.MaxExtensions}.",
+                errors: [new FieldError($"/events/{index}", "too many extension attributes.")]);
+        }
+
+        var envelopeBytes = Utf8Bytes(evt);
+        if (envelopeBytes > opts.MaxEventBytes)
+        {
+            return ErrorResult.Create(ErrorCode.PayloadTooLarge,
+                $"Event is {envelopeBytes} bytes, exceeding the maximum of {opts.MaxEventBytes}.",
+                errors: [new FieldError($"/events/{index}", "event is too large.")]);
+        }
+
+        // The derived public projection must also fit the per-event public budget (defense in depth;
+        // civ-ingested events carry no public data, so this is normally tiny).
+        var publicBytes = Utf8Bytes(ToPublicPreview(evt));
+        if (publicBytes > opts.MaxEventBytes)
+        {
+            return ErrorResult.Create(ErrorCode.PayloadTooLarge,
+                "Event's public projection exceeds the maximum event size.",
+                errors: [new FieldError($"/events/{index}", "public projection is too large.")]);
+        }
+
+        return null;
+    }
+
+    /// <summary>The public projection an ingested event would receive (metadata only; never producer data).</summary>
+    private static CloudEventDto ToPublicPreview(CloudEventDto evt) => new()
+    {
+        Id = evt.Id!,
+        Specversion = SpecVersion,
+        Type = evt.Type!,
+        Source = evt.Source!,
+        Subject = evt.Subject,
+        Time = evt.Time,
+        Correlationid = evt.Correlationid,
+        Causationid = evt.Causationid,
+    };
+
+    private static int Utf8Bytes<T>(T value) =>
+        System.Text.Encoding.UTF8.GetByteCount(System.Text.Json.JsonSerializer.Serialize(value, WorldMapJson.Options));
 }

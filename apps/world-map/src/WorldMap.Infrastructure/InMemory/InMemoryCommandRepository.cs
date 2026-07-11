@@ -58,15 +58,21 @@ public sealed class InMemoryCommandRepository(TimeProvider clock) : ICommandRepo
                 throw new InvalidOperationException($"Command '{commandId}' not found for '{targetCivId}'.");
             }
 
+            // Mutually exclusive terminal transition: expiry and ack cannot both win.
+            if (stored.Expired && stored.AckStatus is null)
+            {
+                return Task.FromResult(new CommandAckTransition(CommandAckOutcome.Expired, InMemoryClone.Copy(stored)));
+            }
+
             if (stored.AckStatus is not null)
             {
-                return Task.FromResult(new CommandAckTransition(false, InMemoryClone.Copy(stored)));
+                return Task.FromResult(new CommandAckTransition(CommandAckOutcome.AlreadyAcked, InMemoryClone.Copy(stored)));
             }
 
             stored.AckStatus = status;
             stored.AckedAt = now;
             stored.Version++;
-            return Task.FromResult(new CommandAckTransition(true, InMemoryClone.Copy(stored)));
+            return Task.FromResult(new CommandAckTransition(CommandAckOutcome.Applied, InMemoryClone.Copy(stored)));
         }
     }
 
@@ -84,19 +90,21 @@ public sealed class InMemoryCommandRepository(TimeProvider clock) : ICommandRepo
         return Task.CompletedTask;
     }
 
-    public Task MarkExpiredAsync(string targetCivId, string commandId, CancellationToken ct)
+    public Task<bool> MarkExpiredAsync(string targetCivId, string commandId, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
         lock (_gate)
         {
-            if (_byKey.TryGetValue((targetCivId, commandId), out var stored) && stored.AckStatus is null)
+            // Expiry wins only over a command that is neither acked nor already expired.
+            if (_byKey.TryGetValue((targetCivId, commandId), out var stored) && stored.AckStatus is null && !stored.Expired)
             {
                 stored.Expired = true;
                 stored.Version++;
+                return Task.FromResult(true);
             }
         }
 
-        return Task.CompletedTask;
+        return Task.FromResult(false);
     }
 
     public Task<IReadOnlyList<Command>> PullAsync(string targetCivId, long afterSequence, int limit, CancellationToken ct)

@@ -88,10 +88,56 @@ internal sealed class CosmosSequenceAllocator(Container counters, string stream)
         }
     }
 
-    private Task WriteCounterAsync(long value, CancellationToken ct)
+    private async Task WriteCounterAsync(long value, CancellationToken ct)
     {
-        var doc = CosmosDoc.Create(_id, stream, new CosmosSequenceCounter { Stream = stream, Value = value });
-        return counters.UpsertItemAsync(doc, _pk, cancellationToken: ct);
+        // ETag/conditional increment — never a blind upsert — so a brief two-writer overlap can never
+        // lower the counter or duplicate a value. The counter is only a restart optimization (the
+        // MAX-scan seed recovers it), so a lost race here is harmless.
+        for (var attempt = 0; attempt < 3; attempt++)
+        {
+            CosmosDoc<CosmosSequenceCounter>? existing = null;
+            try
+            {
+                var read = await counters.ReadItemAsync<CosmosDoc<CosmosSequenceCounter>>(_id, _pk, cancellationToken: ct)
+                    .ConfigureAwait(false);
+                existing = read.Resource;
+            }
+            catch (CosmosException ex) when (ex.StatusCode == HttpStatusCode.NotFound)
+            {
+                // No counter yet — create it below.
+            }
+
+            if (existing is null)
+            {
+                try
+                {
+                    var doc = CosmosDoc.Create(_id, stream, new CosmosSequenceCounter { Stream = stream, Value = value });
+                    await counters.CreateItemAsync(doc, _pk, cancellationToken: ct).ConfigureAwait(false);
+                    return;
+                }
+                catch (CosmosException ex) when (ex.StatusCode == HttpStatusCode.Conflict)
+                {
+                    continue; // Another writer created it first — re-read and re-evaluate.
+                }
+            }
+
+            if (existing.Payload.Value >= value)
+            {
+                return; // Already at or past this value — never move the counter backwards.
+            }
+
+            existing.Payload.Value = value;
+            try
+            {
+                var options = new ItemRequestOptions { IfMatchEtag = existing.Etag };
+                await counters.ReplaceItemAsync(existing, _id, _pk, options, ct).ConfigureAwait(false);
+                return;
+            }
+            catch (CosmosException ex) when (ex.StatusCode == HttpStatusCode.PreconditionFailed)
+            {
+                // Lost the race — re-read and retry.
+            }
+        }
     }
 }
 

@@ -31,22 +31,15 @@ public sealed class CosmosIdempotencyStore(CosmosClient client, IOptions<WorldMa
     {
         var id = CosmosId.Hash(scope);
         var pk = new PartitionKey(scope);
+        var nowEpoch = now.ToUnixTimeSeconds();
 
         for (var attempt = 0; attempt < MaxAttempts; attempt++)
         {
-            var record = new IdempotencyRecord
-            {
-                Scope = scope,
-                Fingerprint = fingerprint,
-                State = IdempotencyState.Pending,
-                CreatedAt = now,
-                LeaseExpiresAt = now.AddSeconds(IdempotencyRecord.PendingLeaseSeconds),
-                ExpiresAt = expiresAt,
-            };
+            var fresh = NewPending(scope, fingerprint, now, expiresAt);
 
             try
             {
-                var created = await _container.CreateItemAsync(ToDoc(id, scope, record, now), pk, cancellationToken: ct)
+                var created = await _container.CreateItemAsync(ToDoc(id, scope, fresh, now), pk, cancellationToken: ct)
                     .ConfigureAwait(false);
                 return new IdempotencyClaim(IdempotencyClaimOutcome.Won, created.Resource.Payload);
             }
@@ -58,49 +51,52 @@ public sealed class CosmosIdempotencyStore(CosmosClient client, IOptions<WorldMa
                     continue; // Raced with a TTL purge — retry the create.
                 }
 
-                if (ReclaimEpoch(existing.Payload) <= now.ToUnixTimeSeconds())
+                // The scope is free only when the record has fully expired (idempotency TTL elapsed),
+                // not merely when a pending lease elapsed. A fully expired record can be reclaimed by
+                // ANY fingerprint as a brand-new claim.
+                if (existing.Payload.ExpiresAt.ToUnixTimeSeconds() <= nowEpoch)
                 {
-                    // Pending lease elapsed (or completed record fully expired): reclaim as a fresh
-                    // pending claim (won) — atomically, so exactly one caller takes over.
-                    try
+                    if (await TryReplaceAsync(id, scope, pk, fresh, now, existing.Etag, ct).ConfigureAwait(false) is { } won)
                     {
-                        var replaceOptions = new ItemRequestOptions { IfMatchEtag = existing.Etag };
-                        var reclaimed = await _container.ReplaceItemAsync(
-                            ToDoc(id, scope, record, now), id, pk, replaceOptions, ct).ConfigureAwait(false);
-                        return new IdempotencyClaim(IdempotencyClaimOutcome.Won, reclaimed.Resource.Payload);
+                        return new IdempotencyClaim(IdempotencyClaimOutcome.Won, won);
                     }
-                    catch (CosmosException replaceEx) when (replaceEx.StatusCode == HttpStatusCode.PreconditionFailed)
-                    {
-                        continue; // Another claimant reclaimed first — re-evaluate.
-                    }
+
+                    continue; // Another claimant reclaimed first — re-evaluate.
                 }
 
+                // Live record: a different fingerprint is ALWAYS a conflict, checked before any reclaim.
                 if (existing.Payload.Fingerprint != fingerprint)
                 {
                     return new IdempotencyClaim(IdempotencyClaimOutcome.FingerprintConflict, existing.Payload);
                 }
 
-                var outcome = existing.Payload.State == IdempotencyState.Completed
-                    ? IdempotencyClaimOutcome.Completed
-                    : IdempotencyClaimOutcome.AlreadyPending;
-                return new IdempotencyClaim(outcome, existing.Payload);
+                if (existing.Payload.State == IdempotencyState.Completed)
+                {
+                    return new IdempotencyClaim(IdempotencyClaimOutcome.Completed, existing.Payload);
+                }
+
+                // Pending, same fingerprint: reclaim only once the owner's lease elapsed. Preserve the
+                // record's ExpiresAt/CreatedAt/Fingerprint; issue a fresh lease token.
+                if (existing.Payload.LeaseExpiresAt.ToUnixTimeSeconds() <= nowEpoch)
+                {
+                    var reclaim = Reclaim(existing.Payload, now);
+                    if (await TryReplaceAsync(id, scope, pk, reclaim, now, existing.Etag, ct).ConfigureAwait(false) is { } took)
+                    {
+                        return new IdempotencyClaim(IdempotencyClaimOutcome.Won, took);
+                    }
+
+                    continue;
+                }
+
+                return new IdempotencyClaim(IdempotencyClaimOutcome.AlreadyPending, existing.Payload);
             }
         }
 
         // Exhausted retries under contention: report the current authoritative state.
         var latest = await ReadDocAsync(id, pk, ct).ConfigureAwait(false);
-        if (latest is null)
+        if (latest is null || latest.Payload.ExpiresAt.ToUnixTimeSeconds() <= nowEpoch)
         {
-            var record = new IdempotencyRecord
-            {
-                Scope = scope,
-                Fingerprint = fingerprint,
-                State = IdempotencyState.Pending,
-                CreatedAt = now,
-                LeaseExpiresAt = now.AddSeconds(IdempotencyRecord.PendingLeaseSeconds),
-                ExpiresAt = expiresAt,
-            };
-            return new IdempotencyClaim(IdempotencyClaimOutcome.AlreadyPending, record);
+            return new IdempotencyClaim(IdempotencyClaimOutcome.AlreadyPending, NewPending(scope, fingerprint, now, expiresAt));
         }
 
         var finalOutcome = latest.Payload.Fingerprint != fingerprint
@@ -111,8 +107,23 @@ public sealed class CosmosIdempotencyStore(CosmosClient client, IOptions<WorldMa
         return new IdempotencyClaim(finalOutcome, latest.Payload);
     }
 
+    private async Task<IdempotencyRecord?> TryReplaceAsync(
+        string id, string scope, PartitionKey pk, IdempotencyRecord record, DateTimeOffset now, string? etag, CancellationToken ct)
+    {
+        try
+        {
+            var options = new ItemRequestOptions { IfMatchEtag = etag };
+            var replaced = await _container.ReplaceItemAsync(ToDoc(id, scope, record, now), id, pk, options, ct).ConfigureAwait(false);
+            return replaced.Resource.Payload;
+        }
+        catch (CosmosException ex) when (ex.StatusCode == HttpStatusCode.PreconditionFailed)
+        {
+            return null;
+        }
+    }
+
     public async Task CompleteAsync(
-        string scope, string fingerprint, string responseJson, int statusCode, string? location, DateTimeOffset now, CancellationToken ct)
+        string scope, string fingerprint, string leaseToken, string responseJson, int statusCode, string? location, DateTimeOffset now, CancellationToken ct)
     {
         var id = CosmosId.Hash(scope);
         var pk = new PartitionKey(scope);
@@ -120,16 +131,19 @@ public sealed class CosmosIdempotencyStore(CosmosClient client, IOptions<WorldMa
         for (var attempt = 0; attempt < MaxAttempts; attempt++)
         {
             var existing = await ReadDocAsync(id, pk, ct).ConfigureAwait(false);
-            if (existing is null || existing.Payload.Fingerprint != fingerprint)
+            if (existing is null
+                || existing.Payload.State != IdempotencyState.Pending
+                || existing.Payload.Fingerprint != fingerprint
+                || existing.Payload.LeaseToken != leaseToken)
             {
-                return; // Nothing owned to complete (mirrors the in-memory reference).
+                return; // Nothing this owner may complete (mirrors the in-memory reference).
             }
 
             existing.Payload.State = IdempotencyState.Completed;
             existing.Payload.ResponseJson = responseJson;
             existing.Payload.StatusCode = statusCode;
             existing.Payload.Location = location;
-            // A completed record is replayable until its full expiry (not the short pending lease).
+            // A completed record is replayable until its full expiry (which the pending doc already had).
             existing.ExpiresAtEpoch = existing.Payload.ExpiresAt.ToUnixTimeSeconds();
             existing.Ttl = (int)Math.Max(1, Math.Ceiling((existing.Payload.ExpiresAt - now).TotalSeconds));
 
@@ -146,7 +160,7 @@ public sealed class CosmosIdempotencyStore(CosmosClient client, IOptions<WorldMa
         }
     }
 
-    public async Task ReleaseAsync(string scope, string fingerprint, CancellationToken ct)
+    public async Task ReleaseAsync(string scope, string fingerprint, string leaseToken, CancellationToken ct)
     {
         var id = CosmosId.Hash(scope);
         var pk = new PartitionKey(scope);
@@ -156,9 +170,10 @@ public sealed class CosmosIdempotencyStore(CosmosClient client, IOptions<WorldMa
             var existing = await ReadDocAsync(id, pk, ct).ConfigureAwait(false);
             if (existing is null
                 || existing.Payload.State != IdempotencyState.Pending
-                || existing.Payload.Fingerprint != fingerprint)
+                || existing.Payload.Fingerprint != fingerprint
+                || existing.Payload.LeaseToken != leaseToken)
             {
-                return; // Nothing owned to release.
+                return; // Nothing this owner may release.
             }
 
             try
@@ -186,14 +201,32 @@ public sealed class CosmosIdempotencyStore(CosmosClient client, IOptions<WorldMa
             return null;
         }
 
-        return ReclaimEpoch(existing.Payload) > clock.GetUtcNow().ToUnixTimeSeconds() ? existing.Payload : null; // Reclaimable ⇒ absent.
+        // Fully-expired records are treated as absent (a completed response is replayable until then).
+        return existing.Payload.ExpiresAt.ToUnixTimeSeconds() > clock.GetUtcNow().ToUnixTimeSeconds() ? existing.Payload : null;
     }
 
-    /// <summary>The epoch after which a record is reclaimable: the pending lease, or the completed final expiry.</summary>
-    private static long ReclaimEpoch(IdempotencyRecord record) =>
-        record.State == IdempotencyState.Pending
-            ? record.LeaseExpiresAt.ToUnixTimeSeconds()
-            : record.ExpiresAt.ToUnixTimeSeconds();
+    private static IdempotencyRecord NewPending(string scope, string fingerprint, DateTimeOffset now, DateTimeOffset expiresAt) => new()
+    {
+        Scope = scope,
+        Fingerprint = fingerprint,
+        State = IdempotencyState.Pending,
+        LeaseToken = Guid.NewGuid().ToString("N"),
+        CreatedAt = now,
+        LeaseExpiresAt = now.AddSeconds(IdempotencyRecord.PendingLeaseSeconds),
+        ExpiresAt = expiresAt,
+    };
+
+    /// <summary>A fresh pending lease over the SAME logical claim (preserves fingerprint + full expiry).</summary>
+    private static IdempotencyRecord Reclaim(IdempotencyRecord existing, DateTimeOffset now) => new()
+    {
+        Scope = existing.Scope,
+        Fingerprint = existing.Fingerprint,
+        State = IdempotencyState.Pending,
+        LeaseToken = Guid.NewGuid().ToString("N"),
+        CreatedAt = existing.CreatedAt,
+        LeaseExpiresAt = now.AddSeconds(IdempotencyRecord.PendingLeaseSeconds),
+        ExpiresAt = existing.ExpiresAt,
+    };
 
     private async Task<CosmosDoc<IdempotencyRecord>?> ReadDocAsync(string id, PartitionKey pk, CancellationToken ct)
     {
@@ -211,9 +244,10 @@ public sealed class CosmosIdempotencyStore(CosmosClient client, IOptions<WorldMa
 
     private static CosmosDoc<IdempotencyRecord> ToDoc(string id, string scope, IdempotencyRecord record, DateTimeOffset now)
     {
-        // Pending docs live for the lease; completed docs are extended to their full expiry on Complete.
-        var reclaimEpoch = ReclaimEpoch(record);
-        var ttlSeconds = (int)Math.Max(1, reclaimEpoch - now.ToUnixTimeSeconds());
-        return CosmosDoc.Create(id, scope, record, ttl: ttlSeconds, expiresAtEpoch: reclaimEpoch);
+        // Both pending and completed docs live for the full idempotency TTL (ExpiresAt), so lease
+        // expiry never deletes the record and the fingerprint-conflict guard survives the whole TTL.
+        var expiresEpoch = record.ExpiresAt.ToUnixTimeSeconds();
+        var ttlSeconds = (int)Math.Max(1, expiresEpoch - now.ToUnixTimeSeconds());
+        return CosmosDoc.Create(id, scope, record, ttl: ttlSeconds, expiresAtEpoch: expiresEpoch);
     }
 }

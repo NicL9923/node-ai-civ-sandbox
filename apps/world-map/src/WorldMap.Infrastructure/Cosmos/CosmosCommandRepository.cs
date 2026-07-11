@@ -104,9 +104,15 @@ public sealed class CosmosCommandRepository : ICommandRepository
             var doc = await ReadDocAsync(targetCivId, commandId, ct).ConfigureAwait(false)
                 ?? throw new InvalidOperationException($"Command '{commandId}' not found for '{targetCivId}'.");
 
+            // Mutually exclusive terminal transition: expiry and ack cannot both win.
+            if (doc.Payload.Expired && doc.Payload.AckStatus is null)
+            {
+                return new CommandAckTransition(CommandAckOutcome.Expired, Hydrate(doc));
+            }
+
             if (doc.Payload.AckStatus is not null)
             {
-                return new CommandAckTransition(false, Hydrate(doc)); // Terminal — never overwrite.
+                return new CommandAckTransition(CommandAckOutcome.AlreadyAcked, Hydrate(doc)); // Never overwrite.
             }
 
             doc.Payload.AckStatus = status;
@@ -116,17 +122,18 @@ public sealed class CosmosCommandRepository : ICommandRepository
             try
             {
                 var response = await ReplaceAsync(doc, targetCivId, ct).ConfigureAwait(false);
-                return new CommandAckTransition(true, Hydrate(response.Resource));
+                return new CommandAckTransition(CommandAckOutcome.Applied, Hydrate(response.Resource));
             }
             catch (CosmosException ex) when (ex.StatusCode == HttpStatusCode.PreconditionFailed)
             {
-                // Lost the race: re-read; if it became acked meanwhile, report the winner's outcome.
+                // Lost the race: re-read and re-evaluate (it may have become acked or expired).
             }
         }
 
         var latest = await GetAsync(targetCivId, commandId, ct).ConfigureAwait(false)
             ?? throw new InvalidOperationException($"Command '{commandId}' not found for '{targetCivId}'.");
-        return new CommandAckTransition(false, latest);
+        var outcome = latest.Expired && latest.AckStatus is null ? CommandAckOutcome.Expired : CommandAckOutcome.AlreadyAcked;
+        return new CommandAckTransition(outcome, latest);
     }
 
     public async Task MarkAckReconciledAsync(string targetCivId, string commandId, CancellationToken ct)
@@ -152,14 +159,14 @@ public sealed class CosmosCommandRepository : ICommandRepository
         }
     }
 
-    public async Task MarkExpiredAsync(string targetCivId, string commandId, CancellationToken ct)
+    public async Task<bool> MarkExpiredAsync(string targetCivId, string commandId, CancellationToken ct)
     {
         for (var attempt = 0; attempt < MaxCasAttempts; attempt++)
         {
             var doc = await ReadDocAsync(targetCivId, commandId, ct).ConfigureAwait(false);
             if (doc is null || doc.Payload.AckStatus is not null || doc.Payload.Expired)
             {
-                return; // No-op if already acked/expired (compare-and-set).
+                return false; // Already acked/expired — expiry did not win.
             }
 
             doc.Payload.Expired = true;
@@ -167,13 +174,15 @@ public sealed class CosmosCommandRepository : ICommandRepository
             try
             {
                 await ReplaceAsync(doc, targetCivId, ct).ConfigureAwait(false);
-                return;
+                return true;
             }
             catch (CosmosException ex) when (ex.StatusCode == HttpStatusCode.PreconditionFailed)
             {
                 // Retry against the newest revision.
             }
         }
+
+        return false;
     }
 
     public async Task<IReadOnlyList<Command>> PullAsync(

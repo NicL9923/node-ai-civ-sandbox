@@ -59,9 +59,42 @@ mapped to a fixed `civId`/`keyId`/`secretRef`). The World **never mints or retur
 secret** — the civ receives it out-of-band, and the runtime resolves it via `ISecretStore` from
 the `secretRef`. Only credential references/metadata are persisted; no secret material is stored.
 
+Registration idempotency is anchored to the **hash of the onboarding token**, independent of the
+caller's HTTP `Idempotency-Key`, and carries a canonical fingerprint of the registration profile
+(`displayName`/`capabilities`/`publicKey`/`contact`; the raw token is never part of the fingerprint,
+id, partition key, or logs). The same token + the same profile **replays** the original result
+(`duplicate: true`) even under a different `Idempotency-Key`; the same token + a **different** profile
+is a `409 registration_conflict` and the existing civ is **never mutated** (civ/credential creation is
+create-if-absent). Registration is resumable and does not burn the token on a downstream failure.
+
 In production the secret is provided as an App Service setting backed by a Key Vault reference
 (`WorldMap:Secrets:Map:<secretRef>`). In tests a seeded in-memory secret store is injected through
 DI (never over HTTP). There is no secret-retrieval endpoint.
+
+## Reliability model
+
+- **Idempotency** — every mutating operation runs under a claim/complete lifecycle with a request
+  **fingerprint**. A pending claim holds a short **lease** (crash-recovery) but the record persists for
+  the full idempotency TTL: a different fingerprint for the same scope is a `409` for the whole TTL
+  (regardless of lease state), and only the SAME fingerprint may reclaim an expired-lease pending
+  claim. Each claim carries an owner **lease token**, so a crashed owner that resumes after a takeover
+  cannot overwrite the new owner's result. Concurrent identical calls produce exactly one effect;
+  losers wait and replay the completed response.
+- **Command terminal CAS** — a command reaches a terminal state through one **mutually-exclusive**
+  compare-and-set: either an ACK wins (→ acked) or expiry wins (→ expired), never both. Expiry advances
+  the linked interaction to `expired` only when expiry actually won; acking an already-expired command
+  returns `404 command_not_found`. Terminal/expired commands are never re-pulled. A crash between a
+  command's terminal ACK and the interaction reconciliation is repaired on ACK replay or by the worker.
+- **Single-writer lease** — the World runs at **App Service scale = 1** for the MVP. As a fail-closed
+  defense, a Cosmos instance must hold a renewable single-writer lease (an ETag-CAS lock document in the
+  `lock` container) to be **ready** and to run background mutations; a second live instance is rejected,
+  fails readiness (removing it from rotation), and skips its maintenance sweeps. This is **not** a
+  scale-out sequencer — the sequence allocator's own ETag/conditional counter increment remains the
+  guard against counter duplication during any brief overlap. Configure via `Storage.SingleWriterLease`.
+- **Event ingestion** — the entire batch is validated before any effect (specversion, authenticated
+  source, sizes); per-event dedupe is producer-scoped with a namespaced identity so an idempotency key
+  can never collide with a `source+id` fallback; the public feed/SSE never reflect arbitrary producer
+  data and are byte-bounded per event and per page.
 
 ## Configuration (`WorldMap` section)
 
@@ -71,10 +104,17 @@ settings:
 - `Storage.Provider` — `InMemory` (default, for local/dev/tests) or `Cosmos`.
 - `Storage.CosmosEndpoint` / `Storage.DatabaseName` — Cosmos account endpoint (auth via
   `DefaultAzureCredential`) and the dedicated `worldmap` database.
-- `Onboarding.Records` — operator-preprovisioned onboarding records (`token` → `civId`/`keyId`/
-  `secretRef`); one-time, never commit real tokens.
+- `Storage.BootstrapEnabled` — dev-only; when `true` the Cosmos bootstrapper provisions the database
+  and containers. Default `false`: normal runtime only validates required containers/PK paths/TTL and
+  readiness-fails on a missing or misconfigured schema.
+- `Storage.SingleWriterLease` — `Enabled` (default `true`), `LeaseDurationSeconds`, `RenewIntervalSeconds`
+  for the single-writer lease (Cosmos). Disable only for explicit dev/first-run.
+- `Onboarding.Records` — operator-preprovisioned onboarding records (prefer `tokenHash`; a raw `token`
+  is accepted only at the process boundary and immediately hashed). Never commit real tokens.
 - `Secrets.Map` — `secretRef` → shared HMAC secret (App Service settings backed by Key Vault
   references in production; user-secrets/env locally). Never commit real secrets.
+- `Events` — `MaxBatchSize`, `MaxBatchBytes`, `MaxEventBytes`, `MaxFieldChars`, `MaxExtensions`,
+  `MaxPublicDataBytes`, `MaxPublicPageBytes` bound ingestion and the public projection.
 - `Telemetry.AzureMonitorConnectionString` — enables the Azure Monitor OpenTelemetry exporter.
 - `Liveness`, `Interaction`, `Maintenance` — freshness thresholds, TTLs, and the sweep interval.
 
@@ -93,9 +133,11 @@ dotnet test  apps/world-map/tests/WorldMap.UnitTests
 dotnet test  apps/world-map/tests/WorldMap.IntegrationTests
 ```
 
-## Scale-out note (worldsequence)
+## Scale-out note (worldsequence & single-writer)
 
 The global `worldsequence` total order is monotonic and correct on a **single** app instance
-(the allocator + ledger append are single-instance-consistent). Scaling out requires a lease/block
-allocator or a dedicated sequence service — intentionally **not** implemented here, and the code
-makes no false distributed-atomicity claims.
+(the allocator + ledger append are single-instance-consistent). The MVP therefore runs at App Service
+**scale = 1**, enforced fail-closed by the single-writer lease (see the Reliability model above): only
+the lease holder is ready and runs mutations. True horizontal scale-out would require a lease/block
+allocator or a dedicated sequence service — intentionally **not** implemented here, and the code makes
+no false distributed-atomicity claims.

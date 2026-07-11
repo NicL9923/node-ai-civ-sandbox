@@ -70,7 +70,12 @@ public sealed class HmacAuthEndpointFilter : IEndpointFilter
 
         var now = clock.GetUtcNow();
         var nowSeconds = now.ToUnixTimeSeconds();
-        if (Math.Abs(nowSeconds - ts) > HmacCanonicalizer.ReplayWindowSeconds)
+
+        // Overflow-safe range check: never do arithmetic on the untrusted `ts` (e.g. long.MinValue
+        // would overflow Math.Abs and throw -> 500). Compare against precomputed bounds instead.
+        var lowerBound = nowSeconds - HmacCanonicalizer.ReplayWindowSeconds;
+        var upperBound = nowSeconds + HmacCanonicalizer.ReplayWindowSeconds;
+        if (ts < lowerBound || ts > upperBound)
         {
             return Fail(ErrorCode.ClockSkew, "X-Timestamp is outside the allowed window.", "clock_skew");
         }

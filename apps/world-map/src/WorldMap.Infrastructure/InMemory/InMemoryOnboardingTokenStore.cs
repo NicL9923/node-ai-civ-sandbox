@@ -1,21 +1,32 @@
 using System.Collections.Concurrent;
 using WorldMap.Core.Abstractions;
+using WorldMap.Core.Domain;
 
 namespace WorldMap.Infrastructure.InMemory;
 
 /// <summary>
-/// Thread-safe in-memory one-time onboarding reservation, keyed by the token HASH (never the raw
-/// token). Idempotent for the same civ so a resumed registration re-reserves without burning the
-/// token; a reservation for a different civ is rejected.
+/// Thread-safe in-memory onboarding registration ledger, keyed by the token HASH (never the raw
+/// token). Records (civ + canonical fingerprint) on first use; a later same-fingerprint request is a
+/// replay (do not mutate the civ) and a different fingerprint is a conflict.
 /// </summary>
 public sealed class InMemoryOnboardingTokenStore : IOnboardingTokenStore
 {
-    private readonly ConcurrentDictionary<string, string> _reserved = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, (string CivId, string Fingerprint)> _reserved = new(StringComparer.Ordinal);
 
-    public Task<bool> TryReserveAsync(string tokenHash, string civId, CancellationToken ct)
+    public Task<OnboardingReservationOutcome> ReserveAsync(string tokenHash, string civId, string fingerprint, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
-        var owner = _reserved.GetOrAdd(tokenHash, civId);
-        return Task.FromResult(owner == civId);
+
+        // Atomic first-writer-wins: TryAdd tells us whether this call created the reservation.
+        if (_reserved.TryAdd(tokenHash, (civId, fingerprint)))
+        {
+            return Task.FromResult(OnboardingReservationOutcome.Reserved);
+        }
+
+        var existing = _reserved[tokenHash];
+        var outcome = existing.Fingerprint == fingerprint
+            ? OnboardingReservationOutcome.DuplicateMatch
+            : OnboardingReservationOutcome.Conflict;
+        return Task.FromResult(outcome);
     }
 }

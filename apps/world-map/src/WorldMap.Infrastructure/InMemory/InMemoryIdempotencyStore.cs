@@ -23,39 +23,49 @@ public sealed class InMemoryIdempotencyStore(TimeProvider clock) : IIdempotencyS
         {
             PruneExpired(now);
 
-            if (!_byScope.TryGetValue(scope, out var existing) || IsReclaimable(existing, now))
+            // The scope is free only when there is no record, or the record has fully expired (its
+            // idempotency TTL elapsed). Lease expiry alone does NOT free the scope.
+            if (!_byScope.TryGetValue(scope, out var existing) || existing.ExpiresAt <= now)
             {
-                var record = new IdempotencyRecord
-                {
-                    Scope = scope,
-                    Fingerprint = fingerprint,
-                    State = IdempotencyState.Pending,
-                    CreatedAt = now,
-                    LeaseExpiresAt = now.Add(PendingLease),
-                    ExpiresAt = expiresAt,
-                };
-                _byScope[scope] = record;
-                return Task.FromResult(new IdempotencyClaim(IdempotencyClaimOutcome.Won, Copy(record)));
+                _byScope[scope] = NewPending(scope, fingerprint, now, expiresAt);
+                return Task.FromResult(new IdempotencyClaim(IdempotencyClaimOutcome.Won, Copy(_byScope[scope])));
             }
 
+            // A different fingerprint on a live (non-expired) record is ALWAYS a hard conflict,
+            // regardless of the pending lease state — checked before any reclaim.
             if (existing.Fingerprint != fingerprint)
             {
                 return Task.FromResult(new IdempotencyClaim(IdempotencyClaimOutcome.FingerprintConflict, Copy(existing)));
             }
 
-            var outcome = existing.State == IdempotencyState.Completed
-                ? IdempotencyClaimOutcome.Completed
-                : IdempotencyClaimOutcome.AlreadyPending;
-            return Task.FromResult(new IdempotencyClaim(outcome, Copy(existing)));
+            if (existing.State == IdempotencyState.Completed)
+            {
+                return Task.FromResult(new IdempotencyClaim(IdempotencyClaimOutcome.Completed, Copy(existing)));
+            }
+
+            // Pending, same fingerprint: reclaim only once the owner's lease has elapsed. Preserve the
+            // record and its ExpiresAt; issue a fresh lease token so the prior owner can no longer
+            // Complete/Release.
+            if (existing.LeaseExpiresAt <= now)
+            {
+                existing.LeaseToken = NewToken();
+                existing.LeaseExpiresAt = now.Add(PendingLease);
+                return Task.FromResult(new IdempotencyClaim(IdempotencyClaimOutcome.Won, Copy(existing)));
+            }
+
+            return Task.FromResult(new IdempotencyClaim(IdempotencyClaimOutcome.AlreadyPending, Copy(existing)));
         }
     }
 
-    public Task CompleteAsync(string scope, string fingerprint, string responseJson, int statusCode, string? location, DateTimeOffset now, CancellationToken ct)
+    public Task CompleteAsync(string scope, string fingerprint, string leaseToken, string responseJson, int statusCode, string? location, DateTimeOffset now, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
         lock (_gate)
         {
-            if (_byScope.TryGetValue(scope, out var existing) && existing.Fingerprint == fingerprint)
+            if (_byScope.TryGetValue(scope, out var existing)
+                && existing.State == IdempotencyState.Pending
+                && existing.Fingerprint == fingerprint
+                && existing.LeaseToken == leaseToken)
             {
                 existing.State = IdempotencyState.Completed;
                 existing.ResponseJson = responseJson;
@@ -67,14 +77,15 @@ public sealed class InMemoryIdempotencyStore(TimeProvider clock) : IIdempotencyS
         return Task.CompletedTask;
     }
 
-    public Task ReleaseAsync(string scope, string fingerprint, CancellationToken ct)
+    public Task ReleaseAsync(string scope, string fingerprint, string leaseToken, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
         lock (_gate)
         {
             if (_byScope.TryGetValue(scope, out var existing)
                 && existing.State == IdempotencyState.Pending
-                && existing.Fingerprint == fingerprint)
+                && existing.Fingerprint == fingerprint
+                && existing.LeaseToken == leaseToken)
             {
                 _byScope.Remove(scope);
             }
@@ -89,7 +100,7 @@ public sealed class InMemoryIdempotencyStore(TimeProvider clock) : IIdempotencyS
         lock (_gate)
         {
             var now = clock.GetUtcNow();
-            if (_byScope.TryGetValue(scope, out var record) && !IsReclaimable(record, now))
+            if (_byScope.TryGetValue(scope, out var record) && record.ExpiresAt > now)
             {
                 return Task.FromResult<IdempotencyRecord?>(Copy(record));
             }
@@ -98,9 +109,18 @@ public sealed class InMemoryIdempotencyStore(TimeProvider clock) : IIdempotencyS
         }
     }
 
-    /// <summary>A pending record is reclaimable once its lease elapses; a completed one once it fully expires.</summary>
-    private static bool IsReclaimable(IdempotencyRecord record, DateTimeOffset now) =>
-        record.State == IdempotencyState.Pending ? record.LeaseExpiresAt <= now : record.ExpiresAt <= now;
+    private static IdempotencyRecord NewPending(string scope, string fingerprint, DateTimeOffset now, DateTimeOffset expiresAt) => new()
+    {
+        Scope = scope,
+        Fingerprint = fingerprint,
+        State = IdempotencyState.Pending,
+        LeaseToken = NewToken(),
+        CreatedAt = now,
+        LeaseExpiresAt = now.Add(PendingLease),
+        ExpiresAt = expiresAt,
+    };
+
+    private static string NewToken() => Guid.NewGuid().ToString("N");
 
     private void PruneExpired(DateTimeOffset now)
     {
@@ -109,7 +129,7 @@ public sealed class InMemoryIdempotencyStore(TimeProvider clock) : IIdempotencyS
             return;
         }
 
-        foreach (var key in _byScope.Where(kv => IsReclaimable(kv.Value, now)).Select(kv => kv.Key).ToList())
+        foreach (var key in _byScope.Where(kv => kv.Value.ExpiresAt <= now).Select(kv => kv.Key).ToList())
         {
             _byScope.Remove(key);
         }
@@ -123,6 +143,7 @@ public sealed class InMemoryIdempotencyStore(TimeProvider clock) : IIdempotencyS
         ResponseJson = r.ResponseJson,
         StatusCode = r.StatusCode,
         Location = r.Location,
+        LeaseToken = r.LeaseToken,
         CreatedAt = r.CreatedAt,
         LeaseExpiresAt = r.LeaseExpiresAt,
         ExpiresAt = r.ExpiresAt,

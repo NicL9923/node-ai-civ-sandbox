@@ -91,6 +91,14 @@ public sealed class CommandService(
     {
         var now = clock.GetUtcNow();
         var transition = await commands.TryAckAsync(civId, commandId, ackStatus, now, ct);
+
+        // Mutually exclusive with expiry: an expired command is terminal and no longer acknowledgeable.
+        if (transition.Outcome == CommandAckOutcome.Expired)
+        {
+            return ErrorResult.Create(ErrorCode.CommandNotFound,
+                $"Command '{commandId}' has expired and can no longer be acknowledged.");
+        }
+
         var command = transition.Command;
 
         // Reconcile the linked interaction (idempotent; repairs a crash between the command's
@@ -101,7 +109,7 @@ public sealed class CommandService(
             await commands.MarkAckReconciledAsync(civId, commandId, ct);
         }
 
-        // The authoritative status is the winning ack; a losing concurrent ack reports duplicate.
+        // The authoritative status is the winning ack; a losing concurrent/replayed ack reports duplicate.
         var result = new CommandAckResultDto
         {
             CommandId = commandId,
@@ -110,8 +118,8 @@ public sealed class CommandService(
             AcknowledgedAt = command.AckedAt ?? now,
         };
 
-        logger.LogDebug("Command {CommandId} ack by {CivId}: status {Status}, won {Won}.",
-            commandId, civId, result.Status, transition.Won);
+        logger.LogDebug("Command {CommandId} ack by {CivId}: status {Status}, outcome {Outcome}.",
+            commandId, civId, result.Status, transition.Outcome);
         return new OperationOutcome<CommandAckResultDto>(result, 200, null);
     }
 

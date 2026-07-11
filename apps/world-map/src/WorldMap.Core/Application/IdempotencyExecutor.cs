@@ -32,7 +32,8 @@ public sealed class IdempotencyExecutor(
         TimeSpan ttl,
         Func<CancellationToken, Task<Result<OperationOutcome<T>>>> effect,
         Func<T, T> markDuplicate,
-        CancellationToken ct)
+        CancellationToken ct,
+        Func<ErrorInfo>? onConflict = null)
     {
         var now = clock.GetUtcNow();
         var claim = await store.ClaimAsync(scope, fingerprint, now, now.Add(ttl), ct);
@@ -40,16 +41,16 @@ public sealed class IdempotencyExecutor(
         switch (claim.Outcome)
         {
             case IdempotencyClaimOutcome.Won:
-                return await RunAndCompleteAsync(scope, fingerprint, effect, ct);
+                return await RunAndCompleteAsync(scope, fingerprint, claim.Record.LeaseToken, effect, ct);
 
             case IdempotencyClaimOutcome.Completed:
                 return Replay(claim.Record, markDuplicate);
 
             case IdempotencyClaimOutcome.FingerprintConflict:
-                return Conflict();
+                return Conflict(onConflict);
 
             case IdempotencyClaimOutcome.AlreadyPending:
-                return await WaitOrReclaimAsync(scope, fingerprint, ttl, effect, markDuplicate, ct);
+                return await WaitOrReclaimAsync(scope, fingerprint, ttl, effect, markDuplicate, ct, onConflict);
 
             default:
                 return ErrorResult.Create(ErrorCode.Internal, "Unexpected idempotency outcome.", retryable: true);
@@ -59,6 +60,7 @@ public sealed class IdempotencyExecutor(
     private async Task<Result<OperationOutcome<T>>> RunAndCompleteAsync<T>(
         string scope,
         string fingerprint,
+        string leaseToken,
         Func<CancellationToken, Task<Result<OperationOutcome<T>>>> effect,
         CancellationToken ct)
     {
@@ -71,7 +73,7 @@ public sealed class IdempotencyExecutor(
         {
             // A mid-effect crash: RELEASE the claim so a retry can re-run (effects are idempotent),
             // then surface the failure. Without this, the leased pending claim would block retries.
-            await store.ReleaseAsync(scope, fingerprint, CancellationToken.None);
+            await store.ReleaseAsync(scope, fingerprint, leaseToken, CancellationToken.None);
             throw;
         }
 
@@ -79,13 +81,13 @@ public sealed class IdempotencyExecutor(
         {
             // The effect failed: RELEASE the claim so a retry can immediately re-run rather than
             // waiting out the pending lease. (We never store a failure as a completed response.)
-            await store.ReleaseAsync(scope, fingerprint, ct);
+            await store.ReleaseAsync(scope, fingerprint, leaseToken, ct);
             return result.Error;
         }
 
         var outcome = result.Value;
         var json = JsonSerializer.Serialize(outcome.Body, WorldMapJson.Options);
-        await store.CompleteAsync(scope, fingerprint, json, outcome.StatusCode, outcome.Location, clock.GetUtcNow(), ct);
+        await store.CompleteAsync(scope, fingerprint, leaseToken, json, outcome.StatusCode, outcome.Location, clock.GetUtcNow(), ct);
         return outcome;
     }
 
@@ -95,7 +97,8 @@ public sealed class IdempotencyExecutor(
         TimeSpan ttl,
         Func<CancellationToken, Task<Result<OperationOutcome<T>>>> effect,
         Func<T, T> markDuplicate,
-        CancellationToken ct)
+        CancellationToken ct,
+        Func<ErrorInfo>? onConflict)
     {
         // Poll by RE-CLAIMING (never a blind re-run): the store grants the pending scope to exactly
         // one caller, and only after the owner's lease elapses. So a live owner is never executed
@@ -108,11 +111,11 @@ public sealed class IdempotencyExecutor(
             switch (claim.Outcome)
             {
                 case IdempotencyClaimOutcome.Won:
-                    return await RunAndCompleteAsync(scope, fingerprint, effect, ct);
+                    return await RunAndCompleteAsync(scope, fingerprint, claim.Record.LeaseToken, effect, ct);
                 case IdempotencyClaimOutcome.Completed:
                     return Replay(claim.Record, markDuplicate);
                 case IdempotencyClaimOutcome.FingerprintConflict:
-                    return Conflict();
+                    return Conflict(onConflict);
                 case IdempotencyClaimOutcome.AlreadyPending:
                     continue;
             }
@@ -135,6 +138,7 @@ public sealed class IdempotencyExecutor(
         return new OperationOutcome<T>(markDuplicate(body), record.StatusCode, record.Location);
     }
 
-    private static ErrorInfo Conflict() =>
-        ErrorResult.Create(ErrorCode.IdempotencyConflict, "This Idempotency-Key was already used with a different request.");
+    private static ErrorInfo Conflict(Func<ErrorInfo>? onConflict = null) =>
+        onConflict?.Invoke()
+        ?? ErrorResult.Create(ErrorCode.IdempotencyConflict, "This Idempotency-Key was already used with a different request.");
 }

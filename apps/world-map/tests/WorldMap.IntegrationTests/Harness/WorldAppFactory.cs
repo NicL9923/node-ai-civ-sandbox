@@ -4,7 +4,9 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using WorldMap.Core.Abstractions;
+using WorldMap.Core.Application;
 using WorldMap.Core.Contracts;
 
 namespace WorldMap.IntegrationTests.Harness;
@@ -29,13 +31,19 @@ public sealed class WorldAppFactory : WebApplicationFactory<Program>
     public const string WorldBaseUrl = "https://world.test/world/v1";
 
     private const int TokenPoolSize = 128;
+    private readonly AdjustableTimeProvider? _clock;
 
     // Auto-registration draws from records 1..N; record 0 is reserved for the explicit
     // registration test so the two never collide.
     private readonly ConcurrentQueue<string> _autoTokens = new();
 
-    public WorldAppFactory()
+    public WorldAppFactory(bool useControllableTime = false)
     {
+        if (useControllableTime)
+        {
+            _clock = new AdjustableTimeProvider(DateTimeOffset.UtcNow);
+        }
+
         for (var i = 1; i < TokenPoolSize; i++)
         {
             _autoTokens.Enqueue(TokenAt(i));
@@ -76,6 +84,15 @@ public sealed class WorldAppFactory : WebApplicationFactory<Program>
     {
         builder.UseSetting("WorldMap:Storage:Provider", "InMemory");
 
+        if (_clock is not null)
+        {
+            builder.ConfigureServices(services =>
+            {
+                services.RemoveAll<TimeProvider>();
+                services.AddSingleton<TimeProvider>(_clock);
+            });
+        }
+
         builder.ConfigureAppConfiguration((_, config) =>
         {
             var settings = new Dictionary<string, string?>
@@ -99,6 +116,20 @@ public sealed class WorldAppFactory : WebApplicationFactory<Program>
 
             config.AddInMemoryCollection(settings);
         });
+    }
+
+    public DateTimeOffset UtcNow => _clock?.GetUtcNow() ?? DateTimeOffset.UtcNow;
+
+    public async Task AdvanceTimeAndSweepAsync(TimeSpan amount, CancellationToken ct = default)
+    {
+        if (_clock is null)
+        {
+            throw new InvalidOperationException("This factory was not configured with controllable time.");
+        }
+
+        _clock.Advance(amount);
+        using var scope = Services.CreateScope();
+        await scope.ServiceProvider.GetRequiredService<IMaintenanceService>().SweepAsync(ct);
     }
 
     /// <summary>
@@ -151,6 +182,15 @@ public sealed class WorldAppFactory : WebApplicationFactory<Program>
         var secret = await GetSigningSecretAsync(body.CivId, ct);
         return new CivContext(body.CivId, body.KeyId, secret);
     }
+}
+
+internal sealed class AdjustableTimeProvider(DateTimeOffset initialUtcNow) : TimeProvider
+{
+    private DateTimeOffset _utcNow = initialUtcNow;
+
+    public override DateTimeOffset GetUtcNow() => _utcNow;
+
+    public void Advance(TimeSpan amount) => _utcNow += amount;
 }
 
 /// <summary>A registered civ plus the credentials a test needs to sign requests as it.</summary>
