@@ -13,9 +13,11 @@ namespace WorldMap.Core.Application.Impl;
 /// <summary>
 /// Civilization onboarding. Resolves a presented token by HASH to a preprovisioned record, then
 /// runs a resumable, idempotent finalize (reserve token → persist credential ref → persist civ)
-/// under an idempotency claim scoped by <c>register:{tokenHash}:{idempotencyKey}</c>. The token is
-/// not "burned" on a downstream failure — a retry with the same key resumes. The World never mints,
-/// stores, or returns the HMAC secret.
+/// under an idempotency claim scoped by <c>register:{tokenHash}</c> — anchored to the token hash and
+/// independent of the caller's HTTP <c>Idempotency-Key</c>, with a fingerprint of the registration
+/// profile (the raw token is excluded). The token is not "burned" on a downstream failure — a retry
+/// with the same token resumes; a different profile for the same token is a registration conflict and
+/// never mutates the civ. The World never mints, stores, or returns the HMAC secret.
 /// </summary>
 public sealed class OnboardingService(
     ICivilizationRepository civilizations,
