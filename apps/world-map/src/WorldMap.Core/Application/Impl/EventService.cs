@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Text.Json.Nodes;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -129,10 +130,40 @@ public sealed class EventService(
         }
 
         var page = await worldEvents.ListAsync(afterOrdinal, Pagination.ClampLimit(limit), ct);
+
+        // Bound the public page by aggregate serialized bytes as well as item count. Each event's
+        // public data is already capped at append time; this caps the whole page so a burst of
+        // max-size events can't produce an unbounded response. Always emit at least one item so the
+        // cursor makes forward progress; on truncation the cursor points at the last included event.
+        var maxBytes = _options.Events.MaxPublicPageBytes;
+        var items = new List<CloudEventDto>(page.Items.Count);
+        long budget = 0;
+        long? lastIncluded = null;
+        var truncated = false;
+
+        foreach (var evt in page.Items)
+        {
+            var dto = evt.ToPublicDto();
+            var size = System.Text.Encoding.UTF8.GetByteCount(JsonSerializer.Serialize(dto, WorldMapJson.Options));
+            if (items.Count > 0 && budget + size > maxBytes)
+            {
+                truncated = true;
+                break;
+            }
+
+            items.Add(dto);
+            budget += size;
+            lastIncluded = evt.Worldsequence;
+        }
+
+        var nextCursor = truncated
+            ? CursorCodec.Encode(lastIncluded!.Value)
+            : page.NextOrdinal is { } o ? CursorCodec.Encode(o) : null;
+
         return new EventPageDto
         {
-            Items = page.Items.Select(e => e.ToPublicDto()).ToList(),
-            NextCursor = page.NextOrdinal is { } o ? CursorCodec.Encode(o) : null,
+            Items = items,
+            NextCursor = nextCursor,
         };
     }
 

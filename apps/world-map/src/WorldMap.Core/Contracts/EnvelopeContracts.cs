@@ -14,8 +14,10 @@ public record CloudEventDto
     [JsonPropertyName("id")]
     public required string Id { get; init; }
 
+    // No default: an omitted specversion must deserialize to null so ingestion validation rejects it
+    // (CloudEvents 1.0 / P1 requires specversion == "1.0"). Output projections always set "1.0".
     [JsonPropertyName("specversion")]
-    public string Specversion { get; init; } = "1.0";
+    public string? Specversion { get; init; }
 
     [JsonPropertyName("type")]
     public required string Type { get; init; }

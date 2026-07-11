@@ -8,7 +8,9 @@ namespace WorldMap.Infrastructure.Cosmos;
 
 /// <summary>
 /// Readiness probe for the Cosmos provider. Validates that the database and every required container
-/// exist, so the readiness endpoint fails non-200 during an outage or a missing/incomplete schema.
+/// exist AND that each container's schema matches the runtime's assumptions (uniform '/pk' partition
+/// key, and time-to-live enabled on the nonce/idempotency containers), so the readiness endpoint fails
+/// non-200 during an outage or a missing/incomplete/misconfigured schema.
 ///
 /// <para>It is strictly READ-ONLY — it never creates the database or any container (provisioning is
 /// the opt-in <see cref="CosmosBootstrapper"/>'s job). Any Cosmos error is reported as
@@ -38,17 +40,33 @@ public sealed class CosmosReadinessProbe(CosmosClient client, IOptions<WorldMapO
         var missing = new List<string>();
         foreach (var name in CosmosContainers.All)
         {
+            ContainerProperties properties;
             try
             {
-                await database.GetContainer(name).ReadContainerAsync(cancellationToken: ct).ConfigureAwait(false);
+                var response = await database.GetContainer(name).ReadContainerAsync(cancellationToken: ct).ConfigureAwait(false);
+                properties = response.Resource;
             }
             catch (CosmosException ex) when (ex.StatusCode == HttpStatusCode.NotFound)
             {
                 missing.Add(name);
+                continue;
             }
             catch (CosmosException ex)
             {
                 return new ReadinessResult(false, $"Cosmos container '{name}' unavailable: {ex.StatusCode}.");
+            }
+
+            // The schema must match what the runtime assumes: a uniform '/pk' partition key, and TTL
+            // enabled on the containers whose per-item expiry (nonce/idempotency) relies on it.
+            if (properties.PartitionKeyPath != CosmosContainers.PartitionKeyPath)
+            {
+                return new ReadinessResult(false,
+                    $"Cosmos container '{name}' has partition key '{properties.PartitionKeyPath}', expected '{CosmosContainers.PartitionKeyPath}'.");
+            }
+
+            if (CosmosContainers.TtlContainers.Contains(name) && properties.DefaultTimeToLive is null or 0)
+            {
+                return new ReadinessResult(false, $"Cosmos container '{name}' requires time-to-live to be enabled.");
             }
         }
 
