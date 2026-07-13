@@ -89,6 +89,37 @@ cd apps/civilization && npm run build && npm start
 The app listens on `PORT` (default `3000`) and serves the built client from
 `apps/civilization/dist/client`. With `AI_PROVIDER=mock` no model calls are made.
 
+## World federation connector (P3)
+
+The civilization app can optionally connect to a central **World** orchestrator to conduct foreign
+affairs with other civilizations. The connector is **off by default**: it activates only when
+`WORLD_API_BASE_URL` is set (see `apps/civilization/.env.example`). With it unset the app runs exactly
+as a standalone civilization — no federation code paths, storage, or network calls.
+
+When enabled, the connector (all calls are civ-initiated; the World never calls the civ):
+
+- **PUSHes** a periodic heartbeat, an at-least-once event batch (a small allowlist of public governance
+  facts mapped to CloudEvents — never private memories, prompts, model responses, or secrets), and
+  President-authorized `contact` / `message` interactions.
+- **PULLs** inbound commands with a forward-only cursor and **ACKs** each (`applied` / `rejected` /
+  `duplicate`) before advancing the cursor. Unknown command types are rejected with a stable reason,
+  never stalling the cursor.
+- Signs every authenticated request with the shared federation HMAC-SHA256 scheme (the same golden
+  vectors as `packages/federation-contracts`). The signing secret is exchanged out-of-band via
+  `WORLD_HMAC_SECRET`.
+
+Only the sitting **President** can act abroad (`contactCivilization` / `messageCivilization`), and only
+when the target civilization is known. Every agent's prompt includes a compact, shared foreign-affairs
+briefing. World downtime never blocks a local turn — the engine only ever reads/writes the store; the
+background connector owns all network I/O.
+
+Admin diagnostics (under the existing `x-admin-key` auth) live at `GET /api/admin/federation/status`
+and `POST /api/admin/federation/{register,heartbeat,sync}`; none echo secrets. The public
+`GET /api/world` snapshot exposes a citizen-safe `foreignAffairs` block when the connector is enabled.
+
+Types and the World HTTP client are consumed from `@ai-civ/federation-contracts` (the P1 contract) — no
+DTOs are duplicated.
+
 ## Infrastructure
 
 See [`infra/README.md`](infra/README.md). The civilization deployment is unchanged from before

@@ -1,6 +1,6 @@
 import { DefaultAzureCredential } from "@azure/identity";
 import type { AccessToken, TokenCredential } from "@azure/core-auth";
-import type { AgentAction, AgentProfile, AmendmentProposal, ConstitutionVersion, ModelKey, Simulation, Tile } from "../shared/types.js";
+import type { AgentAction, AgentProfile, AmendmentProposal, ConstitutionVersion, ForeignAffairsSnapshot, ModelKey, Simulation, Tile } from "../shared/types.js";
 import { parseAgentAction } from "./actionSchema.js";
 import type { AppConfig } from "./config.js";
 
@@ -13,6 +13,8 @@ export interface DecisionContext {
   openProposals: AmendmentProposal[];
   recentEvents: string[];
   turnsSinceConversation?: number;
+  /** Compact citizen-safe foreign-affairs snapshot; present only when the World connector is enabled. */
+  foreignAffairs?: ForeignAffairsSnapshot;
 }
 
 export interface AiProvider {
@@ -133,7 +135,7 @@ export class FoundryAiProvider implements AiProvider {
         },
         {
           role: "user",
-          content: this.buildPrompt(context)
+          content: buildDecisionPrompt(context)
         }
       ],
       response_format: { type: "json_object" }
@@ -189,6 +191,12 @@ export class FoundryAiProvider implements AiProvider {
   }
 
   private buildPrompt(context: DecisionContext): string {
+    return buildDecisionPrompt(context);
+  }
+}
+
+/** Build the tailored per-agent decision prompt. Exported so prompt content can be unit-tested. */
+export function buildDecisionPrompt(context: DecisionContext): string {
     const governance = context.simulation.governance;
     const params = governance.params;
     const me = context.agent;
@@ -261,6 +269,17 @@ export class FoundryAiProvider implements AiProvider {
       }
     }
 
+    // Foreign affairs: only the sitting President, only when the World connector is enabled and there
+    // are other civilizations to reach. Citizens never see these actions.
+    const foreign = context.foreignAffairs;
+    const knownCivilizations = foreign?.knownCivilizations ?? [];
+    if (isPresident && foreign?.enabled && knownCivilizations.length > 0) {
+      allowedActions.push(
+        { type: "contactCivilization", fields: ["targetCivId", "greeting", "purpose?", "rationale"], note: "Open first diplomatic contact with another civilization on behalf of your people." },
+        { type: "messageCivilization", fields: ["targetCivId", "body", "subject?", "inReplyTo?", "rationale"], note: "Send a public message to another civilization you already know." }
+      );
+    }
+
     return JSON.stringify({
       allowedActions,
       economy: {
@@ -295,6 +314,18 @@ export class FoundryAiProvider implements AiProvider {
         note: "The President's term length and powers are set by the constitution and can be changed by amendment (use proposeAmendment.policyChange). Laws can be created by amendment (enactLaw) or, if you are President, by decree."
       },
       politicalOpportunities: buildOpportunities({ me, isPresident, openElection: openElection !== undefined, params, myPendingViolations: myPendingViolations.length, treasury: governance.treasury }),
+      worldBriefing: foreign?.enabled
+        ? {
+            description:
+              "Shared foreign-affairs briefing — what the wider world has been doing lately. Every citizen sees the same briefing. Foreign relations are the President's job; ordinary citizens can talk about world news but cannot act on it.",
+            status: foreign.connected ? "connected" : "world unreachable (foreign affairs paused)",
+            knownCivilizations: knownCivilizations.map((civ) => ({ id: civ.civId, name: civ.displayName })),
+            recent: foreign.briefing,
+            note: isPresident
+              ? "As President you may use contactCivilization / messageCivilization to act on the world's behalf."
+              : "Only the President can contact or message other civilizations."
+          }
+        : undefined,
       socialGuidance: (() => {
         const silence = context.turnsSinceConversation ?? 0;
         if (silence >= context.simulation.config.conversationSilenceThreshold) {
@@ -393,7 +424,6 @@ export class FoundryAiProvider implements AiProvider {
         .filter((tile) => Math.abs(tile.position.x - me.position.x) <= 2 && Math.abs(tile.position.y - me.position.y) <= 2)
         .map((tile) => ({ position: tile.position, terrain: tile.terrain, label: tile.label, productivity: tile.productivity }))
     });
-  }
 }
 
 function buildOpportunities(input: {

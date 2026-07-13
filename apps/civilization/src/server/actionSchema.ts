@@ -153,6 +153,23 @@ export const agentActionSchema: z.ZodType<AgentAction> = z.discriminatedUnion("t
     selfRevision
   }),
   z.object({
+    type: z.literal("contactCivilization"),
+    targetCivId: z.string().trim().min(1).max(120),
+    greeting: z.string().trim().min(1).max(800),
+    purpose: z.string().trim().min(1).max(400).optional(),
+    rationale,
+    selfRevision
+  }),
+  z.object({
+    type: z.literal("messageCivilization"),
+    targetCivId: z.string().trim().min(1).max(120),
+    body: z.string().trim().min(1).max(1200),
+    subject: z.string().trim().min(1).max(200).optional(),
+    inReplyTo: z.string().trim().min(1).max(120).optional(),
+    rationale,
+    selfRevision
+  }),
+  z.object({
     type: z.literal("noop"),
     rationale,
     selfRevision

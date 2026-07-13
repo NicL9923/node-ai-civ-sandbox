@@ -4,6 +4,8 @@ import { z, ZodError } from "zod";
 import type { AppConfig } from "./config.js";
 import type { EventBus } from "./eventBus.js";
 import type { SimulationEngine } from "./simulation.js";
+import type { FederationService } from "./world/federationService.js";
+import type { FederationConnector } from "./world/federationConnector.js";
 
 const positionSchema = z.object({
   x: z.number().int().min(0),
@@ -28,7 +30,13 @@ const agentCreateSchema = z.object({
 
 const agentUpdateSchema = agentCreateSchema.partial().omit({ id: true });
 
-export function createApp(config: AppConfig, engine: SimulationEngine, eventBus: EventBus): express.Express {
+export function createApp(
+  config: AppConfig,
+  engine: SimulationEngine,
+  eventBus: EventBus,
+  federationService?: FederationService,
+  federationConnector?: FederationConnector
+): express.Express {
   const app = express();
   app.disable("x-powered-by");
   app.use(express.json({ limit: "512kb" }));
@@ -111,6 +119,45 @@ export function createApp(config: AppConfig, engine: SimulationEngine, eventBus:
 
   app.post("/api/admin/agents/:agentId/deactivate", requireAdmin(config), asyncHandler(async (request, response) => {
     response.json(await engine.updateAgent(requiredParam(request, "agentId"), { active: false }));
+  }));
+
+  // Federation diagnostics (admin only). These never echo the HMAC secret, key material, or onboarding
+  // token. When the connector is not configured they report a disabled status rather than 404-ing.
+  app.get("/api/admin/federation/status", requireAdmin(config), asyncHandler(async (_request, response) => {
+    if (!federationService) {
+      response.json({ enabled: false });
+      return;
+    }
+    response.json(await federationService.getSnapshot());
+  }));
+
+  app.post("/api/admin/federation/register", requireAdmin(config), asyncHandler(async (_request, response) => {
+    if (!federationConnector || !federationService) {
+      response.status(409).json({ error: "Federation is not enabled." });
+      return;
+    }
+    await federationConnector.register();
+    const snapshot = await federationService.getSnapshot();
+    response.json({ ok: true, registered: snapshot.registered, civId: snapshot.civId });
+  }));
+
+  app.post("/api/admin/federation/heartbeat", requireAdmin(config), asyncHandler(async (_request, response) => {
+    if (!federationConnector) {
+      response.status(409).json({ error: "Federation is not enabled." });
+      return;
+    }
+    await federationConnector.heartbeat();
+    response.json({ ok: true });
+  }));
+
+  app.post("/api/admin/federation/sync", requireAdmin(config), asyncHandler(async (_request, response) => {
+    if (!federationConnector) {
+      response.status(409).json({ error: "Federation is not enabled." });
+      return;
+    }
+    await federationConnector.pollAndAck();
+    await federationConnector.flushOutbox();
+    response.json({ ok: true });
   }));
 
   const clientRoot = path.resolve(process.cwd(), "dist/client");

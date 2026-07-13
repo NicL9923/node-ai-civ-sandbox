@@ -2,6 +2,23 @@ import "dotenv/config";
 import { randomBytes } from "node:crypto";
 import type { GovernanceParams, ModelKey, SimulationConfig } from "../shared/types.js";
 
+export interface FederationConfig {
+  /** Absolute base URL of the World API, INCLUDING the `/world/v1` prefix. */
+  apiBaseUrl: string;
+  protocolVersion: "1";
+  /** Pre-provisioned S2S credentials. Absent until registration completes (onboarding flow). */
+  civId?: string;
+  keyId?: string;
+  /** HMAC signing secret, exchanged out-of-band. Never logged or surfaced in any response. */
+  hmacSecret?: string;
+  /** One-time onboarding token for the explicit registration flow. */
+  onboardingToken?: string;
+  displayName: string;
+  heartbeatIntervalMs: number;
+  pollIntervalMs: number;
+  outboxIntervalMs: number;
+}
+
 export interface AppConfig {
   port: number;
   simulationId: string;
@@ -21,6 +38,8 @@ export interface AppConfig {
     endpoint: string;
     databaseId: string;
   };
+  /** Present only when the optional World federation connector is configured. */
+  federation?: FederationConfig;
   telemetry: {
     connectionString?: string;
   };
@@ -51,6 +70,65 @@ function boolFromEnv(name: string, fallback: boolean): boolean {
     return fallback;
   }
   return value === "true" || value === "1" || value === "yes";
+}
+
+/**
+ * Parse the optional World federation connector configuration. Federation is enabled ONLY when
+ * WORLD_API_BASE_URL is set; when absent this returns undefined and the app runs exactly as a
+ * standalone civilization. Validation never logs or echoes secret values — only variable names.
+ */
+export function loadFederationConfig(simulationId: string): FederationConfig | undefined {
+  const apiBaseUrl = optionalEnv("WORLD_API_BASE_URL");
+  if (!apiBaseUrl) {
+    return undefined;
+  }
+
+  try {
+    // eslint-disable-next-line no-new
+    new URL(apiBaseUrl);
+  } catch {
+    throw new Error("WORLD_API_BASE_URL must be an absolute URL (including the /world/v1 path prefix).");
+  }
+
+  const protocolVersion = optionalEnv("WORLD_PROTOCOL_VERSION") ?? "1";
+  if (protocolVersion !== "1") {
+    throw new Error("WORLD_PROTOCOL_VERSION must be '1' for this protocol.");
+  }
+
+  const civId = optionalEnv("WORLD_CIV_ID");
+  const keyId = optionalEnv("WORLD_KEY_ID");
+  const hmacSecret = optionalEnv("WORLD_HMAC_SECRET");
+  const onboardingToken = optionalEnv("WORLD_ONBOARDING_TOKEN");
+
+  // The HMAC signing secret is exchanged out-of-band and is always required to sign authenticated
+  // requests — including the calls made after an onboarding-token registration assigns civId/keyId.
+  if (!hmacSecret) {
+    throw new Error("Federation requires WORLD_HMAC_SECRET (the S2S signing secret, exchanged out-of-band).");
+  }
+
+  if ((civId && !keyId) || (keyId && !civId)) {
+    throw new Error("Provide WORLD_CIV_ID and WORLD_KEY_ID together, or neither (and use WORLD_ONBOARDING_TOKEN to register).");
+  }
+
+  const hasCivPair = Boolean(civId && keyId);
+  if (!hasCivPair && !onboardingToken) {
+    throw new Error(
+      "Federation needs either pre-provisioned WORLD_CIV_ID + WORLD_KEY_ID, or a WORLD_ONBOARDING_TOKEN to register."
+    );
+  }
+
+  return {
+    apiBaseUrl,
+    protocolVersion,
+    civId,
+    keyId,
+    hmacSecret,
+    onboardingToken,
+    displayName: optionalEnv("WORLD_DISPLAY_NAME") ?? simulationId,
+    heartbeatIntervalMs: numberFromEnv("WORLD_HEARTBEAT_INTERVAL_MS", 30_000),
+    pollIntervalMs: numberFromEnv("WORLD_POLL_INTERVAL_MS", 10_000),
+    outboxIntervalMs: numberFromEnv("WORLD_OUTBOX_INTERVAL_MS", 5_000)
+  };
 }
 
 export function loadConfig(): AppConfig {
@@ -117,6 +195,7 @@ export function loadConfig(): AppConfig {
           databaseId: cosmosDatabaseId
         }
       : undefined,
+    federation: loadFederationConfig(optionalEnv("SIMULATION_ID") ?? "default"),
     telemetry: {
       connectionString: optionalEnv("APPLICATIONINSIGHTS_CONNECTION_STRING")
     }
