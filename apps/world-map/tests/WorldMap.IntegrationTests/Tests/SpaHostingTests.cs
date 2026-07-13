@@ -75,7 +75,7 @@ public sealed class SpaHostingTests : IAsyncLifetime
     [Fact]
     public async Task Unknown_client_route_falls_back_to_index()
     {
-        var response = await _client.GetAsync("/some/deep/link");
+        var response = await GetHtml("/some/deep/link");
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var body = await response.Content.ReadAsStringAsync();
         Assert.Contains(IndexMarker, body);
@@ -94,7 +94,7 @@ public sealed class SpaHostingTests : IAsyncLifetime
     [Fact]
     public async Task Unknown_api_route_returns_404_not_index()
     {
-        var response = await _client.GetAsync("/world/v1/does-not-exist");
+        var response = await GetHtml("/world/v1/does-not-exist");
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
         var body = await response.Content.ReadAsStringAsync();
         Assert.DoesNotContain(IndexMarker, body);
@@ -107,5 +107,49 @@ public sealed class SpaHostingTests : IAsyncLifetime
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var body = await response.Content.ReadAsStringAsync();
         Assert.DoesNotContain(IndexMarker, body);
+    }
+
+    [Fact]
+    public async Task Deep_link_without_html_accept_does_not_return_index()
+    {
+        // A JSON client (e.g. an API caller) hitting an unknown route must get a plain 404,
+        // never the SPA shell.
+        using var request = new HttpRequestMessage(HttpMethod.Get, "/some/deep/link");
+        request.Headers.TryAddWithoutValidation("Accept", "application/json");
+        var response = await _client.SendAsync(request);
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        Assert.DoesNotContain(IndexMarker, await response.Content.ReadAsStringAsync());
+    }
+
+    [Theory]
+    [InlineData("POST")]
+    [InlineData("PUT")]
+    [InlineData("DELETE")]
+    public async Task Non_get_to_unknown_route_does_not_return_index(string method)
+    {
+        using var request = new HttpRequestMessage(new HttpMethod(method), "/some/deep/link");
+        request.Headers.TryAddWithoutValidation("Accept", "text/html");
+        var response = await _client.SendAsync(request);
+        Assert.NotEqual(HttpStatusCode.OK, response.StatusCode);
+        Assert.DoesNotContain(IndexMarker, await response.Content.ReadAsStringAsync());
+    }
+
+    [Theory]
+    [InlineData("/assets/missing-abc123.js")]
+    [InlineData("/nope.js")]
+    [InlineData("/styles/theme.css")]
+    public async Task Missing_asset_returns_404_not_index(string path)
+    {
+        // File-like / asset paths must 404 when absent — not silently resolve to the SPA shell.
+        var response = await GetHtml(path);
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        Assert.DoesNotContain(IndexMarker, await response.Content.ReadAsStringAsync());
+    }
+
+    private Task<HttpResponseMessage> GetHtml(string path)
+    {
+        var request = new HttpRequestMessage(HttpMethod.Get, path);
+        request.Headers.TryAddWithoutValidation("Accept", "text/html,application/xhtml+xml");
+        return _client.SendAsync(request);
     }
 }

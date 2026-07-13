@@ -1,46 +1,50 @@
 # Design
 
-Visual system for the World Map observer. Light **surveyor's-chart** theme: a warm
-paper surface read under daylight, drawn in ink. Deliberately not the dark neon
-strategy-map reflex. All colors are OKLCH; neutrals are tinted toward the paper's warm hue;
-never `#000`/`#fff`.
+Visual system for the World Map observer. Light **surveyor's-chart** theme: a light
+neutral chart surface read under daylight, drawn in ink. Deliberately not the dark neon
+strategy-map reflex, and deliberately not a warm cream/paper. All colors are OKLCH; the
+neutral surfaces and ink are near-neutral (very low chroma) with only a whisper of the
+signal-ink hue for cohesion; never `#000`/`#fff`.
 
 ## Visual Theme
 
-A printed survey / cartographer's chart. Warm paper ground, ink linework, hairline
-graticule. Civilizations are surveyed territories/stations; relationships are inked survey
-lines whose linework encodes stance and whose weight encodes trust. One committed
-signal-ink accent (vermilion) is reserved for live, selection, and threat — nothing else.
-Restrained by default (tinted neutrals + a single accent held under ~10% of the surface).
+A printed survey / cartographer's chart. Light neutral ground, ink linework, hairline
+graticule. Civilizations are surveyed stations; relationships are inked survey lines whose
+linework encodes stance and whose weight encodes trust. One committed signal-ink accent
+(vermilion) is reserved for live, selection, and threat — nothing else. Restrained by
+default (neutral surfaces + a single accent held under ~10% of the surface). The chart
+identity comes from the graticule, linework, and typography — not from a tinted paper.
 
 ## Color Palette
 
-Tokens (OKLCH). Neutrals share a warm hue (~80); the accent is a red-orange signal ink.
+Tokens (OKLCH). Neutral surfaces and ink carry only a faint tint toward the signal hue
+(34) at very low chroma (≤ 0.006); the accent is the same red-orange signal hue at full
+chroma.
 
 Surfaces
-- `--paper`        oklch(0.982 0.008 85)  — primary chart ground
-- `--paper-sunk`   oklch(0.955 0.010 82)  — panels, side rail, timeline (second neutral layer)
-- `--paper-raised` oklch(0.995 0.006 85)  — the rare raised surface (use sparingly)
+- `--paper`        oklch(0.985 0.004 34)  — primary chart ground (light neutral)
+- `--paper-sunk`   oklch(0.958 0.005 34)  — panels, side rail, timeline (second neutral layer)
+- `--paper-raised` oklch(0.997 0.003 34)  — the rare raised surface (use sparingly)
 
 Ink (text + linework)
-- `--ink`        oklch(0.255 0.016 75) — primary text, strong linework (≥ 4.5:1 on paper)
-- `--ink-soft`   oklch(0.435 0.014 75) — secondary text, labels
-- `--ink-faint`  oklch(0.595 0.011 78) — tertiary text, axis/graticule labels
-- `--line`       oklch(0.815 0.012 80) — borders, standard survey lines
-- `--graticule`  oklch(0.885 0.010 82) — hairline map grid
+- `--ink`        oklch(0.25 0.006 34) — primary text, strong linework (≥ 4.5:1 on `--paper`)
+- `--ink-soft`   oklch(0.43 0.006 34) — secondary text, labels
+- `--ink-faint`  oklch(0.6 0.005 34) — tertiary text, axis/graticule labels
+- `--line`       oklch(0.82 0.006 34) — borders, standard survey lines
+- `--graticule`  oklch(0.89 0.005 34) — hairline map grid
 
 Accent — signal ink (live / selection / threat only)
 - `--signal`        oklch(0.575 0.190 34) — selection ring, live pulse, threat emphasis
 - `--signal-strong` oklch(0.505 0.205 32) — pressed/active signal
-- `--signal-wash`   oklch(0.945 0.045 40) — faint signal fill for selected regions
+- `--signal-wash`   oklch(0.95 0.035 34) — faint signal fill for selected regions
 
 Semantic states (product vocabulary; derived from ink/signal, not new hues)
 - focus ring: `--signal` at 2px offset; hover: `--paper-sunk`; disabled: `--ink-faint`.
-- Liveness is drawn, not colored: running = full-strength ink; stale = `--ink-faint`
+- Recency is drawn, not colored: recently-updated = full-strength ink; stale = `--ink-faint`
   with a hatch fill. Threat only tints toward `--signal`.
 
-Contrast: `--ink` on `--paper` ≈ 12:1; `--ink-soft` on `--paper` ≈ 6:1; `--signal` on
-`--paper` ≈ 4.6:1 (usable for text/edges). Verify all pairs during polish.
+Contrast: `--ink` on `--paper` ≈ 13:1; `--ink-soft` on `--paper` ≈ 6:1; `--ink-faint` on
+`--paper` ≈ 3.7:1 (non-text/graphical only). Verify all text pairs meet ≥ 4.5:1.
 
 ## Typography
 

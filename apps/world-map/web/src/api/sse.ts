@@ -54,13 +54,20 @@ export class SseFrameParser {
 export interface EventStreamOptions {
   baseUrl: string;
   /**
-   * Optional opaque resume cursor to echo to the server's `after` query param. The World's
-   * cursor is documented as opaque, so we never construct one: when omitted, we connect from the
-   * beginning and rely on worldsequence dedupe below to drop already-seen events. This makes
-   * reconnects gap-free and duplicate-free (at the cost of replaying history the server catches
-   * up before going live).
+   * Returns the current bounded opaque resume cursor to echo to the server's `after` query param,
+   * read fresh on every (re)connect. The World's cursor is opaque, so we never construct one — we
+   * only echo cursors the server returned (from the initial event crawl / fallback poll). Returning
+   * `undefined` connects from the beginning. Because the cursor advances (via the fallback poll) and
+   * the sequence floor below drops the bounded catch-up overlap, reconnects stay gap-free and
+   * duplicate-free without replaying the entire history from ordinal 0.
    */
-  after?: string;
+  getAfter?: () => string | undefined;
+  /**
+   * Returns the current sequence floor: the max worldsequence already ingested by the app (crawl +
+   * poll + prior stream events). Events with `worldsequence <= floor` are dropped as catch-up
+   * overlap. Read fresh per event so deliveries from crawl/poll are reflected immediately.
+   */
+  getSeqFloor?: () => bigint;
   onEvent: (event: WorldEvent) => void;
   onStatus: (status: StreamStatus) => void;
   fetchImpl?: typeof fetch;
@@ -79,29 +86,30 @@ function toSeq(value: string | null | undefined): bigint | null {
 }
 
 /**
- * Manages one live stream: connect, parse, dedupe by monotonically increasing worldsequence,
- * and reconnect with exponential backoff + jitter, resuming from the last seen sequence.
+ * Manages one live stream: connect (from the current bounded resume cursor), parse frames, drop
+ * catch-up overlap via the shared sequence floor, and reconnect with exponential backoff + jitter.
  */
 export class WorldEventStream {
-  private readonly opts: Required<Omit<EventStreamOptions, "after">> & { after?: string };
+  private readonly opts: Required<Omit<EventStreamOptions, "getAfter" | "getSeqFloor">> & {
+    getAfter: () => string | undefined;
+    getSeqFloor: () => bigint;
+  };
   private controller: AbortController | null = null;
   private stopped = false;
   private attempt = 0;
-  private lastSeq: bigint;
   private timer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(options: EventStreamOptions) {
     this.opts = {
       baseUrl: options.baseUrl,
-      after: options.after,
+      getAfter: options.getAfter ?? (() => undefined),
+      getSeqFloor: options.getSeqFloor ?? (() => 0n),
       onEvent: options.onEvent,
       onStatus: options.onStatus,
       fetchImpl: options.fetchImpl ?? fetch.bind(globalThis),
       baseDelayMs: options.baseDelayMs ?? 1000,
       maxDelayMs: options.maxDelayMs ?? 30_000,
     };
-    // Dedupe floor: only events with a strictly greater worldsequence are delivered.
-    this.lastSeq = 0n;
   }
 
   start(): void {
@@ -137,8 +145,9 @@ export class WorldEventStream {
     this.controller = new AbortController();
     this.opts.onStatus(this.attempt === 0 ? "connecting" : "reconnecting");
 
-    const url = this.opts.after
-      ? `${this.opts.baseUrl}/stream?after=${encodeURIComponent(this.opts.after)}`
+    const after = this.opts.getAfter();
+    const url = after
+      ? `${this.opts.baseUrl}/stream?after=${encodeURIComponent(after)}`
       : `${this.opts.baseUrl}/stream`;
     try {
       const res = await this.opts.fetchImpl(url, {
@@ -179,9 +188,11 @@ export class WorldEventStream {
       return; // ignore malformed frame
     }
     const seq = toSeq(event.worldsequence);
-    if (seq !== null) {
-      if (seq <= this.lastSeq) return; // duplicate / already-seen (catch-up overlap)
-      this.lastSeq = seq;
+    // Drop bounded catch-up overlap using the shared floor (a decimal STRING compared as BigInt,
+    // so sequences beyond 2^53 stay correct). Events with an unparseable/missing sequence are
+    // delivered and deduped downstream by id.
+    if (seq !== null && seq <= this.opts.getSeqFloor()) {
+      return;
     }
     this.opts.onEvent(event);
   }

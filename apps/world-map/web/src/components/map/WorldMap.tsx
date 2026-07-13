@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import type { Civilization, Relationship } from "../../api/types";
 import { deriveFreshness } from "../../domain/freshness";
-import { civLayout, projectToViewBox } from "../../domain/layout";
+import { layoutCivs } from "../../domain/layout";
 import { edgeTreatment, pairKey } from "../../domain/relationships";
 import type { Selection } from "../../hooks/useSelection";
 import { CivNode } from "./CivNode";
@@ -36,11 +36,7 @@ export function WorldMap({
   onSelectRel,
   reducedMotion,
 }: WorldMapProps) {
-  const positions = useMemo(() => {
-    const map = new Map<string, { x: number; y: number }>();
-    for (const id of civIds) map.set(id, projectToViewBox(civLayout(id), SIZE, PAD));
-    return map;
-  }, [civIds]);
+  const positions = useMemo(() => layoutCivs(civIds, SIZE, PAD), [civIds]);
 
   const selectedCivId = selection?.kind === "civ" ? selection.civId : null;
   const selectedPairKey =

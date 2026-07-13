@@ -31,7 +31,7 @@ export function SummaryHeader({
         </span>
         <span className="stat">
           <span className="stat__value mono">{liveCount}</span>
-          <span className="stat__label">live</span>
+          <span className="stat__label">updated recently</span>
         </span>
         <span className="stat">
           <span className="stat__value mono">{staleCount}</span>

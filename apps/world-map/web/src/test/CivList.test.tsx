@@ -48,10 +48,10 @@ describe("CivList", () => {
     expect(current).toHaveTextContent("Alpha");
   });
 
-  it("communicates liveness with an accessible label, not color alone", () => {
+  it("communicates recency with an accessible label, not color alone", () => {
     setup();
-    // Beta is not running → "stopped"; Alpha is fresh → "Running, heartbeat is recent".
-    expect(screen.getByLabelText(/reports it is not running/i)).toBeInTheDocument();
-    expect(screen.getByLabelText(/heartbeat is recent/i)).toBeInTheDocument();
+    // Beta is not running → "paused"; Alpha is fresh → "updated recently".
+    expect(screen.getByLabelText(/simulation reports it is paused/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/projection updated recently/i)).toBeInTheDocument();
   });
 });

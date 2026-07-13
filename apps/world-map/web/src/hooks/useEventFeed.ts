@@ -2,9 +2,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createClient, resolveBaseUrl, type WorldClient } from "../api/client";
 import { WorldEventStream, type StreamStatus } from "../api/sse";
 import type { WorldEvent } from "../api/types";
+import { crawlPaged, DEFAULT_PAGE_LIMIT, type CrawlResult } from "../domain/pagination";
 
-const PAGE_LIMIT = 100;
-const MAX_PAGES = 20; // initial forward crawl bound
+const PAGE_LIMIT = DEFAULT_PAGE_LIMIT;
+const MAX_EVENT_PAGES = 20; // initial forward crawl bound (recent-history window)
 const MAX_RETAINED = 500; // newest-N kept in memory
 const INITIAL_VISIBLE = 40;
 const REVEAL_STEP = 40;
@@ -56,20 +57,36 @@ function mergeEvents(current: WorldEvent[], incoming: WorldEvent[]): WorldEvent[
   return next.length > MAX_RETAINED ? next.slice(0, MAX_RETAINED) : next;
 }
 
-async function crawlForward(client: WorldClient, signal: AbortSignal): Promise<WorldEvent[]> {
-  const all: WorldEvent[] = [];
-  let after: string | undefined;
-  for (let i = 0; i < MAX_PAGES; i++) {
-    const { data, error } = await client.GET("/events", {
-      params: { query: { after, limit: PAGE_LIMIT } },
-      signal,
-    });
-    if (error || !data) throw new Error("events request failed");
-    all.push(...(data.items ?? []));
-    if (!data.nextCursor) break;
-    after = data.nextCursor;
+/**
+ * Crawl `/events` forward from `after` (undefined = beginning), with cursor cycle + page/item cap
+ * detection. Returns the events plus a bounded opaque resume cursor for the live stream / next poll.
+ */
+async function crawlEvents(
+  client: WorldClient,
+  after: string | undefined,
+  signal: AbortSignal,
+): Promise<CrawlResult<WorldEvent>> {
+  return crawlPaged<WorldEvent>(
+    async (cursor, sig) => {
+      const { data, error } = await client.GET("/events", {
+        params: { query: { after: cursor, limit: PAGE_LIMIT } },
+        signal: sig,
+      });
+      if (error || !data) throw new Error("events request failed");
+      return { items: (data.items ?? []) as WorldEvent[], nextCursor: data.nextCursor };
+    },
+    signal,
+    { maxPages: MAX_EVENT_PAGES, startAfter: after },
+  );
+}
+
+function maxSeq(events: WorldEvent[], floor: bigint): bigint {
+  let m = floor;
+  for (const e of events) {
+    const s = toSeq(e.worldsequence);
+    if (s > m) m = s;
   }
-  return all;
+  return m;
 }
 
 /**
@@ -89,35 +106,48 @@ export function useEventFeed(baseUrl?: string): EventFeed {
   const [connection, setConnection] = useState<StreamStatus>("idle");
 
   const connectionRef = useRef<StreamStatus>("idle");
+  // Bounded opaque resume cursor (from the crawl / advanced by the poll) echoed to the stream and
+  // used as the poll's start — we never construct cursors from sequence numbers.
+  const resumeCursorRef = useRef<string | undefined>(undefined);
+  // Max worldsequence ingested so far — the stream's dedupe floor; advanced by crawl/poll/stream.
+  const seqFloorRef = useRef<bigint>(0n);
   const abortRef = useRef<AbortController | null>(null);
+  const pollingRef = useRef(false);
 
   const ingest = useCallback((incoming: WorldEvent[]) => {
     if (incoming.length === 0) return;
+    seqFloorRef.current = maxSeq(incoming, seqFloorRef.current);
     setEvents((cur) => mergeEvents(cur, incoming));
   }, []);
 
-  // Backstop refresh: re-crawl the forward feed and merge (deduped by id). Used when the live
-  // stream is not open. The World's cursor is opaque, so we re-crawl from the beginning rather
-  // than construct one; dedupe keeps this idempotent.
-  const pollAll = useCallback(async () => {
+  // Backstop poll: page `/events` forward FROM the saved resume cursor (not the origin), with
+  // cap/cycle detection, merge deduped, and advance the resume cursor. Used only when the stream
+  // is not open. Guarded so overlapping ticks don't stack.
+  const pollFromCursor = useCallback(async () => {
+    if (pollingRef.current) return;
+    pollingRef.current = true;
     const controller = new AbortController();
     try {
-      const items = await crawlForward(client, controller.signal);
-      ingest(items);
+      const result = await crawlEvents(client, resumeCursorRef.current, controller.signal);
+      ingest(result.items);
+      if (result.resumeCursor !== undefined) resumeCursorRef.current = result.resumeCursor;
     } catch {
-      /* transient; the interval will retry */
+      /* transient (network) or a pagination cycle/cap; the interval will retry */
+    } finally {
+      pollingRef.current = false;
     }
   }, [client, ingest]);
 
-  // Initial forward crawl.
+  // Initial forward crawl (recent history) → seeds events, resume cursor, and sequence floor.
   useEffect(() => {
     const controller = new AbortController();
     abortRef.current = controller;
     setStatus("loading");
-    crawlForward(client, controller.signal)
-      .then((items) => {
+    crawlEvents(client, undefined, controller.signal)
+      .then((result) => {
         if (controller.signal.aborted) return;
-        ingest(items);
+        ingest(result.items);
+        resumeCursorRef.current = result.resumeCursor;
         setStatus("ready");
         setError(null);
       })
@@ -129,12 +159,15 @@ export function useEventFeed(baseUrl?: string): EventFeed {
     return () => controller.abort();
   }, [client, ingest]);
 
-  // Live SSE stream, started after the first load. It catches up from the beginning and dedupes
-  // by worldsequence internally, so no cursor bookkeeping is needed here.
+  // Live SSE stream, started after the first load establishes the bounded resume cursor + floor.
+  // The stream reads both fresh on every (re)connect via getters, so a poll that advances the
+  // cursor/floor bounds the catch-up overlap and the floor drops any re-delivered overlap.
   useEffect(() => {
     if (status !== "ready") return;
     const stream = new WorldEventStream({
       baseUrl: base,
+      getAfter: () => resumeCursorRef.current,
+      getSeqFloor: () => seqFloorRef.current,
       onEvent: (evt) => ingest([evt]),
       onStatus: (s) => {
         connectionRef.current = s;
@@ -150,13 +183,13 @@ export function useEventFeed(baseUrl?: string): EventFeed {
     if (status !== "ready") return;
     const timer = setInterval(() => {
       if (document.visibilityState !== "visible") return;
-      if (connectionRef.current !== "open") void pollAll();
+      if (connectionRef.current !== "open") void pollFromCursor();
     }, FALLBACK_POLL_MS);
     return () => clearInterval(timer);
-  }, [status, pollAll]);
+  }, [status, pollFromCursor]);
 
   const loadOlder = useCallback(() => setVisibleCount((c) => c + REVEAL_STEP), []);
-  const refresh = useCallback(() => void pollAll(), [pollAll]);
+  const refresh = useCallback(() => void pollFromCursor(), [pollFromCursor]);
 
   const visible = events.slice(0, visibleCount);
   const latestWorldSequence = events.length > 0 ? (events[0].worldsequence ?? null) : null;

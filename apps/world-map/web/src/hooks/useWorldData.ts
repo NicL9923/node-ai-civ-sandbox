@@ -2,9 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createClient, type WorldClient } from "../api/client";
 import type { Civilization, Relationship } from "../api/types";
 import { pairKey } from "../domain/relationships";
+import { crawlPaged, DEFAULT_PAGE_LIMIT, PaginationError } from "../domain/pagination";
 
-const PAGE_LIMIT = 100;
-const MAX_PAGES = 50; // safety bound (≤ 5000 items)
+const PAGE_LIMIT = DEFAULT_PAGE_LIMIT;
 const DEFAULT_POLL_MS = 30_000;
 
 export type LoadStatus = "loading" | "ready" | "error";
@@ -27,39 +27,29 @@ interface Snapshot {
   relationships: Map<string, Relationship>;
 }
 
-async function pageAllCivs(client: WorldClient, signal: AbortSignal): Promise<Civilization[]> {
-  const items: Civilization[] = [];
-  let after: string | undefined;
-  for (let i = 0; i < MAX_PAGES; i++) {
-    const { data, error } = await client.GET("/civilizations", {
-      params: { query: { after, limit: PAGE_LIMIT } },
-      signal,
-    });
-    if (error || !data) throw new Error("civilizations request failed");
-    items.push(...(data.items ?? []));
-    if (!data.nextCursor) break;
-    after = data.nextCursor;
-  }
-  return items;
-}
-
-async function pageAllRelationships(
+/**
+ * Fully crawl a paginated public read endpoint into a complete list. Cursor cycles and cap
+ * overruns throw (via crawlPaged); a capped result also throws here, because the civ/relationship
+ * SNAPSHOT must be complete-and-swap — never a silently-partial world.
+ */
+async function crawlAll<T>(
   client: WorldClient,
+  path: "/civilizations" | "/relationships",
   signal: AbortSignal,
-): Promise<Relationship[]> {
-  const items: Relationship[] = [];
-  let after: string | undefined;
-  for (let i = 0; i < MAX_PAGES; i++) {
-    const { data, error } = await client.GET("/relationships", {
+): Promise<T[]> {
+  const result = await crawlPaged<T>(async (after, sig) => {
+    const { data, error } = await client.GET(path, {
       params: { query: { after, limit: PAGE_LIMIT } },
-      signal,
+      signal: sig,
     });
-    if (error || !data) throw new Error("relationships request failed");
-    items.push(...(data.items ?? []));
-    if (!data.nextCursor) break;
-    after = data.nextCursor;
+    if (error || !data) throw new Error(`${path} request failed`);
+    return { items: (data.items ?? []) as T[], nextCursor: data.nextCursor };
+  }, signal);
+
+  if (result.capped) {
+    throw new PaginationError(`${path} exceeded the page cap before completing`);
   }
-  return items;
+  return result.items;
 }
 
 function buildSnapshot(civList: Civilization[], relList: Relationship[]): Snapshot {
@@ -104,8 +94,8 @@ export function useWorldData(baseUrl?: string, pollMs = DEFAULT_POLL_MS): WorldD
       if (!background) setStatus((s) => (s === "ready" ? s : "loading"));
       try {
         const [civList, relList] = await Promise.all([
-          pageAllCivs(client, controller.signal),
-          pageAllRelationships(client, controller.signal),
+          crawlAll<Civilization>(client, "/civilizations", controller.signal),
+          crawlAll<Relationship>(client, "/relationships", controller.signal),
         ]);
         if (id !== requestId.current) return; // superseded
         setSnapshot(buildSnapshot(civList, relList));

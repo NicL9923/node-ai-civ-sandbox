@@ -430,6 +430,22 @@
   width: 100%;
 }
 
+/* Subtle inline text button (e.g. Show more / Show less). */
+.btn-link {
+  border: none;
+  background: none;
+  padding: 2px 0;
+  margin-top: var(--s-1);
+  color: var(--ink-soft);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+  font-size: var(--t-xs);
+}
+.btn-link:hover {
+  color: var(--ink);
+}
+
 /* --- Status states --- */
 .state {
   padding: var(--s-6) var(--s-4);

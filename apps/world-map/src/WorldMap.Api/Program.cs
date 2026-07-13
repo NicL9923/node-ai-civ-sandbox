@@ -130,16 +130,15 @@ app.UseStaticFiles(staticFileOptions);
 
 app.MapWorldMapApi();
 
-// SPA deep-link fallback: serve index.html for unmatched non-API GET routes so client-side routes
-// resolve. API (/world) and health (/health) paths keep their normal 404 behavior.
+// SPA deep-link fallback: serve index.html only for genuine client-side NAVIGATIONS that didn't
+// match an endpoint or a static file. Everything else (API, health, missing assets, non-GET/HEAD,
+// non-HTML Accept, file-like paths) keeps proper 404/405/non-index behavior.
 var effectiveSpaProvider = spaProvider ?? app.Environment.WebRootFileProvider;
 if (effectiveSpaProvider.GetFileInfo("index.html").Exists)
 {
     app.MapFallback((HttpContext ctx) =>
     {
-        var path = ctx.Request.Path.Value ?? "/";
-        if (path.StartsWith("/world", StringComparison.OrdinalIgnoreCase) ||
-            path.StartsWith("/health", StringComparison.OrdinalIgnoreCase))
+        if (!IsSpaNavigation(ctx.Request))
         {
             return Results.NotFound();
         }
@@ -152,6 +151,56 @@ if (effectiveSpaProvider.GetFileInfo("index.html").Exists)
 }
 
 app.Run();
+
+// Decide whether an unmatched request is a client-side navigation that should receive the SPA
+// shell. Requires: GET/HEAD, an Accept header that includes text/html, a path outside the API,
+// health, and asset roots, and a path whose final segment is not file-like (dotted) — a dotted
+// last segment means a missing static asset, which must 404, not return HTML.
+static bool IsSpaNavigation(HttpRequest request)
+{
+    if (!HttpMethods.IsGet(request.Method) && !HttpMethods.IsHead(request.Method))
+    {
+        return false;
+    }
+
+    var path = request.Path.Value ?? "/";
+    if (path.StartsWith("/world", StringComparison.OrdinalIgnoreCase) ||
+        path.StartsWith("/health", StringComparison.OrdinalIgnoreCase) ||
+        path.StartsWith("/assets", StringComparison.OrdinalIgnoreCase))
+    {
+        return false;
+    }
+
+    var lastSlash = path.LastIndexOf('/');
+    var lastSegment = lastSlash >= 0 ? path.AsSpan(lastSlash + 1) : path.AsSpan();
+    if (lastSegment.Contains('.'))
+    {
+        return false; // file-like (e.g. /foo.js) — a missing asset, not a route
+    }
+
+    // Serve the SPA shell unless the client EXPLICITLY prefers a non-HTML representation.
+    // No Accept header (bare GET) or */* → navigation; application/json only → not a navigation.
+    var acceptValues = request.Headers.Accept;
+    if (acceptValues.Count == 0)
+    {
+        return true;
+    }
+
+    foreach (var accept in acceptValues)
+    {
+        if (accept is null)
+        {
+            continue;
+        }
+        if (accept.Contains("text/html", StringComparison.OrdinalIgnoreCase) ||
+            accept.Contains("*/*", StringComparison.Ordinal))
+        {
+            return true;
+        }
+    }
+
+    return false;
+}
 
 /// <summary>Exposed so integration tests can use <c>WebApplicationFactory&lt;Program&gt;</c>.</summary>
 public partial class Program;

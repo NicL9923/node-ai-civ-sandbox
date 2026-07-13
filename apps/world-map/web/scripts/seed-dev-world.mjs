@@ -145,7 +145,7 @@ async function main() {
   await interact(aurora, borealis, "contact", "Aurora extends a formal greeting to Borealis.", { greeting: "Greetings from Aurora.", purpose: "diplomacy" });
   await interact(borealis, aurora, "message", "Borealis welcomes Aurora's overture.", { subject: "Re: Greetings", body: "We welcome further talks." });
   await interact(cinder, delta, "contact", "Cinder issues a stern demarche to Delta.", { greeting: "Cinder demands account for border incursions.", purpose: "grievance" });
-  await interact(aurora, cinder, "message", "Aurora proposes a joint trade corridor with Cinder.", { subject: "Trade corridor", body: "Shall we open a corridor along the eastern reach?" });
+  await interact(aurora, cinder, "message", "Aurora proposes a joint trade corridor with Cinder. The corridor would run along the eastern reach, linking the two economies through a series of guarded waystations, shared customs protocols, and a jointly administered arbitration council intended to keep tariffs predictable and disputes small; both presidents have signalled cautious optimism pending review by their assemblies.", { subject: "Trade corridor", body: "Shall we open a corridor along the eastern reach?" });
   await interact(delta, borealis, "contact", "Delta seeks protection guarantees from Borealis.", { greeting: "Delta requests mutual defense talks.", purpose: "security" });
 
   console.log("\nDone. Interactions process asynchronously — give the World a second, then load the UI.");

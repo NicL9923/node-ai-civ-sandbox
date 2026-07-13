@@ -60,16 +60,31 @@ export function deriveFreshness(
   return { state: "offline", ageMs, label };
 }
 
-/** Plain-language description of a liveness state for aria/tooltips. */
+/** Plain-language description for aria/tooltips. Does NOT claim an authoritative online/offline
+ *  state — the API exposes no such flag; these describe how recent the civ's projection is. */
 export function describeLiveness(state: LivenessState): string {
   switch (state) {
     case "live":
-      return "Running, heartbeat is recent";
+      return "Projection updated recently";
     case "stale":
-      return "Running, but no heartbeat in over 90 seconds";
+      return "Stale projection — no update in over 90 seconds";
     case "offline":
-      return "No heartbeat in over 5 minutes";
+      return "No recent update — over 5 minutes";
     case "stopped":
-      return "Reports it is not running";
+      return "Simulation reports it is paused";
+  }
+}
+
+/** Short, honest civ-facing label for a recency state (chips, detail rows). */
+export function livenessLabel(state: LivenessState): string {
+  switch (state) {
+    case "live":
+      return "updated recently";
+    case "stale":
+      return "stale projection";
+    case "offline":
+      return "no recent update";
+    case "stopped":
+      return "simulation paused";
   }
 }

@@ -73,25 +73,74 @@ describe("WorldEventStream", () => {
     expect(events.map((e) => e.id)).toEqual(["a", "b"]);
   });
 
-  it("dedupes events by worldsequence (already-seen are dropped)", async () => {
+  it("drops catch-up overlap using an advancing sequence floor (id-distinct dupes and older seqs)", async () => {
     const net = streamingFetch();
     const events: WorldEvent[] = [];
+    let floor = 0n;
     const stream = new WorldEventStream({
       baseUrl: "/world/v1",
-      onEvent: (e) => events.push(e),
+      getSeqFloor: () => floor,
+      // Simulate the app advancing the shared floor as it ingests.
+      onEvent: (e) => {
+        events.push(e);
+        const s = BigInt(e.worldsequence as string);
+        if (s > floor) floor = s;
+      },
       onStatus: () => {},
       fetchImpl: net.fetchImpl,
     });
     stream.start();
     await flush();
     net.push(frame({ id: "a", worldsequence: "5" }));
-    net.push(frame({ id: "dup", worldsequence: "5" })); // <= last seen → dropped
+    net.push(frame({ id: "dup", worldsequence: "5" })); // <= floor → dropped
     net.push(frame({ id: "old", worldsequence: "3" })); // older → dropped
     net.push(frame({ id: "c", worldsequence: "6" }));
     await flush();
     stream.stop();
 
     expect(events.map((e) => e.id)).toEqual(["a", "c"]);
+  });
+
+  it("compares sequences as BigInt (10 > 9; handles values beyond 2^53)", async () => {
+    const net = streamingFetch();
+    const events: WorldEvent[] = [];
+    const stream = new WorldEventStream({
+      baseUrl: "/world/v1",
+      getSeqFloor: () => 9n, // fixed floor
+      onEvent: (e) => events.push(e),
+      onStatus: () => {},
+      fetchImpl: net.fetchImpl,
+    });
+    stream.start();
+    await flush();
+    net.push(frame({ id: "nine", worldsequence: "9" })); // 9 <= 9 → dropped (string "9" would sort after "10")
+    net.push(frame({ id: "ten", worldsequence: "10" })); // 10 > 9 → delivered
+    net.push(frame({ id: "huge", worldsequence: "90071992547409910" })); // > 2^53 → delivered
+    await flush();
+    stream.stop();
+
+    expect(events.map((e) => e.id)).toEqual(["ten", "huge"]);
+  });
+
+  it("connects using the current resume cursor from getAfter", async () => {
+    const net = streamingFetch();
+    let cursor: string | undefined = "CURSOR-1";
+    const stream = new WorldEventStream({
+      baseUrl: "/world/v1",
+      getAfter: () => cursor,
+      onEvent: () => {},
+      onStatus: () => {},
+      fetchImpl: net.fetchImpl,
+    });
+    stream.start();
+    await flush();
+    stream.stop();
+
+    expect(net.fetchImpl).toHaveBeenCalledWith(
+      expect.stringContaining("/stream?after=CURSOR-1"),
+      expect.anything(),
+    );
+    void cursor;
   });
 
   it("reconnects with backoff after an error", async () => {
@@ -112,6 +161,7 @@ describe("WorldEventStream", () => {
     const statuses: StreamStatus[] = [];
     const stream = new WorldEventStream({
       baseUrl: "/world/v1",
+      getAfter: () => "CUR",
       onEvent: () => {},
       onStatus: (s) => statuses.push(s),
       fetchImpl: fetchImpl as unknown as typeof fetch,
@@ -124,9 +174,9 @@ describe("WorldEventStream", () => {
     stream.stop();
 
     expect(fetchImpl).toHaveBeenCalledTimes(2);
-    // Connects from the beginning (cursor is opaque; dedupe handles overlap on reconnect).
-    expect(calls[0]).toContain("/stream");
-    expect(calls[0]).not.toContain("after=");
+    // Reconnect resumes from the same bounded cursor (never the origin).
+    expect(calls[0]).toContain("/stream?after=CUR");
+    expect(calls[1]).toContain("/stream?after=CUR");
     expect(statuses).toContain("reconnecting");
     vi.useRealTimers();
   });

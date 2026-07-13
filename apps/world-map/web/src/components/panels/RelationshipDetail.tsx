@@ -7,6 +7,7 @@ import {
   TRUST_RANGE,
   UNIT_RANGE,
 } from "../../domain/relationships";
+import { ExpandableText } from "../common/ExpandableText";
 import { Metric } from "../common/Metric";
 
 interface RelationshipDetailProps {
@@ -75,7 +76,7 @@ export function RelationshipDetail({ relationship: rel, civs, onSelectCiv }: Rel
           <h3 className="panel__title" style={{ fontSize: "var(--t-md)", marginTop: "var(--s-4)" }}>
             Summary
           </h3>
-          <p className="event__narrative">{rel.narrativeSummary}</p>
+          <ExpandableText text={rel.narrativeSummary} className="event__narrative" />
         </>
       ) : null}
 

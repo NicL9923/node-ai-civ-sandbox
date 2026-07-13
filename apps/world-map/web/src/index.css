@@ -1,25 +1,27 @@
-/* World Map observer — surveyor's-chart light theme. See DESIGN.md.
-   All colors OKLCH; neutrals tinted toward the paper's warm hue; never #000/#fff. */
+/* World Map observer — surveyor's-chart, light NEUTRAL theme. See DESIGN.md.
+   Neutral surfaces/ink faintly tinted toward the signal hue (34), never a warm cream/paper hue;
+   never #000/#fff. Survey-chart identity comes from the graticule, linework, and type. */
 
 :root {
   color-scheme: light;
 
-  /* Surfaces */
-  --paper: oklch(0.982 0.008 85);
-  --paper-sunk: oklch(0.955 0.01 82);
-  --paper-raised: oklch(0.995 0.006 85);
+  /* Surfaces — light neutral chart. Near-neutral (very low chroma) with a whisper of the
+     signal-ink hue (34) for cohesion; deliberately NOT a warm cream/paper hue. */
+  --paper: oklch(0.985 0.004 34);
+  --paper-sunk: oklch(0.958 0.005 34);
+  --paper-raised: oklch(0.997 0.003 34);
 
-  /* Ink (text + linework) */
-  --ink: oklch(0.255 0.016 75);
-  --ink-soft: oklch(0.435 0.014 75);
-  --ink-faint: oklch(0.595 0.011 78);
-  --line: oklch(0.815 0.012 80);
-  --graticule: oklch(0.885 0.01 82);
+  /* Ink (text + linework) — neutral graphite, faintly tinted toward the signal hue */
+  --ink: oklch(0.25 0.006 34);
+  --ink-soft: oklch(0.43 0.006 34);
+  --ink-faint: oklch(0.6 0.005 34);
+  --line: oklch(0.82 0.006 34);
+  --graticule: oklch(0.89 0.005 34);
 
   /* Accent — signal ink: live / selection / threat only */
   --signal: oklch(0.575 0.19 34);
   --signal-strong: oklch(0.505 0.205 32);
-  --signal-wash: oklch(0.945 0.045 40);
+  --signal-wash: oklch(0.95 0.035 34);
 
   /* Type */
   --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, Roboto, Arial,

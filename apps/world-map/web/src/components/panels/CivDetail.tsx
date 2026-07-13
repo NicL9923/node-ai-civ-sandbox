@@ -1,5 +1,5 @@
 import type { Civilization, Relationship } from "../../api/types";
-import { deriveFreshness } from "../../domain/freshness";
+import { deriveFreshness, livenessLabel } from "../../domain/freshness";
 import { formatCount, formatPopulation, formatTreasury, humanize } from "../../domain/format";
 import { pairKey } from "../../domain/relationships";
 import { LivenessDot } from "../common/LivenessDot";
@@ -25,14 +25,18 @@ export function CivDetail({ civ, relationships, civs, nowMs, onSelectRel }: CivD
       </p>
 
       <Metric
-        label="State"
+        label="Projection"
         value={
           <span style={{ display: "inline-flex", gap: "0.375rem", alignItems: "center" }}>
             <LivenessDot state={fresh.state} />
-            {fresh.state}
+            {livenessLabel(fresh.state)}
           </span>
         }
-        note={civ.running ? `Reports running; last heartbeat ${fresh.label}.` : "Reports it is not running."}
+        note={
+          civ.running
+            ? `Reports running; projection updated ${fresh.label}.`
+            : "Reports the simulation is not running."
+        }
       />
       <Metric label="Turn" value={<span className="mono">{formatCount(civ.turn)}</span>} />
       <Metric

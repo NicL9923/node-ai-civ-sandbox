@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { deriveFreshness, relativeAge, toEpochMs } from "../domain/freshness";
+import { deriveFreshness, describeLiveness, livenessLabel, relativeAge, toEpochMs } from "../domain/freshness";
 
 const NOW = Date.parse("2026-07-13T12:00:00Z");
 
@@ -46,5 +46,19 @@ describe("toEpochMs", () => {
   it("returns NaN for missing/invalid input", () => {
     expect(Number.isNaN(toEpochMs(null))).toBe(true);
     expect(Number.isNaN(toEpochMs("nope"))).toBe(true);
+  });
+});
+
+describe("recency copy", () => {
+  it("uses honest, non-authoritative labels (no online/offline claims)", () => {
+    // Short labels
+    expect(livenessLabel("live")).toBe("updated recently");
+    expect(livenessLabel("stale")).toBe("stale projection");
+    expect(livenessLabel("offline")).toBe("no recent update");
+    expect(livenessLabel("stopped")).toBe("simulation paused");
+    // Descriptions never claim an authoritative "online" state.
+    for (const s of ["live", "stale", "offline", "stopped"] as const) {
+      expect(describeLiveness(s).toLowerCase()).not.toContain("online");
+    }
   });
 });

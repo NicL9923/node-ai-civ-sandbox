@@ -4,6 +4,7 @@ import { relativeAge, toEpochMs } from "../../domain/freshness";
 import { humanize } from "../../domain/format";
 import type { EventFeed } from "../../hooks/useEventFeed";
 import { ConnectionStatus } from "../common/ConnectionStatus";
+import { ExpandableText } from "../common/ExpandableText";
 import { EmptyState, ErrorState, LoadingState } from "../common/StatusStates";
 
 interface WorldTimelineProps {
@@ -54,9 +55,10 @@ function EventRow({
           {event.time ? relativeAge(ageMs) : "—"}
         </span>
       </div>
-      {/* All narrative is rendered as plain text — never innerHTML. */}
+      {/* All narrative is rendered as plain text — never innerHTML — and long text is clamped
+          with an accessible expand toggle. */}
       {data?.publicNarrative ? (
-        <p className="event__narrative">{data.publicNarrative}</p>
+        <ExpandableText text={data.publicNarrative} className="event__narrative" />
       ) : data?.subject ? (
         <p className="event__narrative">Subject: {data.subject}</p>
       ) : (

@@ -46,7 +46,7 @@ export function MapLegend() {
       ))}
       <span className="legend__item">
         <LivenessDot state="live" />
-        <span>Live</span>
+        <span>Recent</span>
       </span>
       <span className="legend__item">
         <LivenessDot state="stale" />
@@ -54,11 +54,11 @@ export function MapLegend() {
       </span>
       <span className="legend__item">
         <LivenessDot state="offline" />
-        <span>Offline</span>
+        <span>No update</span>
       </span>
       <span className="legend__item">
         <LivenessDot state="stopped" />
-        <span>Stopped</span>
+        <span>Paused</span>
       </span>
     </div>
   );
