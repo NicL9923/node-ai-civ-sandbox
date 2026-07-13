@@ -1,0 +1,19 @@
+{
+  "schemaVersion": "1",
+  "name": "unknown command is rejected and cursor advances",
+  "actors": {
+    "aurora": {
+      "displayName": "Aurora",
+      "credentialRef": "aurora",
+      "capabilities": { "protocolVersion": "1.0.0", "supportedInteractionKinds": ["contact", "message"] }
+    }
+  },
+  "steps": [
+    { "op": "register", "actor": "aurora", "idempotencyKey": "register-aurora-1" },
+    { "op": "arrange", "action": "queueUnknownCommand", "value": { "type": "world.future.v9", "nextCursor": "cursor-after-unknown" } },
+    { "op": "sync", "actor": "aurora", "saveAs": "unknown" },
+    { "op": "assert", "actual": "/unknown/rejected", "equals": 1 },
+    { "op": "assert", "actual": "/unknown/pages", "equals": 2 },
+    { "op": "assert", "actual": "/unknown/cursor", "equals": null }
+  ]
+}

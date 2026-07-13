@@ -1,0 +1,20 @@
+{
+  "schemaVersion": "1",
+  "name": "retryable failures and pagination boundaries",
+  "actors": {
+    "aurora": {
+      "displayName": "Aurora",
+      "credentialRef": "aurora",
+      "capabilities": { "protocolVersion": "1.0.0", "supportedInteractionKinds": ["contact", "message"] }
+    }
+  },
+  "steps": [
+    { "op": "register", "actor": "aurora", "idempotencyKey": "register-aurora-1" },
+    { "op": "arrange", "action": "injectRetryableFailures", "value": { "count": 2 } },
+    { "op": "arrange", "action": "queuePaginatedCommands", "value": { "pageSize": 1, "pages": 3 } },
+    { "op": "sync", "actor": "aurora", "saveAs": "paged" },
+    { "op": "assert", "actual": "/paged/pages", "equals": 3 },
+    { "op": "assert", "actual": "/paged/capped", "equals": false },
+    { "op": "assert", "actual": "/paged/cursor", "equals": null }
+  ]
+}

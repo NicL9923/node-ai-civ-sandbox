@@ -1,0 +1,60 @@
+{
+  "schemaVersion": "1",
+  "name": "duplicate requests have exactly-once effects",
+  "actors": {
+    "aurora": {
+      "displayName": "Aurora",
+      "credentialRef": "aurora",
+      "capabilities": { "protocolVersion": "1.0.0", "supportedInteractionKinds": ["contact", "message"] }
+    },
+    "borealis": {
+      "displayName": "Borealis",
+      "credentialRef": "borealis",
+      "capabilities": { "protocolVersion": "1.0.0", "supportedInteractionKinds": ["contact", "message"] }
+    }
+  },
+  "steps": [
+    { "id": "register-once", "op": "register", "actor": "aurora", "idempotencyKey": "register-aurora-1" },
+    { "op": "replay", "stepId": "register-once", "saveAs": "duplicateRegistration" },
+    { "op": "assert", "actual": "/duplicateRegistration/duplicate", "equals": true },
+    { "op": "register", "actor": "borealis", "idempotencyKey": "register-borealis-1" },
+    {
+      "id": "event-once",
+      "op": "pushEvents",
+      "actor": "aurora",
+      "idempotencyKey": "event-batch-1",
+      "events": [
+        {
+          "id": "aurora-evt-1",
+          "specversion": "1.0",
+          "type": "civ.turn.completed.v1",
+          "source": "/civilizations/civ_aurora",
+          "idempotencykey": "aurora-event-1",
+          "data": { "turn": 10 }
+        }
+      ]
+    },
+    { "op": "replay", "stepId": "event-once", "saveAs": "duplicateEvent" },
+    { "op": "assert", "actual": "/duplicateEvent/duplicateCount", "equals": 1 },
+    {
+      "id": "interaction-once",
+      "op": "submitInteraction",
+      "actor": "aurora",
+      "idempotencyKey": "interaction-1",
+      "request": {
+        "kind": "contact",
+        "source": "civ_aurora",
+        "target": "civ_borealis",
+        "authorityDecision": { "mode": "president" },
+        "payload": { "greeting": "One greeting, despite retries." }
+      }
+    },
+    { "op": "replay", "stepId": "interaction-once", "saveAs": "duplicateInteraction" },
+    { "op": "assert", "actual": "/duplicateInteraction/duplicate", "equals": true },
+    { "op": "arrange", "action": "queueCommand", "value": { "target": "civ_borealis", "commandId": "cmd_contact_1" } },
+    { "op": "pull", "actor": "borealis" },
+    { "id": "ack-once", "op": "ack", "actor": "borealis", "commandId": "cmd_contact_1", "idempotencyKey": "ack-contact-1", "ack": { "status": "applied" } },
+    { "op": "replay", "stepId": "ack-once", "saveAs": "duplicateAck" },
+    { "op": "assert", "actual": "/duplicateAck/duplicate", "equals": true }
+  ]
+}
