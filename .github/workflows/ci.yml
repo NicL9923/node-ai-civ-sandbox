@@ -145,7 +145,7 @@ jobs:
           echo "SPA asset=$asset css=$css"
           test -f "publish/wwwroot$asset"
 
-          ASPNETCORE_ENVIRONMENT=Development dotnet ./publish/WorldMap.Api.dll --urls http://127.0.0.1:5099 --contentRoot ./publish &
+          ASPNETCORE_ENVIRONMENT=Development dotnet ./publish/WorldMap.Api.dll --urls http://127.0.0.1:5099 --contentRoot "$PWD/publish" &
           srv=$!
           trap "kill $srv 2>/dev/null || true" EXIT
           for i in $(seq 1 30); do
