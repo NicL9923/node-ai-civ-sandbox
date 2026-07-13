@@ -150,6 +150,18 @@ internal static class EventEndpoints
     private static Task WriteFrameAsync(HttpContext http, CloudEventDto evt, CancellationToken ct)
     {
         var json = JsonSerializer.Serialize(evt, WorldMapJson.Options);
+
+        // Emit the SSE `id:` as the SAME opaque cursor a client echoes in `after` (CursorCodec over
+        // the event's worldsequence ordinal). This lets a client resume precisely from the last
+        // delivered event, bounding reconnect catch-up to the disconnect window. Both catch-up and
+        // live frames use this. A committed public event always carries a numeric worldsequence; if
+        // one is somehow missing/invalid we omit the id rather than emit a bad cursor.
+        if (long.TryParse(evt.Worldsequence, out var ordinal) && ordinal >= 0)
+        {
+            var cursor = CursorCodec.Encode(ordinal);
+            return http.Response.WriteAsync($"id: {cursor}\ndata: {json}\n\n", Encoding.UTF8, ct);
+        }
+
         return http.Response.WriteAsync($"data: {json}\n\n", Encoding.UTF8, ct);
     }
 }

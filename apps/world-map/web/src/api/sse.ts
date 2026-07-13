@@ -1,26 +1,33 @@
 // Live world-event stream over Server-Sent Events. The World exposes GET /world/v1/stream?after=
-// which first catches up from the cursor, then delivers live frames (`data: <CloudEvent>`) plus
-// `: keep-alive` comments. We use fetch streaming (not EventSource) so we can resume from the last
-// seen worldsequence on reconnect — preventing both gaps and duplicates — and control backoff.
+// which first catches up from the cursor, then delivers live frames plus `: keep-alive` comments.
+// Each event frame carries an SSE `id:` (the server's opaque resume cursor) alongside `data:`; we
+// use fetch streaming (not EventSource) so we can resume from the last delivered `id:` on reconnect
+// — bounding catch-up to the disconnect window — and control backoff.
 import type { WorldEvent } from "./types";
 
 export type StreamStatus = "idle" | "connecting" | "open" | "reconnecting" | "offline";
 
-/** Pure SSE frame parser. Feed raw text chunks; get back complete data payloads. */
+/** A parsed SSE frame: its `data:` payload plus the optional `id:` (server resume cursor). */
+export interface SseFrame {
+  data: string;
+  id?: string;
+}
+
+/** Pure SSE frame parser. Feed raw text chunks; get back complete frames ({ data, id? }). */
 export class SseFrameParser {
   private buffer = "";
 
-  /** Append a chunk, returning the `data:` payloads of any complete frames. */
-  push(chunk: string): string[] {
+  /** Append a chunk, returning any complete frames that carry a `data:` payload. */
+  push(chunk: string): SseFrame[] {
     this.buffer += chunk;
-    const frames: string[] = [];
+    const frames: SseFrame[] = [];
     let sep: number;
     // Frames are separated by a blank line (\n\n). Tolerate \r\n.
     while ((sep = this.indexOfSeparator()) !== -1) {
       const raw = this.buffer.slice(0, sep);
       this.buffer = this.buffer.slice(this.separatorEnd(sep));
-      const data = this.extractData(raw);
-      if (data !== null) frames.push(data);
+      const frame = this.parseFrame(raw);
+      if (frame !== null) frames.push(frame);
     }
     return frames;
   }
@@ -37,17 +44,24 @@ export class SseFrameParser {
     return this.buffer.startsWith("\r\n\r\n", sepIndex) ? sepIndex + 4 : sepIndex + 2;
   }
 
-  /** Concatenate `data:` lines within a frame; return null for comment-only/keep-alive frames. */
-  private extractData(frame: string): string | null {
+  /**
+   * Parse one frame's lines: concatenate `data:` lines (SSE joins with \n), take the last `id:`
+   * (SSE last-wins), ignore comment lines. Returns null for comment-only / id-only frames (no data).
+   */
+  private parseFrame(frame: string): SseFrame | null {
     const lines = frame.split(/\r?\n/);
     const dataLines: string[] = [];
+    let id: string | undefined;
     for (const line of lines) {
       if (line.startsWith(":")) continue; // comment / keep-alive
       if (line.startsWith("data:")) {
         dataLines.push(line.slice(5).replace(/^ /, ""));
+      } else if (line.startsWith("id:")) {
+        id = line.slice(3).replace(/^ /, "");
       }
     }
-    return dataLines.length ? dataLines.join("\n") : null;
+    if (dataLines.length === 0) return null;
+    return id !== undefined ? { data: dataLines.join("\n"), id } : { data: dataLines.join("\n") };
   }
 }
 
@@ -69,6 +83,13 @@ export interface EventStreamOptions {
    */
   getSeqFloor?: () => bigint;
   onEvent: (event: WorldEvent) => void;
+  /**
+   * Called with a frame's opaque SSE `id:` after the frame's event parsed successfully — including
+   * frames dropped as stale overlap — so the resume cursor tracks the last VALID frame seen. Never
+   * called for a malformed frame (which must not poison the cursor). Frames arrive in ascending
+   * order, so echoing the latest id monotonically advances the resume point to the disconnect edge.
+   */
+  onCursor?: (cursor: string) => void;
   onStatus: (status: StreamStatus) => void;
   fetchImpl?: typeof fetch;
   /** Backoff tuning (ms). */
@@ -90,9 +111,10 @@ function toSeq(value: string | null | undefined): bigint | null {
  * catch-up overlap via the shared sequence floor, and reconnect with exponential backoff + jitter.
  */
 export class WorldEventStream {
-  private readonly opts: Required<Omit<EventStreamOptions, "getAfter" | "getSeqFloor">> & {
+  private readonly opts: Required<Omit<EventStreamOptions, "getAfter" | "getSeqFloor" | "onCursor">> & {
     getAfter: () => string | undefined;
     getSeqFloor: () => bigint;
+    onCursor: (cursor: string) => void;
   };
   private controller: AbortController | null = null;
   private stopped = false;
@@ -104,6 +126,7 @@ export class WorldEventStream {
       baseUrl: options.baseUrl,
       getAfter: options.getAfter ?? (() => undefined),
       getSeqFloor: options.getSeqFloor ?? (() => 0n),
+      onCursor: options.onCursor ?? (() => {}),
       onEvent: options.onEvent,
       onStatus: options.onStatus,
       fetchImpl: options.fetchImpl ?? fetch.bind(globalThis),
@@ -180,13 +203,21 @@ export class WorldEventStream {
     }
   }
 
-  private dispatch(payload: string): void {
+  private dispatch(frame: SseFrame): void {
     let event: WorldEvent;
     try {
-      event = JSON.parse(payload) as WorldEvent;
+      event = JSON.parse(frame.data) as WorldEvent;
     } catch {
-      return; // ignore malformed frame
+      return; // malformed frame: ignore and do NOT advance the cursor (must not poison resume)
     }
+
+    // The frame parsed to a valid event. Advance the resume cursor to this frame's server `id:`
+    // (even if we drop the event below as stale overlap) so a reconnect resumes from here, bounding
+    // catch-up to the disconnect window. Frames arrive in ascending order, so this is monotonic.
+    if (frame.id !== undefined) {
+      this.opts.onCursor(frame.id);
+    }
+
     const seq = toSeq(event.worldsequence);
     // Drop bounded catch-up overlap using the shared floor (a decimal STRING compared as BigInt,
     // so sequences beyond 2^53 stay correct). Events with an unparseable/missing sequence are

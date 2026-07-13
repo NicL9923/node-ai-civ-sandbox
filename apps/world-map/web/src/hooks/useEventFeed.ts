@@ -159,15 +159,22 @@ export function useEventFeed(baseUrl?: string): EventFeed {
     return () => controller.abort();
   }, [client, ingest]);
 
-  // Live SSE stream, started after the first load establishes the bounded resume cursor + floor.
-  // The stream reads both fresh on every (re)connect via getters, so a poll that advances the
-  // cursor/floor bounds the catch-up overlap and the floor drops any re-delivered overlap.
+  // Live SSE stream, started after the first load establishes the bootstrap resume cursor + floor.
+  // While healthy, the stream advances the resume cursor from each frame's server `id:` (onCursor),
+  // so a reconnect catches up only from the disconnect edge. The poll advances it while disconnected.
+  // The floor + id dedupe remain as belt-and-suspenders against any re-delivered overlap.
   useEffect(() => {
     if (status !== "ready") return;
     const stream = new WorldEventStream({
       baseUrl: base,
       getAfter: () => resumeCursorRef.current,
       getSeqFloor: () => seqFloorRef.current,
+      onCursor: (cursor) => {
+        // Server-provided resume cursor for the last valid frame. Frames arrive in ascending order,
+        // so this monotonically advances the resume point while the stream is healthy — a reconnect
+        // then catches up only from the disconnect edge, not from mount.
+        resumeCursorRef.current = cursor;
+      },
       onEvent: (evt) => ingest([evt]),
       onStatus: (s) => {
         connectionRef.current = s;

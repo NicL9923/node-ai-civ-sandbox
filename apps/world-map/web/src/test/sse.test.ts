@@ -7,7 +7,12 @@ const flush = () => new Promise((r) => setTimeout(r, 0));
 describe("SseFrameParser", () => {
   it("extracts data payloads from complete frames", () => {
     const p = new SseFrameParser();
-    expect(p.push('data: {"id":"a"}\n\n')).toEqual(['{"id":"a"}']);
+    expect(p.push('data: {"id":"a"}\n\n')).toEqual([{ data: '{"id":"a"}' }]);
+  });
+
+  it("captures the SSE id alongside data", () => {
+    const p = new SseFrameParser();
+    expect(p.push("id: c12\ndata: hello\n\n")).toEqual([{ data: "hello", id: "c12" }]);
   });
 
   it("ignores comment/keep-alive frames", () => {
@@ -15,21 +20,28 @@ describe("SseFrameParser", () => {
     expect(p.push(": keep-alive\n\n")).toEqual([]);
   });
 
-  it("buffers partial frames across chunks", () => {
+  it("ignores id-only frames (no data payload)", () => {
     const p = new SseFrameParser();
-    expect(p.push("data: {"))
-      .toEqual([]);
-    expect(p.push('"id":"a"}\n\n')).toEqual(['{"id":"a"}']);
+    expect(p.push("id: c9\n\n")).toEqual([]);
+  });
+
+  it("buffers partial frames across chunks (id split from data)", () => {
+    const p = new SseFrameParser();
+    expect(p.push("id: c1\nda")).toEqual([]);
+    expect(p.push('ta: {"x":1}\n\n')).toEqual([{ data: '{"x":1}', id: "c1" }]);
   });
 
   it("handles multiple frames and CRLF separators", () => {
     const p = new SseFrameParser();
-    expect(p.push("data: one\r\n\r\ndata: two\r\n\r\n")).toEqual(["one", "two"]);
+    expect(p.push("id: a\r\ndata: one\r\n\r\nid: b\r\ndata: two\r\n\r\n")).toEqual([
+      { data: "one", id: "a" },
+      { data: "two", id: "b" },
+    ]);
   });
 
-  it("joins multi-line data fields", () => {
+  it("joins multi-line data fields and takes the last id", () => {
     const p = new SseFrameParser();
-    expect(p.push("data: a\ndata: b\n\n")).toEqual(["a\nb"]);
+    expect(p.push("id: x\ndata: a\ndata: b\nid: y\n\n")).toEqual([{ data: "a\nb", id: "y" }]);
   });
 });
 
@@ -49,8 +61,9 @@ function streamingFetch() {
   };
 }
 
-function frame(event: Partial<WorldEvent>): string {
-  return `data: ${JSON.stringify(event)}\n\n`;
+function frame(event: Partial<WorldEvent>, id?: string): string {
+  const head = id ? `id: ${id}\n` : "";
+  return `${head}data: ${JSON.stringify(event)}\n\n`;
 }
 
 describe("WorldEventStream", () => {
@@ -122,6 +135,52 @@ describe("WorldEventStream", () => {
     expect(events.map((e) => e.id)).toEqual(["ten", "huge"]);
   });
 
+  it("advances the resume cursor from each frame's server id; malformed frames don't poison it", async () => {
+    const net = streamingFetch();
+    const cursors: string[] = [];
+    const events: WorldEvent[] = [];
+    const stream = new WorldEventStream({
+      baseUrl: "/world/v1",
+      onCursor: (c) => cursors.push(c),
+      onEvent: (e) => events.push(e),
+      onStatus: () => {},
+      fetchImpl: net.fetchImpl,
+    });
+    stream.start();
+    await flush();
+    net.push(frame({ id: "e1", worldsequence: "11" }, "c11"));
+    net.push(frame({ id: "e2", worldsequence: "12" }, "c12"));
+    net.push("id: cBAD\ndata: {not valid json}\n\n"); // malformed → no cursor advance, no event
+    await flush();
+    stream.stop();
+
+    expect(cursors).toEqual(["c11", "c12"]);
+    expect(events.map((e) => e.id)).toEqual(["e1", "e2"]);
+  });
+
+  it("advances the cursor even for a stale overlap frame (bounds re-catch-up)", async () => {
+    const net = streamingFetch();
+    const cursors: string[] = [];
+    const events: WorldEvent[] = [];
+    const stream = new WorldEventStream({
+      baseUrl: "/world/v1",
+      getSeqFloor: () => 20n, // anything <= 20 is stale overlap
+      onCursor: (c) => cursors.push(c),
+      onEvent: (e) => events.push(e),
+      onStatus: () => {},
+      fetchImpl: net.fetchImpl,
+    });
+    stream.start();
+    await flush();
+    net.push(frame({ id: "overlap", worldsequence: "15" }, "c15")); // dropped as stale, cursor still advances
+    net.push(frame({ id: "fresh", worldsequence: "21" }, "c21"));
+    await flush();
+    stream.stop();
+
+    expect(cursors).toEqual(["c15", "c21"]);
+    expect(events.map((e) => e.id)).toEqual(["fresh"]);
+  });
+
   it("connects using the current resume cursor from getAfter", async () => {
     const net = streamingFetch();
     let cursor: string | undefined = "CURSOR-1";
@@ -178,6 +237,43 @@ describe("WorldEventStream", () => {
     expect(calls[0]).toContain("/stream?after=CUR");
     expect(calls[1]).toContain("/stream?after=CUR");
     expect(statuses).toContain("reconnecting");
+    vi.useRealTimers();
+  });
+
+  it("reconnect resumes from the server-advanced id, not the initial cursor", async () => {
+    vi.useFakeTimers();
+    const streams = [streamingFetch(), streamingFetch()];
+    let call = 0;
+    const urls: string[] = [];
+    const fetchImpl = vi.fn(async (url: string) => {
+      urls.push(url);
+      return streams[call++].fetchImpl();
+    });
+
+    let cursor: string | undefined = "c1"; // initial bootstrap cursor
+    const stream = new WorldEventStream({
+      baseUrl: "/world/v1",
+      getAfter: () => cursor,
+      onCursor: (c) => {
+        cursor = c;
+      },
+      onEvent: () => {},
+      onStatus: () => {},
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      baseDelayMs: 5,
+    });
+    stream.start();
+    await vi.advanceTimersByTimeAsync(0);
+    // Deliver two frames while healthy; the server ids advance the resume cursor to c12.
+    streams[0].push(frame({ id: "e11", worldsequence: "11" }, "c11"));
+    streams[0].push(frame({ id: "e12", worldsequence: "12" }, "c12"));
+    await vi.advanceTimersByTimeAsync(0);
+    streams[0].close(); // disconnect → reconnect
+    await vi.advanceTimersByTimeAsync(20);
+    stream.stop();
+
+    expect(urls[0]).toContain("/stream?after=c1");
+    expect(urls[1]).toContain("/stream?after=c12"); // resumed from the last delivered id
     vi.useRealTimers();
   });
 });
