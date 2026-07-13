@@ -77,6 +77,24 @@ world-test:
 world-run:
     dotnet run --project apps/world-map/src/WorldMap.Api/WorldMap.Api.csproj
 
+# --- World-map observer web app (Vite + React + TypeScript) ---
+
+# Start the Vite dev server (proxies /world + /health to the ASP.NET host on :5266).
+world-web-dev:
+    npm run dev -w apps/world-map/web
+
+# Type-check the observer web app.
+world-web-typecheck:
+    npm run typecheck -w apps/world-map/web
+
+# Run the observer web app tests (vitest).
+world-web-test:
+    npm run test -w apps/world-map/web
+
+# Build the observer web app for production (typecheck + vite build -> apps/world-map/web/dist).
+world-web-build:
+    npm run build -w apps/world-map/web
+
 # Build the whole .NET solution (contracts C# + world-map).
 world:
     dotnet build AiCivilization.slnx -c Debug

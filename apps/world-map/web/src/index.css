@@ -1,0 +1,116 @@
+/* World Map observer — surveyor's-chart light theme. See DESIGN.md.
+   All colors OKLCH; neutrals tinted toward the paper's warm hue; never #000/#fff. */
+
+:root {
+  color-scheme: light;
+
+  /* Surfaces */
+  --paper: oklch(0.982 0.008 85);
+  --paper-sunk: oklch(0.955 0.01 82);
+  --paper-raised: oklch(0.995 0.006 85);
+
+  /* Ink (text + linework) */
+  --ink: oklch(0.255 0.016 75);
+  --ink-soft: oklch(0.435 0.014 75);
+  --ink-faint: oklch(0.595 0.011 78);
+  --line: oklch(0.815 0.012 80);
+  --graticule: oklch(0.885 0.01 82);
+
+  /* Accent — signal ink: live / selection / threat only */
+  --signal: oklch(0.575 0.19 34);
+  --signal-strong: oklch(0.505 0.205 32);
+  --signal-wash: oklch(0.945 0.045 40);
+
+  /* Type */
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, Roboto, Arial,
+    sans-serif;
+  --font-mono: ui-monospace, "Cascadia Code", SFMono-Regular, Menlo, Consolas, monospace;
+  --t-2xs: 0.6875rem;
+  --t-xs: 0.75rem;
+  --t-sm: 0.8125rem;
+  --t-base: 0.875rem;
+  --t-md: 1rem;
+  --t-lg: 1.25rem;
+  --t-xl: 1.5rem;
+
+  /* Spacing */
+  --s-1: 0.25rem;
+  --s-2: 0.5rem;
+  --s-3: 0.75rem;
+  --s-4: 1rem;
+  --s-5: 1.5rem;
+  --s-6: 2rem;
+  --s-8: 3rem;
+
+  /* Radii */
+  --r-sm: 3px;
+  --r-md: 6px;
+
+  /* Motion */
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+  --dur: 200ms;
+
+  font-family: var(--font-sans);
+  font-size: 16px;
+  line-height: 1.45;
+  color: var(--ink);
+  background: var(--paper);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  font-size: var(--t-base);
+}
+
+button {
+  font: inherit;
+  color: inherit;
+}
+
+/* Numeric metrics + identifiers align in columns. */
+.mono {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Visible keyboard focus everywhere (signal ink). */
+:where(a, button, [tabindex], [role="button"], input, select):focus-visible {
+  outline: 2px solid var(--signal);
+  outline-offset: 2px;
+  border-radius: var(--r-sm);
+}
+
+/* Screen-reader-only helper for map/list equivalence + live announcements. */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}

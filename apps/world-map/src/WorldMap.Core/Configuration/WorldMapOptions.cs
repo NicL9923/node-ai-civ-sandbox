@@ -21,6 +21,13 @@ public sealed class WorldMapOptions
     /// <summary>Base URL returned to civs (e.g. https://world.example.com/world/v1).</summary>
     public string WorldBaseUrl { get; set; } = "https://world.example.com/world/v1";
 
+    /// <summary>
+    /// Optional physical directory to serve the observer SPA (built web assets) from. When unset,
+    /// static files are served from the app's default web root (wwwroot). Host wiring only — this
+    /// is not part of the federation contract.
+    /// </summary>
+    public string? WebRoot { get; set; }
+
     public StorageOptions Storage { get; set; } = new();
     public OnboardingOptions Onboarding { get; set; } = new();
     public LivenessOptions Liveness { get; set; } = new();

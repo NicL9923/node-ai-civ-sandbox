@@ -27,6 +27,10 @@
     "typecheck:contracts": "npm run typecheck -w @ai-civ/federation-contracts",
     "test:contracts": "npm run test -w @ai-civ/federation-contracts",
     "build:world": "dotnet build apps/world-map/src/WorldMap.Api/WorldMap.Api.csproj -c Release",
-    "test:world": "dotnet test apps/world-map/tests/WorldMap.UnitTests/WorldMap.UnitTests.csproj && dotnet test apps/world-map/tests/WorldMap.IntegrationTests/WorldMap.IntegrationTests.csproj"
+    "test:world": "dotnet test apps/world-map/tests/WorldMap.UnitTests/WorldMap.UnitTests.csproj && dotnet test apps/world-map/tests/WorldMap.IntegrationTests/WorldMap.IntegrationTests.csproj",
+    "dev:web": "npm run dev -w apps/world-map/web",
+    "build:web": "npm run build -w apps/world-map/web",
+    "typecheck:web": "npm run typecheck -w apps/world-map/web",
+    "test:web": "npm run test -w apps/world-map/web"
   }
 }

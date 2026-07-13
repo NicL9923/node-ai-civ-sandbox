@@ -2,6 +2,7 @@ using System.Text.Json.Serialization;
 using System.Threading.RateLimiting;
 using Azure.Monitor.OpenTelemetry.AspNetCore;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.FileProviders;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
@@ -106,11 +107,49 @@ app.Use(async (context, next) =>
 
 app.UseRateLimiter();
 
-// Minimal static placeholder for the future React web app (real UI is a later phase).
-app.UseDefaultFiles();
-app.UseStaticFiles();
+// Serve the observer SPA. When WorldMap:WebRoot is configured (e.g. a publish that dropped the
+// built web assets there), static files + the client-route fallback come from that directory;
+// otherwise the app's default web root (wwwroot) is used. Federation endpoints and health probes
+// are matched first, so this never shadows the API.
+IFileProvider? spaProvider = null;
+if (!string.IsNullOrWhiteSpace(options.WebRoot) && Directory.Exists(options.WebRoot))
+{
+    spaProvider = new PhysicalFileProvider(Path.GetFullPath(options.WebRoot));
+}
+
+var defaultFilesOptions = new DefaultFilesOptions();
+var staticFileOptions = new StaticFileOptions();
+if (spaProvider is not null)
+{
+    defaultFilesOptions.FileProvider = spaProvider;
+    staticFileOptions.FileProvider = spaProvider;
+}
+
+app.UseDefaultFiles(defaultFilesOptions);
+app.UseStaticFiles(staticFileOptions);
 
 app.MapWorldMapApi();
+
+// SPA deep-link fallback: serve index.html for unmatched non-API GET routes so client-side routes
+// resolve. API (/world) and health (/health) paths keep their normal 404 behavior.
+var effectiveSpaProvider = spaProvider ?? app.Environment.WebRootFileProvider;
+if (effectiveSpaProvider.GetFileInfo("index.html").Exists)
+{
+    app.MapFallback((HttpContext ctx) =>
+    {
+        var path = ctx.Request.Path.Value ?? "/";
+        if (path.StartsWith("/world", StringComparison.OrdinalIgnoreCase) ||
+            path.StartsWith("/health", StringComparison.OrdinalIgnoreCase))
+        {
+            return Results.NotFound();
+        }
+
+        var indexFile = effectiveSpaProvider.GetFileInfo("index.html");
+        return indexFile.Exists
+            ? Results.File(indexFile.CreateReadStream(), "text/html; charset=utf-8")
+            : Results.NotFound();
+    });
+}
 
 app.Run();
 

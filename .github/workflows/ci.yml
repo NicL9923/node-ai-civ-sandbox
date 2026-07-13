@@ -47,6 +47,25 @@ jobs:
       - name: Test civilization
         run: npm test
 
+  web:
+    name: World observer web (typecheck, test, build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - name: Install (workspace)
+        run: npm ci
+      - name: Typecheck web
+        run: npm run typecheck:web
+      - name: Test web
+        run: npm run test:web
+      - name: Build web
+        run: npm run build:web
+
   contracts:
     name: Contracts (lint, drift, tests)
     strategy:

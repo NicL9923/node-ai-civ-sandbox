@@ -28,6 +28,9 @@ infra/**/*.json
 .DS_Store
 .deploy-error.tmp
 
+# Local agent skills / tooling (installed via `gh skill`, not committed)
+.agents/
+
 # Test run artifacts
 TestResults/
 **/TestResults/

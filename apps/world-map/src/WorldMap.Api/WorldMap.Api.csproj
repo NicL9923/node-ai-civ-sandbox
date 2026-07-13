@@ -16,4 +16,35 @@
     <ImplicitUsings>enable</ImplicitUsings>
   </PropertyGroup>
 
+  <!-- Observer SPA (apps/world-map/web) integration. On `dotnet publish`, build the web assets
+       (when npm is available) and copy them into the publish output's wwwroot so the published app
+       serves a working SPA (overwriting the placeholder index.html). Pure `dotnet build`/`test` is
+       unaffected: these targets run only on Publish. Set BuildSpa=false to skip the npm build
+       (e.g. when CI already produced web/dist). -->
+  <PropertyGroup>
+    <RepoRoot>$(MSBuildProjectDirectory)\..\..\..\..</RepoRoot>
+    <SpaDistDir>$(MSBuildProjectDirectory)\..\..\web\dist</SpaDistDir>
+    <BuildSpa Condition="'$(BuildSpa)' == ''">true</BuildSpa>
+  </PropertyGroup>
+
+  <Target Name="BuildSpaAssets"
+          Condition="'$(BuildSpa)' == 'true' And !Exists('$(SpaDistDir)\index.html')">
+    <Message Importance="high" Text="Building observer SPA (apps/world-map/web)..." />
+    <Exec Command="npm run build -w apps/world-map/web" WorkingDirectory="$(RepoRoot)"
+          ContinueOnError="true" />
+  </Target>
+
+  <Target Name="CopySpaToPublish" AfterTargets="Publish" DependsOnTargets="BuildSpaAssets"
+          Condition="Exists('$(SpaDistDir)\index.html')">
+    <ItemGroup>
+      <_SpaFile Include="$(SpaDistDir)\**\*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(_SpaFile)"
+          DestinationFiles="@(_SpaFile->'$(PublishDir)wwwroot\%(RecursiveDir)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true" OverwriteReadOnlyFiles="true" />
+    <!-- Drop stale precompressed copies of the placeholder index (the real SPA index replaced it). -->
+    <Delete Files="$(PublishDir)wwwroot\index.html.br;$(PublishDir)wwwroot\index.html.gz" />
+    <Message Importance="high" Text="Copied observer SPA into $(PublishDir)wwwroot." />
+  </Target>
+
 </Project>
