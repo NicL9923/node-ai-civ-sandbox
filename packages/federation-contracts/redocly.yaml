@@ -1,0 +1,25 @@
+# Redocly configuration for the federation contracts.
+# Used for `redocly lint` (contract quality gate) and `redocly bundle`
+# (deterministic single-file artifact consumed by the TS and C# generators).
+extends:
+  - recommended
+
+rules:
+  # Every operation must be uniquely identified — generators key off operationId.
+  operation-operationId: error
+  operation-operationId-unique: error
+  operation-summary: error
+  # Responses and schemas must be documented.
+  operation-description: warn
+  no-unused-components: error
+  # 2xx presence is enforced per-operation in the spec; keep tag hygiene relaxed.
+  operation-tag-defined: off
+  tags-alphabetical: off
+  # Security is documented via a described scheme (HMAC cannot be modeled natively).
+  security-defined: warn
+  info-license: off
+  # A placeholder example.com server URL is intentional for a spec-only contract.
+  no-server-example.com: off
+  no-empty-servers: off
+  # `data`/`payload` intentionally use an open `anyOf` fallback (not a discriminator).
+  no-invalid-schema-examples: warn

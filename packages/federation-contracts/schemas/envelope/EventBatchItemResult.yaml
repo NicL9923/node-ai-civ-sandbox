@@ -1,0 +1,26 @@
+type: object
+title: EventBatchItemResult
+description: Per-event result within an event batch response.
+required:
+  - id
+  - status
+properties:
+  id:
+    type: string
+    description: The CloudEvent `id` echoed back.
+  status:
+    type: string
+    enum:
+      - accepted
+      - duplicate
+      - rejected
+  worldsequence:
+    description: World total-order sequence assigned to an accepted event.
+    oneOf:
+      - $ref: ../common/WorldSequence.yaml
+      - type: "null"
+  problem:
+    description: Populated when `status` is `rejected`.
+    oneOf:
+      - $ref: ../common/ProblemDetails.yaml
+      - type: "null"

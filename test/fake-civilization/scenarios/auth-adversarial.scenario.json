@@ -1,0 +1,26 @@
+{
+  "schemaVersion": "1",
+  "name": "adversarial authentication controls",
+  "actors": {
+    "aurora": {
+      "displayName": "Aurora",
+      "credentialRef": "aurora",
+      "capabilities": { "protocolVersion": "1.0.0", "supportedInteractionKinds": ["contact", "message"] }
+    }
+  },
+  "steps": [
+    { "op": "register", "actor": "aurora", "idempotencyKey": "register-aurora-1" },
+    { "op": "setAuthFault", "actor": "aurora", "fault": "invalid-signature" },
+    { "op": "heartbeat", "actor": "aurora", "expectError": { "status": 401 } },
+    { "op": "setAuthFault", "actor": "aurora", "fault": "stale-timestamp" },
+    { "op": "heartbeat", "actor": "aurora", "expectError": { "status": 401 } },
+    { "op": "setAuthFault", "actor": "aurora", "fault": "reused-nonce" },
+    { "id": "first-nonce-use", "op": "heartbeat", "actor": "aurora" },
+    { "op": "replay", "stepId": "first-nonce-use", "expectError": { "status": 401 } },
+    { "op": "setAuthFault", "actor": "aurora", "fault": "body-tamper" },
+    { "op": "heartbeat", "actor": "aurora", "expectError": { "status": 401 } },
+    { "op": "setAuthFault", "actor": "aurora", "fault": "wrong-civ-id" },
+    { "op": "heartbeat", "actor": "aurora", "expectError": { "status": 401 } },
+    { "op": "setAuthFault", "actor": "aurora", "fault": "none" }
+  ]
+}

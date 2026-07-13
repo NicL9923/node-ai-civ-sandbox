@@ -1,0 +1,242 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+    paths:
+      - "apps/civilization/**"
+      - "apps/world-map/**"
+      - "packages/**"
+      - "test/**"
+      - "infra/**"
+      - "package.json"
+      - "package-lock.json"
+      - "Justfile"
+      - ".npmrc"
+      - ".config/**"
+      - "global.json"
+      - "Directory.Build.props"
+      - "AiCivilization.slnx"
+      - ".github/workflows/ci.yml"
+  pull_request:
+    paths:
+      - "apps/civilization/**"
+      - "apps/world-map/**"
+      - "packages/**"
+      - "test/**"
+      - "infra/**"
+      - "package.json"
+      - "package-lock.json"
+      - "Justfile"
+      - ".npmrc"
+      - ".config/**"
+      - "global.json"
+      - "Directory.Build.props"
+      - "AiCivilization.slnx"
+      - ".github/workflows/ci.yml"
+
+jobs:
+  civilization:
+    name: Civilization build & test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - name: Install (workspace)
+        run: npm ci
+      - name: Build civilization
+        run: npm run build
+      - name: Test civilization
+        run: npm test
+
+  web:
+    name: World observer web (typecheck, test, build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - name: Install (workspace)
+        run: npm ci
+      - name: Typecheck web
+        run: npm run typecheck:web
+      - name: Test web
+        run: npm run test:web
+      - name: Build web
+        run: npm run build:web
+
+  contracts:
+    name: Contracts (lint, drift, tests)
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+      - name: Install (workspace)
+        run: npm ci
+      - name: Restore .NET tools (Kiota)
+        run: dotnet tool restore
+      - name: Lint OpenAPI
+        run: npm run lint:contracts
+      - name: Check contract drift (regenerate + diff)
+        run: npm run check:contracts
+      - name: Typecheck contracts
+        run: npm run typecheck:contracts
+      - name: Test contracts
+        run: npm run test:contracts
+      - name: Build generated C# client
+        run: dotnet build packages/federation-contracts/csharp/FederationContracts.csproj -c Release
+
+  world:
+    name: World runtime (build & test)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+      - name: Restore world-map projects
+        run: |
+          dotnet restore apps/world-map/src/WorldMap.Api/WorldMap.Api.csproj
+          dotnet restore apps/world-map/tests/WorldMap.UnitTests/WorldMap.UnitTests.csproj
+          dotnet restore apps/world-map/tests/WorldMap.IntegrationTests/WorldMap.IntegrationTests.csproj
+      - name: Build world runtime
+        run: dotnet build apps/world-map/src/WorldMap.Api/WorldMap.Api.csproj -c Release --no-restore
+      - name: Test (unit)
+        run: dotnet test apps/world-map/tests/WorldMap.UnitTests/WorldMap.UnitTests.csproj -c Release
+      - name: Test (integration)
+        run: dotnet test apps/world-map/tests/WorldMap.IntegrationTests/WorldMap.IntegrationTests.csproj -c Release
+
+  publish-smoke:
+    name: Publish smoke (real SPA + host)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+      - name: Install (workspace)
+        run: npm ci
+      - name: Publish WorldMap.Api (Release, builds + bundles the SPA)
+        run: dotnet publish apps/world-map/src/WorldMap.Api/WorldMap.Api.csproj -c Release -o ./publish
+      - name: Launch published app and verify SPA + host behavior
+        run: |
+          set -euo pipefail
+          test -f publish/wwwroot/index.html
+          asset=$(grep -oE '/assets/index-[A-Za-z0-9_-]+\.js' publish/wwwroot/index.html | head -1)
+          css=$(grep -oE '/assets/index-[A-Za-z0-9_-]+\.css' publish/wwwroot/index.html | head -1 || true)
+          test -n "$asset"
+          echo "SPA asset=$asset css=$css"
+          test -f "publish/wwwroot$asset"
+
+          ASPNETCORE_ENVIRONMENT=Development dotnet ./publish/WorldMap.Api.dll --urls http://127.0.0.1:5099 --contentRoot "$PWD/publish" &
+          srv=$!
+          trap "kill $srv 2>/dev/null || true" EXIT
+          for i in $(seq 1 30); do
+            if curl -sf http://127.0.0.1:5099/health >/dev/null 2>&1; then break; fi
+            sleep 1
+          done
+
+          base=http://127.0.0.1:5099
+          code() { curl -s -o /dev/null -w '%{http_code}' "$@"; }
+
+          # 1. root serves the real SPA index referencing the hashed asset
+          curl -sf "$base/" | grep -q "$asset"
+          # 2. referenced JS (and CSS) are served 200
+          test "$(code "$base$asset")" = "200"
+          if [ -n "$css" ]; then test "$(code "$base$css")" = "200"; fi
+          # 3. deep-link navigation (Accept: text/html) returns the SPA shell
+          curl -sf -H "Accept: text/html" "$base/some/deep/link" | grep -q "$asset"
+          # 4. API returns JSON, never the SPA
+          curl -sf "$base/world/v1/civilizations" | grep -q '"items"'
+          # 5. unknown API route → 404 (not the SPA)
+          test "$(code "$base/world/v1/does-not-exist")" = "404"
+          # 6. missing asset → 404
+          test "$(code "$base/assets/missing-xyz.js")" = "404"
+          # 7. POST to an unknown route must NOT return the SPA index
+          if curl -s -X POST -H "Accept: text/html" "$base/some/deep/link" | grep -q "$asset"; then
+            echo "FAIL: POST to unknown route returned the SPA index"; exit 1
+          fi
+          echo "Publish smoke passed."
+
+  fake-civilization-testkit:
+    name: Fake civilization testkit (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - name: Install (workspace)
+        run: npm ci
+      - name: Build testkit
+        run: npm run build:testkit
+      - name: Test testkit
+        run: npm run test:testkit
+      - name: Smoke test CLI
+        run: npm run fake-civ -- help
+
+  federation-e2e:
+    name: Federation E2E (real World + civ + fake civ, Chromium)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+      - name: Install (workspace)
+        run: npm ci
+      - name: Install Playwright Chromium
+        run: npx --workspace @ai-civ/federation-e2e playwright install --with-deps chromium
+      - name: Run federation E2E (builds civ + testkit, publishes World, runs Playwright)
+        run: npm run test:federation-e2e
+      - name: Upload E2E report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: federation-e2e-report
+          path: test/federation-e2e/.artifacts/report
+          if-no-files-found: ignore
+          retention-days: 7
+
+  infra:
+    name: Infrastructure (Bicep compile validation)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile civilization Bicep (no login, no deployment)
+        run: az bicep build --file infra/civilization/main.bicep
+

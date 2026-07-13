@@ -1,0 +1,11 @@
+type: string
+title: InteractionKind
+description: >-
+  Kind of inter-civilization interaction. Open set for forward compatibility.
+  MVP defines only `contact` and `message`; trade, treaty, conflict, and
+  migration are later additive kinds. Clients MUST tolerate unknown values and
+  MUST NOT treat this as a closed enum.
+examples: ["contact", "message"]
+x-known-values:
+  - contact
+  - message

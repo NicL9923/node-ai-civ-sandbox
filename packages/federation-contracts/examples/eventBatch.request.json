@@ -1,0 +1,22 @@
+{
+  "events": [
+    {
+      "id": "civ_aurora-evt-1001",
+      "specversion": "1.0",
+      "type": "civ.agent.acted.v1",
+      "source": "/civilizations/civ_aurora",
+      "time": "2026-07-10T18:04:00Z",
+      "data": { "agentRef": "a_12", "action": "gather" },
+      "idempotencykey": "civ_aurora-1001"
+    },
+    {
+      "id": "civ_aurora-evt-1002",
+      "specversion": "1.0",
+      "type": "civ.president.elected.v1",
+      "source": "/civilizations/civ_aurora",
+      "time": "2026-07-10T18:04:05Z",
+      "data": { "leaderRef": "leader_current", "termNumber": 3 },
+      "idempotencykey": "civ_aurora-1002"
+    }
+  ]
+}

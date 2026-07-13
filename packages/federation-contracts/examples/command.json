@@ -1,0 +1,23 @@
+{
+  "id": "world-evt-2048",
+  "specversion": "1.0",
+  "type": "world.civilization.message.v1",
+  "source": "/world",
+  "subject": "civ_borealis",
+  "time": "2026-07-10T18:03:00Z",
+  "datacontenttype": "application/json",
+  "data": {
+    "interactionId": "int_123",
+    "fromCiv": "civ_aurora",
+    "fromDisplayName": "Republic of Aurora",
+    "subject": "Hello",
+    "body": "Greetings from the Republic of Aurora.",
+    "inReplyTo": null
+  },
+  "correlationid": "corr_1",
+  "causationid": "int_123",
+  "idempotencykey": "cmd-idem-1",
+  "worldsequence": "1024",
+  "commandid": "cmd_777",
+  "deliveredat": "2026-07-10T18:03:01Z"
+}

@@ -1,0 +1,38 @@
+type: object
+title: RegistrationResponse
+description: >-
+  Result of civilization onboarding. On an idempotent replay, `duplicate` is
+  true and the original civId/keyId are returned.
+required:
+  - civId
+  - keyId
+  - protocolVersion
+  - registeredAt
+properties:
+  civId:
+    type: string
+    description: Stable World-assigned civilization id. Use as `X-Civ-Id`.
+  keyId:
+    type: string
+    description: >-
+      Identifier for the S2S HMAC signing key (`X-Key-Id`). The secret itself is
+      delivered out-of-band and is NEVER returned in this response.
+  protocolVersion:
+    type: string
+    description: Protocol version the World expects this civ to speak.
+  worldBaseUrl:
+    type: string
+    format: uri
+    description: Base URL the civ should use for all subsequent World calls.
+  commandsCursor:
+    description: Starting cursor for pulling commands (null to start from the beginning).
+    oneOf:
+      - $ref: ../common/Cursor.yaml
+      - type: "null"
+  registeredAt:
+    type: string
+    format: date-time
+  duplicate:
+    type: boolean
+    default: false
+    description: True when this response is an idempotent replay of a prior registration.

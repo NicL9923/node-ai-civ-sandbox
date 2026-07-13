@@ -1,0 +1,12 @@
+{
+  "kind": "message",
+  "source": "civ_aurora",
+  "target": "civ_borealis",
+  "authorityDecision": { "mode": "president", "ref": "decree_91" },
+  "publicNarrative": "Aurora replies to Borealis.",
+  "payload": {
+    "subject": "Re: trade winds",
+    "body": "We received your message and will consider a delegation.",
+    "inReplyTo": "int_123"
+  }
+}

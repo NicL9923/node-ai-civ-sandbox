@@ -1,0 +1,27 @@
+type: object
+title: Capabilities
+description: >-
+  Capabilities a civilization advertises at registration and refreshes on
+  heartbeat. Forward-compatible: unknown fields are ignored by the World.
+required:
+  - protocolVersion
+  - supportedInteractionKinds
+properties:
+  protocolVersion:
+    type: string
+    description: SemVer of the world protocol the civ implements (e.g. "1.0.0").
+    examples: ["1.0.0"]
+  supportedInteractionKinds:
+    type: array
+    description: Interaction kinds the civ can receive. Open set (see InteractionKind).
+    items:
+      $ref: ../interaction/InteractionKind.yaml
+  maxEventBatchSize:
+    type: integer
+    minimum: 1
+    description: Largest event batch the civ intends to push in one request.
+  features:
+    type: array
+    description: Optional named feature flags. Open set of strings.
+    items:
+      type: string

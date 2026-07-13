@@ -1,0 +1,13 @@
+type: string
+title: RelationshipStance
+description: >-
+  Coarse public stance label between two civilizations. Open set for forward
+  compatibility; known values are listed below. Clients MUST tolerate unknown
+  values.
+examples: ["neutral"]
+x-known-values:
+  - allied
+  - friendly
+  - neutral
+  - wary
+  - hostile

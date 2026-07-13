@@ -1,0 +1,59 @@
+type: object
+title: Relationship
+description: >-
+  Public projection of the relationship state between two civilizations. Numeric
+  dimensions use fixed, documented ranges so clients can render them without
+  server-specific scaling.
+required:
+  - pair
+  - trust
+  - grievance
+  - threat
+  - familiarity
+  - interdependence
+  - stance
+  - version
+  - updatedAt
+properties:
+  pair:
+    $ref: ./CivPair.yaml
+  trust:
+    type: number
+    minimum: -1
+    maximum: 1
+    description: Net trust, from -1 (total distrust) to 1 (full trust).
+  grievance:
+    type: number
+    minimum: 0
+    maximum: 100
+    description: Accumulated grievance, 0 (none) to 100 (maximal).
+  threat:
+    type: number
+    minimum: 0
+    maximum: 100
+    description: Perceived threat, 0 (none) to 100 (existential).
+  familiarity:
+    type: number
+    minimum: 0
+    maximum: 1
+    description: How well the civs know each other, 0 (strangers) to 1.
+  interdependence:
+    type: number
+    minimum: 0
+    maximum: 1
+    description: Mutual reliance, 0 (independent) to 1 (highly interdependent).
+  stance:
+    $ref: ./RelationshipStance.yaml
+  narrativeSummary:
+    type: string
+    description: Short, citizen-visible narrative describing the relationship.
+  version:
+    type: integer
+    minimum: 0
+    description: Monotonically increasing version for optimistic concurrency.
+  etag:
+    type: string
+    description: Opaque version tag mirroring `version` for HTTP caching.
+  updatedAt:
+    type: string
+    format: date-time

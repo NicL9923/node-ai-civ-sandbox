@@ -1,14 +1,42 @@
+# Node
 node_modules/
+**/node_modules/
 dist/
+**/dist/
+*.log
+
+# .NET
+[Bb]in/
+[Oo]bj/
+*.user
+
+# Secrets & local env
 .env
 .env.*
 !.env.example
-*.log
-*.zip
 .admin-key.local
 .azure-outputs.json
-.DS_Store
 
+# Deploy artifacts
+*.zip
+
+# Bicep compiled output
 infra/*.json
+infra/**/*.json
 
+# Misc
+.DS_Store
 .deploy-error.tmp
+
+# Local agent skills / tooling (installed via `gh skill`, not committed)
+.agents/
+
+# Test run artifacts
+TestResults/
+**/TestResults/
+
+# Federation E2E artifacts (published World, Playwright report/results, traces)
+.artifacts/
+**/.artifacts/
+playwright-report/
+**/playwright-report/

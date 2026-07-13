@@ -1,0 +1,22 @@
+type: object
+title: ContactCommandData
+description: >-
+  `data` payload for a world command of type `world.civilization.contact.v1`,
+  delivered to the target civ when another civ initiates contact.
+required:
+  - interactionId
+  - fromCiv
+properties:
+  interactionId:
+    type: string
+    description: The originating interaction id (use it to correlate replies).
+  fromCiv:
+    type: string
+    description: Civ id that initiated contact.
+  fromDisplayName:
+    type: string
+  greeting:
+    type: string
+    description: The opening greeting (mirrors ContactIntentData.greeting).
+  publicNarrative:
+    type: string

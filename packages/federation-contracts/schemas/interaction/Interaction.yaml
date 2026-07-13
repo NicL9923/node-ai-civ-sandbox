@@ -1,0 +1,60 @@
+type: object
+title: Interaction
+description: The World's record and current status of a submitted interaction.
+required:
+  - interactionId
+  - kind
+  - source
+  - target
+  - status
+  - public
+  - createdAt
+properties:
+  interactionId:
+    type: string
+  kind:
+    $ref: ./InteractionKind.yaml
+  source:
+    type: string
+  target:
+    type: string
+  status:
+    $ref: ./InteractionStatus.yaml
+  authorityDecision:
+    $ref: ./AuthorityDecision.yaml
+  publicNarrative:
+    type: string
+  payload:
+    description: The kind-specific payload as submitted (see InteractionRequest.payload).
+    anyOf:
+      - $ref: ./ContactIntentData.yaml
+      - $ref: ./MessageIntentData.yaml
+      - type: object
+        additionalProperties: true
+  public:
+    type: boolean
+    description: Whether this interaction is citizen-visible (always true in MVP).
+  worldsequence:
+    description: World total-order sequence, assigned once ordered into the ledger.
+    oneOf:
+      - $ref: ../common/WorldSequence.yaml
+      - type: "null"
+  correlationId:
+    type: string
+    description: Correlation id linking related interactions/commands/events.
+  createdAt:
+    type: string
+    format: date-time
+  updatedAt:
+    type: string
+    format: date-time
+  expiresAt:
+    oneOf:
+      - type: string
+        format: date-time
+      - type: "null"
+  problem:
+    description: Populated when status is `rejected` or `failed`.
+    oneOf:
+      - $ref: ../common/ProblemDetails.yaml
+      - type: "null"

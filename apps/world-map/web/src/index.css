@@ -1,0 +1,118 @@
+/* World Map observer — surveyor's-chart, light NEUTRAL theme. See DESIGN.md.
+   Neutral surfaces/ink faintly tinted toward the signal hue (34), never a warm cream/paper hue;
+   never #000/#fff. Survey-chart identity comes from the graticule, linework, and type. */
+
+:root {
+  color-scheme: light;
+
+  /* Surfaces — light neutral chart. Near-neutral (very low chroma) with a whisper of the
+     signal-ink hue (34) for cohesion; deliberately NOT a warm cream/paper hue. */
+  --paper: oklch(0.985 0.004 34);
+  --paper-sunk: oklch(0.958 0.005 34);
+  --paper-raised: oklch(0.997 0.003 34);
+
+  /* Ink (text + linework) — neutral graphite, faintly tinted toward the signal hue */
+  --ink: oklch(0.25 0.006 34);
+  --ink-soft: oklch(0.43 0.006 34);
+  --ink-faint: oklch(0.6 0.005 34);
+  --line: oklch(0.82 0.006 34);
+  --graticule: oklch(0.89 0.005 34);
+
+  /* Accent — signal ink: live / selection / threat only */
+  --signal: oklch(0.575 0.19 34);
+  --signal-strong: oklch(0.505 0.205 32);
+  --signal-wash: oklch(0.95 0.035 34);
+
+  /* Type */
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, Roboto, Arial,
+    sans-serif;
+  --font-mono: ui-monospace, "Cascadia Code", SFMono-Regular, Menlo, Consolas, monospace;
+  --t-2xs: 0.6875rem;
+  --t-xs: 0.75rem;
+  --t-sm: 0.8125rem;
+  --t-base: 0.875rem;
+  --t-md: 1rem;
+  --t-lg: 1.25rem;
+  --t-xl: 1.5rem;
+
+  /* Spacing */
+  --s-1: 0.25rem;
+  --s-2: 0.5rem;
+  --s-3: 0.75rem;
+  --s-4: 1rem;
+  --s-5: 1.5rem;
+  --s-6: 2rem;
+  --s-8: 3rem;
+
+  /* Radii */
+  --r-sm: 3px;
+  --r-md: 6px;
+
+  /* Motion */
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+  --dur: 200ms;
+
+  font-family: var(--font-sans);
+  font-size: 16px;
+  line-height: 1.45;
+  color: var(--ink);
+  background: var(--paper);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  font-size: var(--t-base);
+}
+
+button {
+  font: inherit;
+  color: inherit;
+}
+
+/* Numeric metrics + identifiers align in columns. */
+.mono {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Visible keyboard focus everywhere (signal ink). */
+:where(a, button, [tabindex], [role="button"], input, select):focus-visible {
+  outline: 2px solid var(--signal);
+  outline-offset: 2px;
+  border-radius: var(--r-sm);
+}
+
+/* Screen-reader-only helper for map/list equivalence + live announcements. */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}

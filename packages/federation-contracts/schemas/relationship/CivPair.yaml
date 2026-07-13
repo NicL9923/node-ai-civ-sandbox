@@ -1,0 +1,13 @@
+type: object
+title: CivPair
+description: >-
+  An unordered pair of civilization ids. The World canonicalizes the ordering
+  such that `civA` <= `civB` lexicographically.
+required:
+  - civA
+  - civB
+properties:
+  civA:
+    type: string
+  civB:
+    type: string

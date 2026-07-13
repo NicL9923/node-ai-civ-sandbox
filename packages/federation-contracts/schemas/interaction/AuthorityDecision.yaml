@@ -1,0 +1,22 @@
+type: object
+title: AuthorityDecision
+description: >-
+  Reference to the source civ's internal authorization for an interaction. The
+  World RECORDS this reference for auditability but does NOT adjudicate a civ's
+  constitution or verify the decision. A future protocol version may require
+  ratification; that is intentionally not modeled here.
+required:
+  - mode
+properties:
+  mode:
+    type: string
+    description: >-
+      How the action was authorized. Open set; known values: `president`,
+      `decree`, `referendum`, `delegated`.
+    examples: ["president"]
+  ref:
+    type: string
+    description: Opaque, civ-scoped reference to the authorizing decision or record.
+  authorizedAt:
+    type: string
+    format: date-time

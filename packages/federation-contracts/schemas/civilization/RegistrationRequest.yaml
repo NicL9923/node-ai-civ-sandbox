@@ -1,0 +1,29 @@
+type: object
+title: RegistrationRequest
+description: >-
+  One-time civilization onboarding. Idempotent when accompanied by an
+  `Idempotency-Key` header: replaying the same key returns the original
+  registration result rather than creating a duplicate.
+required:
+  - onboardingToken
+  - displayName
+  - capabilities
+properties:
+  onboardingToken:
+    type: string
+    description: One-time onboarding token issued out-of-band by a World operator.
+  displayName:
+    type: string
+    minLength: 1
+    maxLength: 120
+    description: Requested public display name.
+  capabilities:
+    $ref: ./Capabilities.yaml
+  publicKey:
+    type: string
+    description: >-
+      Optional civ-provided public key material or key-id hint to assist S2S
+      HMAC key provisioning. The signing secret itself is exchanged out-of-band.
+  contact:
+    type: string
+    description: Optional operator contact handle for onboarding follow-up.

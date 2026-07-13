@@ -1,0 +1,15 @@
+type: object
+title: CommandPage
+description: A cursor-paginated page of commands a civ pulls from the World.
+required:
+  - items
+properties:
+  items:
+    type: array
+    items:
+      $ref: ./Command.yaml
+  nextCursor:
+    description: Cursor to pass as `after` for the next pull, or null when caught up.
+    oneOf:
+      - $ref: ../common/Cursor.yaml
+      - type: "null"

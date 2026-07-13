@@ -1,0 +1,23 @@
+title: Command
+description: >-
+  A world-originated command that a civ PULLs and then ACKs. A Command is a
+  CloudEvent (so it carries the same envelope + extensions) plus command
+  delivery metadata. The World never pushes commands to civ URLs; civs pull them
+  from the commands feed.
+allOf:
+  - $ref: ./CloudEvent.yaml
+  - type: object
+    required:
+      - commandid
+    properties:
+      commandid:
+        type: string
+        description: World-assigned command id. Use this in the ack call.
+      deliveredat:
+        type: string
+        format: date-time
+        description: When the command became available to pull.
+      expiresat:
+        type: string
+        format: date-time
+        description: After this time an unacked command may be dropped by the World.

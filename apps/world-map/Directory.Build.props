@@ -1,0 +1,17 @@
+<Project>
+
+  <!--
+    world-map subtree defaults. Imports the repo-root Directory.Build.props
+    (LangVersion / Nullable / ImplicitUsings) and adds settings shared by every
+    world-map project. The Cosmos SDK v3 transitively expects Newtonsoft.Json;
+    we keep our code Newtonsoft-free and use the built-in System.Text.Json
+    serializer, so bypass the SDK's presence check across the whole subtree.
+  -->
+  <Import Project="$([MSBuild]::GetPathOfFileAbove('Directory.Build.props', '$(MSBuildThisFileDirectory)../../'))" />
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <AzureCosmosDisableNewtonsoftJsonCheck>true</AzureCosmosDisableNewtonsoftJsonCheck>
+  </PropertyGroup>
+
+</Project>

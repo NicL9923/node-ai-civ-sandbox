@@ -1,0 +1,13 @@
+type: object
+title: EconomySummary
+description: >-
+  Safe, aggregate economy summary for public projection. Contains only
+  civ-level aggregates — never per-agent balances or private ledgers.
+properties:
+  treasury:
+    type: number
+    description: Public treasury balance.
+  currency:
+    type: string
+    default: credits
+    description: Unit label for economic values.

@@ -1,0 +1,26 @@
+type: object
+title: Accepted
+description: >-
+  Standard body for an asynchronously accepted mutation (HTTP 202). The
+  `statusUrl` points at the resource that will reflect terminal status. On an
+  idempotent replay, `duplicate` is true and the same `resourceId`/`statusUrl`
+  are returned.
+required:
+  - status
+  - statusUrl
+properties:
+  status:
+    type: string
+    enum: [accepted]
+    description: Always `accepted` for a 202 response.
+  resourceId:
+    type: string
+    description: Identifier of the created/queued resource (e.g. interactionId).
+  statusUrl:
+    type: string
+    format: uri-reference
+    description: URL to poll for terminal status (mirrors the Location header).
+  duplicate:
+    type: boolean
+    default: false
+    description: True when this response is an idempotent replay of a prior request.

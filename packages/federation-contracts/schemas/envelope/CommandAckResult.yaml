@@ -1,0 +1,22 @@
+type: object
+title: CommandAckResult
+description: The World's response to a command acknowledgment.
+required:
+  - commandId
+  - status
+properties:
+  commandId:
+    type: string
+  status:
+    type: string
+    enum:
+      - applied
+      - rejected
+      - duplicate
+  duplicate:
+    type: boolean
+    default: false
+    description: True if this ack was an idempotent replay of a prior ack.
+  acknowledgedAt:
+    type: string
+    format: date-time

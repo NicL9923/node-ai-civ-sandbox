@@ -1,0 +1,61 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <ItemGroup>
+    <ProjectReference Include="..\WorldMap.Core\WorldMap.Core.csproj" />
+    <ProjectReference Include="..\WorldMap.Infrastructure\WorldMap.Infrastructure.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Azure.Monitor.OpenTelemetry.AspNetCore" Version="1.5.0" />
+    <PackageReference Include="OpenTelemetry.Instrumentation.Runtime" Version="1.16.0" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+
+  <!-- Observer SPA (apps/world-map/web) integration. `dotnet publish` builds the exact-pinned
+       web bundle from the repo-root workspace and copies it into the publish output's wwwroot,
+       FAILING CLOSED if the build fails or produces no SPA assets. Pure `dotnet build`/`test` is
+       unaffected (these targets run only on Publish). Set SkipSpaBuild=true ONLY for Node-free
+       unit/test publishes — never for a deployment publish. -->
+  <PropertyGroup>
+    <RepoRoot>$(MSBuildProjectDirectory)\..\..\..\..</RepoRoot>
+    <SpaDistDir>$(MSBuildProjectDirectory)\..\..\web\dist</SpaDistDir>
+    <SkipSpaBuild Condition="'$(SkipSpaBuild)' == ''">false</SkipSpaBuild>
+  </PropertyGroup>
+
+  <Target Name="BuildSpaForPublish" BeforeTargets="Publish" Condition="'$(SkipSpaBuild)' != 'true'">
+    <Message Importance="high" Text="Building observer SPA (apps/world-map/web) for publish..." />
+    <!-- Clean stale dist so publish never ships an out-of-date bundle. -->
+    <RemoveDir Directories="$(SpaDistDir)" />
+    <!-- Install (only if needed) then build with exact-pinned deps. No ContinueOnError: any
+         npm/build failure fails the publish. -->
+    <Exec Command="npm ci" WorkingDirectory="$(RepoRoot)" Condition="!Exists('$(RepoRoot)\node_modules')" />
+    <Exec Command="npm run build -w apps/world-map/web" WorkingDirectory="$(RepoRoot)" />
+    <Error Condition="!Exists('$(SpaDistDir)\index.html')"
+           Text="SPA publish build did not produce $(SpaDistDir)\index.html." />
+    <ItemGroup>
+      <_SpaJsCheck Include="$(SpaDistDir)\assets\*.js" />
+    </ItemGroup>
+    <Error Condition="'@(_SpaJsCheck)' == ''"
+           Text="SPA publish build produced no JS assets under $(SpaDistDir)\assets." />
+  </Target>
+
+  <Target Name="CopySpaToPublish" AfterTargets="Publish" Condition="'$(SkipSpaBuild)' != 'true'">
+    <Error Condition="!Exists('$(SpaDistDir)\index.html')"
+           Text="SPA assets missing; refusing to publish a placeholder-only app." />
+    <ItemGroup>
+      <_SpaFile Include="$(SpaDistDir)\**\*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(_SpaFile)"
+          DestinationFiles="@(_SpaFile->'$(PublishDir)wwwroot\%(RecursiveDir)%(Filename)%(Extension)')"
+          OverwriteReadOnlyFiles="true" />
+    <!-- Remove the stale placeholder index + its precompressed copies (the real SPA index wins). -->
+    <Delete Files="$(PublishDir)wwwroot\index.html.br;$(PublishDir)wwwroot\index.html.gz" />
+    <Message Importance="high" Text="Bundled observer SPA into $(PublishDir)wwwroot." />
+  </Target>
+
+</Project>

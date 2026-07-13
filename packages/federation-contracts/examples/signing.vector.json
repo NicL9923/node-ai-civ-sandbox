@@ -1,0 +1,67 @@
+{
+  "$comment": "Machine-verifiable HMAC-SHA256 signing vectors for the federation protocol. Golden reference for every language implementation (Node now; C# runtime later). Regenerate ONLY by intentionally re-deriving the algorithm; test/signing.test.ts recomputes and asserts equality.",
+  "algorithm": {
+    "canonicalStringFields": [
+      "protocolVersion (literal 1)",
+      "civId",
+      "keyId",
+      "timestamp (unix epoch seconds)",
+      "nonce",
+      "idempotencyKey (empty string for reads)",
+      "UPPERCASE method",
+      "RFC 3986-normalized path (no query)",
+      "canonical query string",
+      "lowercase-hex SHA-256 of raw body bytes (empty body = SHA-256 of zero bytes)"
+    ],
+    "join": "single LF (\\n), no trailing newline",
+    "canonicalQuery": "split pairs; x-www-form-urlencoded-decode key+value (+ => space); RFC 3986 percent-encode (space => %20, uppercase hex, unreserved A-Za-z0-9-._~ literal); sort by encoded key then encoded value; preserve repeats; join k=v with &; no leading ?",
+    "signature": "base64url(HMAC-SHA256(utf8(canonicalString), secret)) without padding",
+    "replayWindowSeconds": 300
+  },
+  "vectors": [
+    {
+      "name": "post-events-batch-messy-query",
+      "input": {
+        "protocolVersion": "1",
+        "civId": "civ_aurora",
+        "keyId": "key_01",
+        "timestamp": "1780000000",
+        "nonce": "nonce-abc-123",
+        "idempotencyKey": "idem-xyz-1",
+        "method": "POST",
+        "path": "/world/v1/civilizations/civ_aurora/events/batch",
+        "query": "b=2&a=hello world&a=1&c=%7Bx%7D&z=a+b&e=1=2&d=%20x",
+        "body": "{\"hello\":\"world\"}",
+        "secret": "s3cr3t-hmac-key-v1"
+      },
+      "expected": {
+        "canonicalQuery": "a=1&a=hello%20world&b=2&c=%7Bx%7D&d=%20x&e=1%3D2&z=a%20b",
+        "bodySha256Hex": "93a23971a914e5eacbf0a8d25154cda309c3c1c72fbb9914d47c60f3cb681588",
+        "canonicalString": "1\nciv_aurora\nkey_01\n1780000000\nnonce-abc-123\nidem-xyz-1\nPOST\n/world/v1/civilizations/civ_aurora/events/batch\na=1&a=hello%20world&b=2&c=%7Bx%7D&d=%20x&e=1%3D2&z=a%20b\n93a23971a914e5eacbf0a8d25154cda309c3c1c72fbb9914d47c60f3cb681588",
+        "signature": "QRmQtUEXmNYzWnBvnjEnefj8WqZSuVF5H0soubuQKNQ"
+      }
+    },
+    {
+      "name": "get-commands-read-empty-idempotency-and-body",
+      "input": {
+        "protocolVersion": "1",
+        "civId": "civ_aurora",
+        "keyId": "key_01",
+        "timestamp": "1780000123",
+        "nonce": "nonce-read-1",
+        "idempotencyKey": "",
+        "method": "GET",
+        "path": "/world/v1/civilizations/civ_aurora/commands",
+        "query": "limit=50&after=eyJvIjo0Mn0",
+        "body": "",
+        "secret": "s3cr3t-hmac-key-v1"
+      },
+      "expected": {
+        "canonicalQuery": "after=eyJvIjo0Mn0&limit=50",
+        "bodySha256Hex": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "canonicalString": "1\nciv_aurora\nkey_01\n1780000123\nnonce-read-1\n\nGET\n/world/v1/civilizations/civ_aurora/commands\nafter=eyJvIjo0Mn0&limit=50\ne3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "signature": "5H1IQ1tyJ0FnrX9TyYqhMDUrS9R0-J6IOTvyUmRV5I8"
+      }
+    }
+  ]
+}

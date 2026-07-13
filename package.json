@@ -1,43 +1,44 @@
 {
-  "name": "node-ai-civ-sandbox",
+  "name": "ai-civilization-monorepo",
   "version": "0.1.0",
-  "description": "AI civilization sandbox for Azure App Service",
-  "type": "module",
+  "description": "Polyglot monorepo for the AI civilization sandbox and the future multi-civilization world.",
   "private": true,
-  "scripts": {
-    "dev": "tsx src/server/index.ts",
-    "dev:client": "vite --host 127.0.0.1",
-    "build": "npm run typecheck:client && npm run build:client && npm run build:server",
-    "typecheck:client": "tsc --noEmit -p tsconfig.json",
-    "build:client": "vite build",
-    "build:server": "tsc -p tsconfig.server.json",
-    "start": "node dist/server/server/index.js",
-    "test": "vitest run"
-  },
+  "workspaces": [
+    "apps/civilization",
+    "apps/*/web",
+    "packages/*",
+    "test/fake-civilization",
+    "test/federation-e2e"
+  ],
   "engines": {
     "node": ">=22 <25"
   },
-  "dependencies": {
-    "@azure/ai-projects": "^2.2.0",
-    "@azure/cosmos": "^4.9.3",
-    "@azure/identity": "^4.13.1",
-    "applicationinsights": "^3.9.0",
-    "dotenv": "^17.4.2",
-    "express": "^5.2.1",
-    "openai": "^6.45.0",
-    "zod": "^4.4.3"
-  },
-  "devDependencies": {
-    "@types/express": "^5.0.6",
-    "@types/node": "^26.0.1",
-    "@types/react": "^19.2.17",
-    "@types/react-dom": "^19.2.3",
-    "@vitejs/plugin-react": "^6.0.3",
-    "react": "^19.2.7",
-    "react-dom": "^19.2.7",
-    "tsx": "^4.22.4",
-    "typescript": "^6.0.3",
-    "vite": "^8.1.0",
-    "vitest": "^4.1.9"
+  "scripts": {
+    "build": "npm run build -w apps/civilization",
+    "build:civilization": "npm run build -w apps/civilization",
+    "test": "npm run test -w apps/civilization",
+    "test:civilization": "npm run test -w apps/civilization",
+    "typecheck": "npm run typecheck:client -w apps/civilization",
+    "typecheck:civilization": "npm run typecheck:client -w apps/civilization",
+    "dev:civilization": "npm run dev -w apps/civilization",
+    "start:civilization": "npm run start -w apps/civilization",
+    "build:contracts": "npm run build -w @ai-civ/federation-contracts",
+    "lint:contracts": "npm run lint -w @ai-civ/federation-contracts",
+    "generate:contracts": "npm run generate -w @ai-civ/federation-contracts",
+    "check:contracts": "npm run check -w @ai-civ/federation-contracts",
+    "typecheck:contracts": "npm run typecheck -w @ai-civ/federation-contracts",
+    "test:contracts": "npm run test -w @ai-civ/federation-contracts",
+    "build:world": "dotnet build apps/world-map/src/WorldMap.Api/WorldMap.Api.csproj -c Release",
+    "test:world": "dotnet test apps/world-map/tests/WorldMap.UnitTests/WorldMap.UnitTests.csproj && dotnet test apps/world-map/tests/WorldMap.IntegrationTests/WorldMap.IntegrationTests.csproj",
+    "dev:web": "npm run dev -w apps/world-map/web",
+    "build:web": "npm run build -w apps/world-map/web",
+    "typecheck:web": "npm run typecheck -w apps/world-map/web",
+    "test:web": "npm run test -w apps/world-map/web",
+    "build:testkit": "npm run build -w @ai-civ/fake-civilization-testkit",
+    "test:testkit": "npm run test -w @ai-civ/fake-civilization-testkit",
+    "fake-civ": "npm run build:testkit --silent && node test/fake-civilization/dist/cli.js",
+    "publish:world-e2e": "dotnet publish apps/world-map/src/WorldMap.Api/WorldMap.Api.csproj -c Release -o test/federation-e2e/.artifacts/publish",
+    "pretest:federation-e2e": "npm run build:civilization && npm run build:testkit && npm run publish:world-e2e",
+    "test:federation-e2e": "npm run test -w @ai-civ/federation-e2e"
   }
 }

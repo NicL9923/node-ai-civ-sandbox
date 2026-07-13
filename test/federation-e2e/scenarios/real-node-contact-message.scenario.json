@@ -1,0 +1,92 @@
+{
+  "schemaVersion": "1",
+  "name": "real-node contact and message from the fake civilization",
+  "actors": {
+    "fake": {
+      "displayName": "FakeDominionE2E",
+      "credentialRef": "fake",
+      "capabilities": {
+        "protocolVersion": "1.0.0",
+        "supportedInteractionKinds": ["contact", "message"]
+      }
+    }
+  },
+  "steps": [
+    { "op": "heartbeat", "actor": "fake" },
+
+    {
+      "id": "producer-event",
+      "op": "pushEvents",
+      "actor": "fake",
+      "idempotencyKey": "fake-producer-batch-1",
+      "events": [
+        {
+          "id": "fake-evt-1",
+          "specversion": "1.0",
+          "type": "civ.turn.completed.v1",
+          "source": "/civilizations/civ_fake",
+          "idempotencykey": "fake-producer-event-1",
+          "data": { "turn": 7, "secret": "PRIVATE-EVENT-DATA-8f31c2a4" }
+        }
+      ],
+      "saveAs": "producerAccepted"
+    },
+    { "op": "replay", "stepId": "producer-event", "saveAs": "producerReplay" },
+    { "op": "assert", "actual": "/producerReplay/acceptedCount", "equals": 1 },
+
+    {
+      "op": "pushEvents",
+      "actor": "fake",
+      "idempotencyKey": "fake-invalid-source-batch-1",
+      "events": [
+        {
+          "id": "fake-evt-invalid-1",
+          "specversion": "1.0",
+          "type": "civ.turn.completed.v1",
+          "source": "/civilizations/civ_real",
+          "idempotencykey": "fake-invalid-source-event-1",
+          "data": { "turn": 8 }
+        }
+      ],
+      "expectError": { "status": 400, "code": "validation_failed" },
+      "saveAs": "invalidSourceResult"
+    },
+    { "op": "assert", "actual": "/invalidSourceResult/status", "equals": 400 },
+
+    {
+      "id": "contact",
+      "op": "submitInteraction",
+      "actor": "fake",
+      "idempotencyKey": "fake-contact-1",
+      "request": {
+        "kind": "contact",
+        "source": "civ_fake",
+        "target": "civ_real",
+        "authorityDecision": { "mode": "president", "ref": "fake-contact-decree-1" },
+        "publicNarrative": "FakeDominionE2E opens diplomatic contact with the Republic.",
+        "payload": { "greeting": "PRIVATE-CONTACT-GREETING-a17b90de", "purpose": "diplomacy" }
+      },
+      "saveAs": "contactAccepted"
+    },
+    { "op": "replay", "stepId": "contact", "saveAs": "contactReplay" },
+    { "op": "assert", "actual": "/contactReplay/duplicate", "equals": true },
+
+    {
+      "id": "message",
+      "op": "submitInteraction",
+      "actor": "fake",
+      "idempotencyKey": "fake-message-1",
+      "request": {
+        "kind": "message",
+        "source": "civ_fake",
+        "target": "civ_real",
+        "authorityDecision": { "mode": "president", "ref": "fake-message-decree-1" },
+        "publicNarrative": "FakeDominionE2E sends a public message to the Republic.",
+        "payload": { "subject": "Re: contact", "body": "PRIVATE-MESSAGE-BODY-6cd44e17" }
+      },
+      "saveAs": "messageAccepted"
+    },
+    { "op": "replay", "stepId": "message", "saveAs": "messageReplay" },
+    { "op": "assert", "actual": "/messageReplay/duplicate", "equals": true }
+  ]
+}

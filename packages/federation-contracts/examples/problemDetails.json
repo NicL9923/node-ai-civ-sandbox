@@ -1,0 +1,11 @@
+{
+  "type": "https://world.example.com/problems/validation",
+  "title": "Validation failed",
+  "status": 400,
+  "detail": "target is required",
+  "instance": "/interactions",
+  "code": "validation_failed",
+  "retryable": false,
+  "traceId": "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01",
+  "errors": [{ "pointer": "/target", "detail": "must not be empty" }]
+}

@@ -1,0 +1,13 @@
+{
+  "kind": "contact",
+  "source": "civ_aurora",
+  "target": "civ_borealis",
+  "authorityDecision": {
+    "mode": "president",
+    "ref": "decree_88",
+    "authorizedAt": "2026-07-10T18:02:00Z"
+  },
+  "publicNarrative": "Aurora extends a formal greeting to Borealis.",
+  "payload": { "greeting": "Greetings from the Republic of Aurora.", "purpose": "diplomacy" },
+  "expiresAt": "2026-07-17T18:02:00Z"
+}
