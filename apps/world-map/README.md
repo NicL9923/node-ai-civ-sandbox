@@ -20,7 +20,7 @@ It implements the v1 protocol defined in [`packages/federation-contracts`](../..
 ```
 src/
   WorldMap.Api             ASP.NET Core Minimal API host — endpoints, HMAC filter, ProblemDetails,
-                           rate limiting, OpenTelemetry, static placeholder, maintenance worker.
+                           rate limiting, OpenTelemetry, observer SPA hosting + fallback, maintenance worker.
   WorldMap.Core            Domain aggregates + state machines, application services, Result<T>,
                            HMAC canonicalizer/signer, wire DTOs (System.Text.Json), config options.
   WorldMap.Infrastructure  In-memory + Azure Cosmos repositories/stores, config-backed secret
@@ -42,8 +42,10 @@ tests/
 | `POST /interactions` (202) · `GET /interactions/{interactionId}` | HMAC |
 | `GET /relationships` · `GET /events` · `GET /stream` (SSE) | public |
 
-`GET /health` and `GET /health/ready` are unauthenticated. `/` serves a static placeholder for
-the future React web app.
+`GET /health` and `GET /health/ready` are unauthenticated. `/` serves the observer SPA
+(`apps/world-map/web`), which is built and bundled into the host's `wwwroot` on `dotnet publish`;
+client-side deep links fall back to the SPA shell while API, health, and asset paths keep their real
+status codes.
 
 ## Authentication (HMAC-SHA256)
 

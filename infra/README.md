@@ -11,10 +11,10 @@ infra/
 ## Civilization
 
 `civilization/main.bicep` provisions the existing single-app deployment: a Linux App
-Service (`NODE|22-lts`, `appCommandLine: npm start`), Cosmos DB (SQL API), Application
-Insights + Log Analytics, and a Microsoft Foundry account/project with model deployments.
-Resource names, parameters, and semantics are unchanged from the pre-monorepo layout — this
-was a pure file move.
+Service (`NODE|22-lts`, `appCommandLine: npm start`), Cosmos DB (SQL API) — including the
+`federation` container the P3 World connector reads/writes when federation is enabled — Application
+Insights + Log Analytics, and a Microsoft Foundry account/project with model deployments. CI compiles
+this template with `az bicep build` (no login, no deployment).
 
 Deploy (unchanged from before, just the new path):
 
@@ -28,8 +28,10 @@ az deployment group create \
 > A future deploy pipeline must build/zip the app from `apps/civilization/` so that the
 > server's `process.cwd()`-relative static path (`dist/client`) resolves at runtime.
 
-## Future (not in this PR)
+## Not included here
 
-- `world-map/` — P2 world composition + world-map service.
-- A root composition that wires civilizations into the shared world will be added when the
-  world service exists. Intentionally omitted now to avoid implying a working root deploy.
+- `world-map/` — the World runtime (`apps/world-map`) and observer exist as code and run locally on
+  the InMemory provider (see the repo README's federation E2E), but a production world-map deployment
+  template is intentionally out of scope for this repo.
+- A root composition that wires multiple civilizations into a deployed shared world is likewise out of
+  scope; the real-process integration is proven by the federation E2E, not by a deploy.

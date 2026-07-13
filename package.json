@@ -7,7 +7,8 @@
     "apps/civilization",
     "apps/*/web",
     "packages/*",
-    "test/fake-civilization"
+    "test/fake-civilization",
+    "test/federation-e2e"
   ],
   "engines": {
     "node": ">=22 <25"
@@ -35,6 +36,9 @@
     "test:web": "npm run test -w apps/world-map/web",
     "build:testkit": "npm run build -w @ai-civ/fake-civilization-testkit",
     "test:testkit": "npm run test -w @ai-civ/fake-civilization-testkit",
-    "fake-civ": "npm run build:testkit --silent && node test/fake-civilization/dist/cli.js"
+    "fake-civ": "npm run build:testkit --silent && node test/fake-civilization/dist/cli.js",
+    "publish:world-e2e": "dotnet publish apps/world-map/src/WorldMap.Api/WorldMap.Api.csproj -c Release -o test/federation-e2e/.artifacts/publish",
+    "pretest:federation-e2e": "npm run build:civilization && npm run build:testkit && npm run publish:world-e2e",
+    "test:federation-e2e": "npm run test -w @ai-civ/federation-e2e"
   }
 }

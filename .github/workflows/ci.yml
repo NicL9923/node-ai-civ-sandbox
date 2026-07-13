@@ -7,7 +7,8 @@ on:
       - "apps/civilization/**"
       - "apps/world-map/**"
       - "packages/**"
-      - "test/fake-civilization/**"
+      - "test/**"
+      - "infra/**"
       - "package.json"
       - "package-lock.json"
       - "Justfile"
@@ -22,7 +23,8 @@ on:
       - "apps/civilization/**"
       - "apps/world-map/**"
       - "packages/**"
-      - "test/fake-civilization/**"
+      - "test/**"
+      - "infra/**"
       - "package.json"
       - "package-lock.json"
       - "Justfile"
@@ -201,3 +203,40 @@ jobs:
         run: npm run test:testkit
       - name: Smoke test CLI
         run: npm run fake-civ -- help
+
+  federation-e2e:
+    name: Federation E2E (real World + civ + fake civ, Chromium)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+      - name: Install (workspace)
+        run: npm ci
+      - name: Install Playwright Chromium
+        run: npx --workspace @ai-civ/federation-e2e playwright install --with-deps chromium
+      - name: Run federation E2E (builds civ + testkit, publishes World, runs Playwright)
+        run: npm run test:federation-e2e
+      - name: Upload E2E report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: federation-e2e-report
+          path: test/federation-e2e/.artifacts/report
+          if-no-files-found: ignore
+          retention-days: 7
+
+  infra:
+    name: Infrastructure (Bicep compile validation)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile civilization Bicep (no login, no deployment)
+        run: az bicep build --file infra/civilization/main.bicep
+

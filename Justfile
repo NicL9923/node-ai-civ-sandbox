@@ -1,6 +1,6 @@
 # Cross-language task runner for the AI civilization monorepo.
-# Node/TS (civilization) recipes work today. .NET/world recipes are placeholders
-# that land in P1/P2. Run `just` (or `just --list`) to see all recipes.
+# Run `just` (or `just --list`) to see all recipes across the civilization app,
+# federation contracts, the World runtime, the observer web app, and the test kits.
 
 set windows-shell := ["powershell.exe", "-NoLogo", "-NoProfile", "-Command"]
 
@@ -29,8 +29,6 @@ typecheck:
 # Start the built civilization server (cwd = apps/civilization).
 start:
     npm run start -w apps/civilization
-
-# --- Placeholders for future workstreams (do not implement here) ---
 
 # --- Federation contracts (P1: OpenAPI 3.1 -> generated TypeScript + C#) ---
 
@@ -74,6 +72,10 @@ testkit-test:
 # Run a JSON scenario against the configured World.
 testkit-scenario file:
     npm run fake-civ -- scenario {{file}}
+
+# Run the real-process federation end-to-end proof (builds civ + testkit, publishes World, runs Playwright).
+federation-e2e:
+    npm run test:federation-e2e
 
 # --- World-map runtime (P2: .NET 10 ASP.NET Core World federation service) ---
 

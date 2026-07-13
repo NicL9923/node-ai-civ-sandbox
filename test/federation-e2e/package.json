@@ -1,0 +1,23 @@
+{
+  "name": "@ai-civ/federation-e2e",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Real-process federation end-to-end proof: the published WorldMap.Api, the real compiled Node civilization (P3 connector), and the P4 fake civilization drive the full protocol over real HTTP, observed in Chromium.",
+  "scripts": {
+    "test": "playwright test",
+    "test:e2e": "playwright test",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "engines": {
+    "node": ">=22 <25"
+  },
+  "dependencies": {
+    "@ai-civ/fake-civilization-testkit": "0.1.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.60.0",
+    "@types/node": "26.0.1",
+    "typescript": "6.0.3"
+  }
+}

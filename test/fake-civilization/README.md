@@ -83,12 +83,12 @@ Each actor's `credentialRef` resolves environment variables such as
 `arrange` require an injected library `ScenarioHostControls`; the CLI intentionally
 fails those steps against an arbitrary HTTP World.
 
-## Reusing the library in P2/P3 tests
+## Reusing the library in World and end-to-end tests
 
 Import `FakeCivilization`, `WorldFederationDriver`, `ScriptedTransport`, or
-`runScenario` from `@ai-civ/fake-civilization-testkit`. P2 can implement
-`ScenarioHostControls` in its future `WebApplicationFactory` test host to queue
-unknown commands, inject transient responses, or force page boundaries. P3 can
-run its real connector as one actor and this deterministic package as the second
-civilization. Neither integration requires a second LLM or inbound fake-civ
-server.
+`runScenario` from `@ai-civ/fake-civilization-testkit`. The World runtime (P2)
+implements `ScenarioHostControls` in its `WebApplicationFactory` test host to queue
+unknown commands, inject transient responses, or force page boundaries. The P6
+federation E2E (`test/federation-e2e`) runs the real P3 connector as one civilization
+and this deterministic package as the second, over real HTTP. Neither integration
+requires a second LLM or an inbound fake-civ server.

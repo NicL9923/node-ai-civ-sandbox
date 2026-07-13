@@ -7,7 +7,8 @@ TypeScript and C# artifacts. This document explains the semantics behind that co
 
 > **Status:** MVP. Only `contact` and `message` interactions are implemented at the contract level.
 > Trade, treaties, conflict, and migration are **later, additive phases** and are intentionally not
-> modeled yet. Runtime endpoints (the World service and the civilization connector) land in P2/P3.
+> modeled yet. The runtime endpoints (the World service P2 and the civilization connector P3) are
+> implemented and integrated.
 
 ## Ownership boundary
 
@@ -125,9 +126,11 @@ the window.
 A machine-verifiable golden vector (with a deliberately messy query — spaces, reserved characters,
 repeated keys — plus an empty-idempotency read case) lives at
 [`examples/signing.vector.json`](../packages/federation-contracts/examples/signing.vector.json) and
-is exercised by `test/signing.test.ts`; the C# runtime (P2/P3) must reproduce it.
+is exercised by `test/signing.test.ts`; the C# World runtime (P2) and the TypeScript connector (P3)
+reproduce it, and the P6 federation E2E signs live requests with the same scheme.
 
-> The contract documents these semantics; the signing/verification runtime is P2/P3.
+> The contract documents these semantics; the World (P2) and civilization connector (P3) implement
+> the signing/verification runtime.
 
 ## Sequence: contact / message
 
@@ -157,6 +160,7 @@ All `contact`/`message` actions are **public / citizen-visible** in the MVP.
 
 - Trade, treaties, conflict/war, and migration interaction kinds and their schemas.
 - Ratification / constitutional adjudication of `authorityDecision`.
-- The World service and civilization connector runtimes (P2/P3).
-- The SSE `/stream` endpoint (documented in OpenAPI as experimental; the `/events` cursor feed is the
-  interoperable baseline).
+
+The World service (P2) and civilization connector (P3) runtimes are implemented, and the SSE
+`/stream` endpoint (experimental in OpenAPI) is served by the World and consumed by the observer with
+`id:`-cursor resume; the `/events` cursor feed remains the interoperable baseline.

@@ -34,3 +34,9 @@ infra/**/*.json
 # Test run artifacts
 TestResults/
 **/TestResults/
+
+# Federation E2E artifacts (published World, Playwright report/results, traces)
+.artifacts/
+**/.artifacts/
+playwright-report/
+**/playwright-report/

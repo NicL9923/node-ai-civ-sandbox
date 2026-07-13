@@ -83,7 +83,7 @@ class MockWorld {
 
       if (method === "POST" && p.endsWith("/civilizations/register")) {
         this.registrations.push(JSON.parse(body || "{}"));
-        json(200, { civId: "civ_a", keyId: "key_a", protocolVersion: "1", registeredAt: new Date().toISOString(), duplicate: false, commandsCursor: null });
+        json(201, { civId: "civ_a", keyId: "key_a", protocolVersion: "1", registeredAt: new Date().toISOString(), duplicate: false, commandsCursor: null });
         return;
       }
       if (method === "GET" && p.endsWith("/civilizations")) {
