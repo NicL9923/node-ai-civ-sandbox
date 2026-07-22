@@ -42,6 +42,11 @@ internal sealed class TestWorld
             Liveness = new LivenessOptions { SuggestedHeartbeatSeconds = 15 },
             Interaction = new InteractionOptions { CommandTtlSeconds = 60, IdempotencyTtlSeconds = 5 },
             Events = new EventOptions { MaxBatchSize = 500, MaxPublicDataBytes = 4096 },
+            Social = new SocialOptions
+            {
+                IdempotencyTtlSeconds = 5,
+                RateLimit = new SocialRateLimitOptions { PostCooldownSeconds = 0 },
+            },
             Secrets = new SecretsOptions
             {
                 Map = Records.ToDictionary(r => r.SecretRef, r => r.Secret, StringComparer.Ordinal),
@@ -76,8 +81,32 @@ internal sealed class TestWorld
         Command = new CommandService(
             Commands, InteractionRepository, Idempotency, Clock, Options, NullLogger<CommandService>.Instance);
         Relationship = new RelationshipService(Relationships);
+
+        // --- World Wire social ---
+        SocialAccountRepo = new InMemorySocialAccountRepository();
+        SocialPostRepo = new InMemorySocialPostRepository();
+        SocialFollowRepo = new InMemorySocialFollowRepository();
+        SocialLikeRepo = new InMemorySocialLikeRepository();
+        SocialFeedRepo = new InMemorySocialFeedRepository();
+        SocialSnapshotStore = new InMemorySocialSnapshotStore();
+        SocialRateLimitStore = new InMemorySocialRateLimitStore();
+
+        var socialEvents = new SocialEventFactory(Options);
+        SocialRateLimiter = new SocialRateLimiter(SocialRateLimitStore, Clock, Options);
+        SocialPipeline = new SocialMutationPipeline(IdempotencyStore, Idempotency, SocialRateLimiter, Options);
+        SocialAccountService = new SocialAccountService(
+            SocialAccountRepo, SocialFollowRepo, WorldEvents, Idempotency, socialEvents, Sink, Clock, Options,
+            NullLogger<SocialAccountService>.Instance);
+        SocialPostService = new SocialPostService(
+            SocialAccountRepo, SocialPostRepo, SocialFeedRepo, WorldEvents, SocialPipeline, socialEvents, Sink, Clock,
+            Options, NullLogger<SocialPostService>.Instance);
+        SocialGraphService = new SocialGraphService(
+            SocialAccountRepo, SocialPostRepo, SocialFollowRepo, SocialLikeRepo, WorldEvents, SocialPipeline, socialEvents, Sink, Clock);
+        SocialFeedService = new SocialFeedService(
+            SocialAccountRepo, SocialPostRepo, SocialFollowRepo, SocialFeedRepo, SocialSnapshotStore, Clock, Options);
+
         Maintenance = new MaintenanceService(
-            Commands, InteractionRepository, Processor, Clock, NullLogger<MaintenanceService>.Instance);
+            Commands, InteractionRepository, Processor, SocialPostService, Clock, NullLogger<MaintenanceService>.Instance);
     }
 
     public IOptions<WorldMapOptions> Options { get; }
@@ -101,6 +130,20 @@ internal sealed class TestWorld
     public CommandService Command { get; }
     public RelationshipService Relationship { get; }
     public MaintenanceService Maintenance { get; }
+
+    public InMemorySocialAccountRepository SocialAccountRepo { get; }
+    public InMemorySocialPostRepository SocialPostRepo { get; }
+    public InMemorySocialFollowRepository SocialFollowRepo { get; }
+    public InMemorySocialLikeRepository SocialLikeRepo { get; }
+    public InMemorySocialFeedRepository SocialFeedRepo { get; }
+    public InMemorySocialSnapshotStore SocialSnapshotStore { get; }
+    public InMemorySocialRateLimitStore SocialRateLimitStore { get; }
+    public SocialRateLimiter SocialRateLimiter { get; }
+    public SocialMutationPipeline SocialPipeline { get; }
+    public SocialAccountService SocialAccountService { get; }
+    public SocialPostService SocialPostService { get; }
+    public SocialGraphService SocialGraphService { get; }
+    public SocialFeedService SocialFeedService { get; }
 
     public InteractionProcessor CreateProcessor(
         IWorldEventRepository worldEvents,

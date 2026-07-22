@@ -15,6 +15,7 @@ public sealed class MaintenanceService(
     ICommandRepository commands,
     IInteractionRepository interactions,
     IInteractionProcessor processor,
+    ISocialPostService socialPosts,
     TimeProvider clock,
     ILogger<MaintenanceService> logger) : IMaintenanceService
 {
@@ -28,6 +29,9 @@ public sealed class MaintenanceService(
         await ReconcileAckedCommandsAsync(now, ct);
         var expiredCommands = await ExpireCommandsAsync(now, ct);
         var expiredInteractions = await ExpireInteractionsAsync(now, ct);
+
+        // Repair any social posts whose create process crashed before completing its projections.
+        await socialPosts.RepairIncompleteAsync(ct);
 
         if (expiredCommands > 0 || expiredInteractions > 0)
         {

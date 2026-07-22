@@ -26,6 +26,24 @@ public sealed class ContractConformanceTests
         ["eventBatch.request.json", typeof(EventBatchDto)],
         ["commandAck.request.json", typeof(CommandAckDto)],
         ["problemDetails.json", typeof(ProblemDetails)],
+
+        // World Wire social wire shapes.
+        ["social.account-sync.request.json", typeof(SocialAccountSyncRequestDto)],
+        ["social.account-sync.response.json", typeof(SocialAccountSyncResponseDto)],
+        ["social.post.json", typeof(SocialPostDto)],
+        ["social.post-tombstone.json", typeof(SocialPostDto)],
+        ["social.post-create.request.json", typeof(SocialPostCreateRequestDto)],
+        ["social.official-post-create.request.json", typeof(SocialPostCreateRequestDto)],
+        ["social.reply-create.request.json", typeof(SocialPostCreateRequestDto)],
+        ["social.follow-set.request.json", typeof(SocialFollowSetRequestDto)],
+        ["social.reaction-set.request.json", typeof(SocialReactionSetRequestDto)],
+        ["social.feed.page.json", typeof(SocialPostPageDto)],
+        ["social.event.account-synced.data.json", typeof(SocialAccountSyncedEventDataDto)],
+        ["social.event.post-created.data.json", typeof(SocialPostEventDataDto)],
+        ["social.event.reply-created.data.json", typeof(SocialPostEventDataDto)],
+        ["social.event.reaction-changed.data.json", typeof(SocialPostReactionChangedEventDataDto)],
+        ["social.event.follow-changed.data.json", typeof(SocialFollowChangedEventDataDto)],
+        ["social.event.post-tombstoned.data.json", typeof(SocialPostTombstonedEventDataDto)],
     ];
 
     [Theory]

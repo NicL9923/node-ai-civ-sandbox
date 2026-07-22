@@ -17,6 +17,7 @@ internal static class WorldMapEndpoints
         v1.MapCommandEndpoints();
         v1.MapInteractionEndpoints();
         v1.MapRelationshipEndpoints();
+        v1.MapSocialEndpoints();
 
         // Liveness — independent of dependencies (is the process running?).
         app.MapGet("/health", () => TypedResults.Ok(new { status = "healthy" }))

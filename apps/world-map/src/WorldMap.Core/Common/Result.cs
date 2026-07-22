@@ -13,7 +13,8 @@ public sealed record ErrorInfo(
     ErrorCode Code,
     string Message,
     bool Retryable = false,
-    IReadOnlyList<FieldError>? Errors = null);
+    IReadOnlyList<FieldError>? Errors = null,
+    int? RetryAfterSeconds = null);
 
 /// <summary>
 /// Factory for <see cref="ErrorInfo"/>. Mirrors the team pattern where a service
@@ -26,8 +27,9 @@ public static class ErrorResult
         ErrorCode code,
         string message,
         bool retryable = false,
-        IReadOnlyList<FieldError>? errors = null)
-        => new(code, message, retryable, errors);
+        IReadOnlyList<FieldError>? errors = null,
+        int? retryAfterSeconds = null)
+        => new(code, message, retryable, errors, retryAfterSeconds);
 }
 
 /// <summary>

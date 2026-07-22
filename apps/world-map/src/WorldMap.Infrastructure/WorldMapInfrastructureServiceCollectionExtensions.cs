@@ -73,6 +73,15 @@ public static class WorldMapInfrastructureServiceCollectionExtensions
         services.AddSingleton<IOnboardingTokenStore, InMemoryOnboardingTokenStore>();
         services.AddSingleton<IReadinessProbe, InMemoryReadinessProbe>();
 
+        // World Wire social stores.
+        services.AddSingleton<ISocialAccountRepository, InMemorySocialAccountRepository>();
+        services.AddSingleton<ISocialPostRepository, InMemorySocialPostRepository>();
+        services.AddSingleton<ISocialFollowRepository, InMemorySocialFollowRepository>();
+        services.AddSingleton<ISocialLikeRepository, InMemorySocialLikeRepository>();
+        services.AddSingleton<ISocialFeedRepository, InMemorySocialFeedRepository>();
+        services.AddSingleton<ISocialSnapshotStore, InMemorySocialSnapshotStore>();
+        services.AddSingleton<ISocialRateLimitStore, InMemorySocialRateLimitStore>();
+
         // A single in-process instance is inherently the sole writer — the lease is always held.
         services.AddSingleton(new WriterLeaseState(initiallyHeld: true));
     }
@@ -117,6 +126,15 @@ public static class WorldMapInfrastructureServiceCollectionExtensions
         services.AddSingleton<IIdempotencyStore, CosmosIdempotencyStore>();
         services.AddSingleton<IOnboardingTokenStore, CosmosOnboardingTokenStore>();
         services.AddSingleton<IReadinessProbe, CosmosReadinessProbe>();
+
+        // World Wire social stores.
+        services.AddSingleton<ISocialAccountRepository, CosmosSocialAccountRepository>();
+        services.AddSingleton<ISocialPostRepository, CosmosSocialPostRepository>();
+        services.AddSingleton<ISocialFollowRepository, CosmosSocialFollowRepository>();
+        services.AddSingleton<ISocialLikeRepository, CosmosSocialLikeRepository>();
+        services.AddSingleton<ISocialFeedRepository, CosmosSocialFeedRepository>();
+        services.AddSingleton<ISocialSnapshotStore, CosmosSocialSnapshotStore>();
+        services.AddSingleton<ISocialRateLimitStore, CosmosSocialRateLimitStore>();
 
         // Single-writer lease (fail-closed). When disabled, the instance is treated as always the
         // writer (dev/first-run); when enabled, the lease worker maintains the held state and the

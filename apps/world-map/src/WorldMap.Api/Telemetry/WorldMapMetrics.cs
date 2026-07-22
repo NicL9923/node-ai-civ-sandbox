@@ -18,6 +18,8 @@ public sealed class WorldMapMetrics : IDisposable
     private readonly Counter<long> _interactionsSubmitted;
     private readonly Counter<long> _interactionAcks;
     private readonly Counter<long> _eventsIngested;
+    private readonly Counter<long> _socialMutations;
+    private readonly Counter<long> _socialRateLimited;
     private readonly Histogram<double> _interactionLatencyMs;
 
     public WorldMapMetrics(IMeterFactory meterFactory)
@@ -28,6 +30,8 @@ public sealed class WorldMapMetrics : IDisposable
         _interactionsSubmitted = _meter.CreateCounter<long>("worldmap.interactions.submitted", "interactions", "Interactions submitted.");
         _interactionAcks = _meter.CreateCounter<long>("worldmap.interactions.acks", "acks", "Command acks by status.");
         _eventsIngested = _meter.CreateCounter<long>("worldmap.events.ingested", "events", "Events ingested by outcome.");
+        _socialMutations = _meter.CreateCounter<long>("worldmap.social.mutations", "mutations", "World Wire social mutations by operation.");
+        _socialRateLimited = _meter.CreateCounter<long>("worldmap.social.ratelimited", "rejections", "World Wire social mutations rejected by the per-account rate limiter.");
         _interactionLatencyMs = _meter.CreateHistogram<double>("worldmap.interactions.submit.duration", "ms", "Interaction submit latency.");
     }
 
@@ -53,6 +57,12 @@ public sealed class WorldMapMetrics : IDisposable
             _eventsIngested.Add(count, new KeyValuePair<string, object?>("outcome", outcome));
         }
     }
+
+    public void RecordSocialMutation(string operation) =>
+        _socialMutations.Add(1, new KeyValuePair<string, object?>("operation", operation));
+
+    public void RecordSocialRateLimited(string operation) =>
+        _socialRateLimited.Add(1, new KeyValuePair<string, object?>("operation", operation));
 
     public void Dispose() => _meter.Dispose();
 }

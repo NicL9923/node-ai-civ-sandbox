@@ -100,3 +100,53 @@ public interface IMaintenanceService
 {
     Task SweepAsync(CancellationToken ct);
 }
+
+/// <summary>World Wire account sync (HMAC + idempotency) and public account/follower/following reads.</summary>
+public interface ISocialAccountService
+{
+    Task<Result<SocialMutationEnvelope<SocialAccountSyncResponseDto>>> SyncAsync(
+        string authenticatedCivId, SocialAccountSyncRequestDto request, string idempotencyKey, CancellationToken ct);
+
+    Task<Result<SocialAccountDto>> GetAsync(string accountId, CancellationToken ct);
+
+    Task<Result<SocialAccountPageDto>> ListFollowersAsync(string accountId, string? cursor, int? limit, CancellationToken ct);
+
+    Task<Result<SocialAccountPageDto>> ListFollowingAsync(string accountId, string? cursor, int? limit, CancellationToken ct);
+}
+
+/// <summary>World Wire post create/get/thread/tombstone.</summary>
+public interface ISocialPostService
+{
+    Task<Result<SocialMutationEnvelope<SocialPostDto>>> CreateAsync(
+        string authenticatedCivId, SocialPostCreateRequestDto request, string idempotencyKey, CancellationToken ct);
+
+    Task<Result<SocialPostDto>> GetAsync(string postId, CancellationToken ct);
+
+    Task<Result<SocialThreadPageDto>> GetThreadAsync(string postId, string? cursor, int? limit, CancellationToken ct);
+
+    Task<Result<SocialMutationEnvelope<SocialPostDto>>> TombstoneAsync(
+        string authenticatedCivId, string postId, SocialPostTombstoneRequestDto request, string idempotencyKey, CancellationToken ct);
+
+    /// <summary>Repairs posts whose create process crashed before completing its projections (worker resume).</summary>
+    Task RepairIncompleteAsync(CancellationToken ct);
+}
+
+/// <summary>World Wire desired-state follow and like mutations.</summary>
+public interface ISocialGraphService
+{
+    Task<Result<SocialMutationEnvelope<SocialFollowDto>>> SetFollowAsync(
+        string authenticatedCivId, string accountId, string targetAccountId, SocialFollowSetRequestDto request, string idempotencyKey, CancellationToken ct);
+
+    Task<Result<SocialMutationEnvelope<SocialReactionDto>>> SetLikeAsync(
+        string authenticatedCivId, string postId, string accountId, SocialReactionSetRequestDto request, string idempotencyKey, CancellationToken ct);
+}
+
+/// <summary>World Wire public feeds: global, account posts, and following feed (snapshot-bound).</summary>
+public interface ISocialFeedService
+{
+    Task<Result<SocialPostPageDto>> GlobalAsync(string? cursor, int? limit, CancellationToken ct);
+
+    Task<Result<SocialPostPageDto>> AccountPostsAsync(string accountId, string? cursor, int? limit, CancellationToken ct);
+
+    Task<Result<SocialPostPageDto>> FollowingFeedAsync(string accountId, string? cursor, int? limit, CancellationToken ct);
+}

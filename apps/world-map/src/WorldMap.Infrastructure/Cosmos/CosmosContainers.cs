@@ -16,6 +16,27 @@ internal static class CosmosContainers
     public const string Nonces = "nonces";
     public const string Onboarding = "onboarding";
 
+    /// <summary>Canonical World Wire accounts (PK = accountId).</summary>
+    public const string SocialAccounts = "socialAccounts";
+
+    /// <summary>Canonical World Wire posts (PK = conversationRootPostId).</summary>
+    public const string SocialPosts = "socialPosts";
+
+    /// <summary>Desired-state following edges (PK = followerAccountId).</summary>
+    public const string SocialFollows = "socialFollows";
+
+    /// <summary>Desired-state like edges (PK = postId).</summary>
+    public const string SocialLikes = "socialLikes";
+
+    /// <summary>World-sequence feed index rows (PK = feedScope: "global" or author accountId).</summary>
+    public const string SocialFeed = "socialFeed";
+
+    /// <summary>Durable following-feed snapshots (PK = ownerAccountId; TTL).</summary>
+    public const string SocialSnapshots = "socialSnapshots";
+
+    /// <summary>Per-account rate-limit state (PK = accountId; TTL).</summary>
+    public const string SocialRateLimit = "socialRateLimit";
+
     /// <summary>Counter documents backing the atomic sequence/ordinal allocators (PK = stream name).</summary>
     public const string Sequences = "sequences";
 
@@ -33,7 +54,7 @@ internal static class CosmosContainers
     public const string WorldEventFeedPartition = "public";
 
     /// <summary>Containers that enable time-to-live (per-item <c>ttl</c> drives expiry).</summary>
-    public static readonly IReadOnlyList<string> TtlContainers = [Nonces, Idempotency];
+    public static readonly IReadOnlyList<string> TtlContainers = [Nonces, Idempotency, SocialSnapshots, SocialRateLimit];
 
     /// <summary>Every container the runtime requires to exist (validated by the readiness probe).</summary>
     public static readonly IReadOnlyList<string> All =
@@ -47,6 +68,13 @@ internal static class CosmosContainers
         Idempotency,
         Nonces,
         Onboarding,
+        SocialAccounts,
+        SocialPosts,
+        SocialFollows,
+        SocialLikes,
+        SocialFeed,
+        SocialSnapshots,
+        SocialRateLimit,
         Sequences,
         Lock,
     ];

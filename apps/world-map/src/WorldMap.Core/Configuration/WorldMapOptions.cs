@@ -36,6 +36,7 @@ public sealed class WorldMapOptions
     public SecretsOptions Secrets { get; set; } = new();
     public MaintenanceOptions Maintenance { get; set; } = new();
     public TelemetryOptions Telemetry { get; set; } = new();
+    public SocialOptions Social { get; set; } = new();
 }
 
 public sealed class StorageOptions
@@ -165,4 +166,55 @@ public sealed class TelemetryOptions
 {
     /// <summary>App Insights / Azure Monitor connection string; when null, exporter is disabled.</summary>
     public string? AzureMonitorConnectionString { get; set; }
+}
+
+/// <summary>
+/// World Wire social runtime configuration. The <b>structural</b> bounds (text/display/bio code points,
+/// reply depth, sync batch size, page limits) are fixed by the contract and defaulted here; the
+/// <see cref="RateLimit"/> quota numbers are deployment policy advertised to civs via
+/// <c>SocialRateLimitPolicy</c>.
+/// </summary>
+public sealed class SocialOptions
+{
+    /// <summary>Maximum accounts in one atomic sync batch (contract-fixed 100).</summary>
+    public int MaxSyncBatch { get; set; } = 100;
+
+    /// <summary>Maximum post/reply text length in Unicode code points (contract-fixed 280).</summary>
+    public int MaxTextCodePoints { get; set; } = 280;
+
+    /// <summary>Maximum display-name length in Unicode code points (contract-fixed 80).</summary>
+    public int MaxDisplayNameCodePoints { get; set; } = 80;
+
+    /// <summary>Maximum bio length in Unicode code points (contract-fixed 160).</summary>
+    public int MaxBioCodePoints { get; set; } = 160;
+
+    /// <summary>Maximum reply depth (root is 0; contract-fixed maximum 4).</summary>
+    public int MaxReplyDepth { get; set; } = 4;
+
+    /// <summary>Default social page size (contract default 25).</summary>
+    public int DefaultPageLimit { get; set; } = 25;
+
+    /// <summary>Maximum social page size (contract-fixed 100).</summary>
+    public int MaxPageLimit { get; set; } = 100;
+
+    /// <summary>Following-feed durable snapshot time-to-live.</summary>
+    public int SnapshotTtlSeconds { get; set; } = 3600;
+
+    /// <summary>Idempotency record time-to-live for social mutations.</summary>
+    public int IdempotencyTtlSeconds { get; set; } = 86400;
+
+    public SocialRateLimitOptions RateLimit { get; set; } = new();
+
+    public int ClampPageLimit(int? limit) =>
+        limit is null ? DefaultPageLimit : Math.Clamp(limit.Value, 1, MaxPageLimit);
+}
+
+/// <summary>Per-account anti-spam quota policy advertised via <c>SocialRateLimitPolicy</c>.</summary>
+public sealed class SocialRateLimitOptions
+{
+    public int PostCooldownSeconds { get; set; } = 30;
+    public int PostsPerWindow { get; set; } = 20;
+    public int ReactionsPerWindow { get; set; } = 120;
+    public int FollowsPerWindow { get; set; } = 60;
+    public int WindowSeconds { get; set; } = 3600;
 }
