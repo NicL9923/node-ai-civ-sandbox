@@ -33,15 +33,35 @@ param(
 $ErrorActionPreference = 'Stop'
 if (-not $CivHmacSecretName) { $CivHmacSecretName = $HmacSecretName }
 
-# --- CSPRNG material (cryptographically secure; never a non-crypto PRNG for secrets) ---
-$rng = [System.Security.Cryptography.RandomNumberGenerator]
-$tokBytes = [byte[]]::new(32); $rng::Fill($tokBytes)
-$onboardingToken = [Convert]::ToHexString($tokBytes).ToLower()
-$tokenHash = [Convert]::ToHexString(
-  [System.Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes($onboardingToken))
-).ToLower()
-$hmBytes = [byte[]]::new(48); $rng::Fill($hmBytes)
-$hmacSecret = [Convert]::ToHexString($hmBytes).ToLower()
+# --- CSPRNG material (cryptographically secure). Uses only APIs available in BOTH Windows PowerShell
+#     5.1 (.NET Framework) and PowerShell 7+ (.NET 5+): RandomNumberGenerator.Create().GetBytes,
+#     SHA256.Create().ComputeHash, and BitConverter for hex. ---
+function ConvertTo-LowerHex([byte[]]$Bytes) {
+  return [BitConverter]::ToString($Bytes).Replace('-', '').ToLower()
+}
+
+$tokBytes = [byte[]]::new(32)
+$hmBytes = [byte[]]::new(48)
+$rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+try {
+  $rng.GetBytes($tokBytes)
+  $rng.GetBytes($hmBytes)
+}
+finally {
+  $rng.Dispose()
+}
+
+$onboardingToken = ConvertTo-LowerHex $tokBytes
+$hmacSecret = ConvertTo-LowerHex $hmBytes
+
+$sha = [System.Security.Cryptography.SHA256]::Create()
+try {
+  $hashBytes = $sha.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($onboardingToken))
+}
+finally {
+  $sha.Dispose()
+}
+$tokenHash = ConvertTo-LowerHex $hashBytes
 
 # --- Restricted temp dir (remove inheritance; grant only the current user) ---
 $dir = Join-Path $env:TEMP ("world-onboarding-" + [Guid]::NewGuid())
