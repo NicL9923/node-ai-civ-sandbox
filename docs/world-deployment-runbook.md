@@ -90,12 +90,12 @@ override after this inventory.
 Edit `infra/world/main.bicepparam`. Set at least:
 
 - `existingCosmosAccountName` (default `nicnodeai0706162325`).
-- `cosmosThroughputMode` (+ RU/s) per the step-2 inventory.
-- `existingLogAnalyticsWorkspaceResourceId` — the ID from step 1 (or leave blank to create a new one).
+- `cosmosThroughputMode` (+ RU/s) per the §2 inventory.
+- `existingLogAnalyticsWorkspaceResourceId` — the ID from §1 (or leave blank to create a new one).
 - Optionally `worldAppName`, `keyVaultName`, `appServiceSkuName`/`Tier`.
 
 Leave `onboardingRecords = []` for the first deploy (Key Vault references only resolve after their
-secrets exist — see step 6). Validate locally (no login):
+World-vault secrets exist — created in §7, wired in §8). Validate locally (no login):
 
 ```powershell
 just world-infra-build      # compiles all templates + validates the .bicepparam
