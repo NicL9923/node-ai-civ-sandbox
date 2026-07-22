@@ -1,5 +1,6 @@
 import type { StreamStatus } from "../../api/sse";
 import { ConnectionStatus } from "../common/ConnectionStatus";
+import { WireNav, type Surface } from "../wire/WireNav";
 
 interface SummaryHeaderProps {
   civCount: number;
@@ -9,6 +10,9 @@ interface SummaryHeaderProps {
   latestWorldSequence: string | null;
   connection: StreamStatus;
   onRefresh: () => void;
+  surface: Surface;
+  onObservatory: () => void;
+  onWire: () => void;
 }
 
 /** Top bar: what the world contains right now, plus live-stream health. No giant hero metrics. */
@@ -20,10 +24,14 @@ export function SummaryHeader({
   latestWorldSequence,
   connection,
   onRefresh,
+  surface,
+  onObservatory,
+  onWire,
 }: SummaryHeaderProps) {
   return (
     <header className="summary">
       <h1 className="summary__title">World Observatory</h1>
+      <WireNav active={surface} onObservatory={onObservatory} onWire={onWire} />
       <div className="summary__stats">
         <span className="stat">
           <span className="stat__value mono">{civCount}</span>

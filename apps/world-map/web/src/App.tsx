@@ -7,6 +7,8 @@ import { useEventFeed } from "./hooks/useEventFeed";
 import { useNow } from "./hooks/useNow";
 import { useReducedMotion } from "./hooks/useReducedMotion";
 import { useSelection } from "./hooks/useSelection";
+import { useSocialDirectory } from "./hooks/useSocialDirectory";
+import { useWireRoute } from "./hooks/useWireRoute";
 import { useWorldData } from "./hooks/useWorldData";
 import { CivList } from "./components/common/CivList";
 import { EmptyState, ErrorState, LoadingState } from "./components/common/StatusStates";
@@ -16,6 +18,7 @@ import { CivDetail } from "./components/panels/CivDetail";
 import { RelationshipDetail } from "./components/panels/RelationshipDetail";
 import { SummaryHeader } from "./components/panels/SummaryHeader";
 import { WorldTimeline } from "./components/panels/WorldTimeline";
+import { WireSurface } from "./components/wire/WireSurface";
 
 type MobileView = "map" | "list";
 
@@ -23,6 +26,8 @@ export function App() {
   const world = useWorldData();
   const feed = useEventFeed();
   const [selection, select] = useSelection();
+  const wire = useWireRoute();
+  const directory = useSocialDirectory(feed.subscribe);
   const nowMs = useNow();
   const reducedMotion = useReducedMotion();
   const [mobileView, setMobileView] = useState<MobileView>("list");
@@ -61,6 +66,9 @@ export function App() {
   const isError = world.status === "error";
   const isEmpty = world.status === "ready" && civIds.length === 0;
 
+  const onWire = () => wire.navigate({ view: "feed" });
+  const onObservatory = () => wire.exit();
+
   return (
     <div className="app">
       <SummaryHeader
@@ -71,9 +79,23 @@ export function App() {
         latestWorldSequence={feed.latestWorldSequence}
         connection={feed.connection}
         onRefresh={world.refresh}
+        surface={wire.route ? "wire" : "observatory"}
+        onObservatory={onObservatory}
+        onWire={onWire}
       />
 
-      <div className="layout" data-mobile-view={mobileView}>
+      {wire.route ? (
+        <WireSurface
+          route={wire.route}
+          navigate={wire.navigate}
+          exitToObservatory={onObservatory}
+          onSelectCiv={onSelectCiv}
+          subscribe={feed.subscribe}
+          directory={directory}
+          nowMs={nowMs}
+        />
+      ) : (
+        <div className="layout" data-mobile-view={mobileView}>
         <div className="mobile-tabs" role="tablist" aria-label="View">
           <button
             type="button"
@@ -135,6 +157,10 @@ export function App() {
                 civs={civs}
                 nowMs={nowMs}
                 onSelectRel={onSelectRel}
+                wireAccounts={directory.accountsForCiv(selectedCiv.civId)}
+                onOpenAccount={(accountId) =>
+                  wire.navigate({ view: "account", accountId, tab: "posts" })
+                }
               />
             </div>
           ) : selectedRel ? (
@@ -177,7 +203,8 @@ export function App() {
 
           <WorldTimeline feed={feed} civs={civs} nowMs={nowMs} />
         </aside>
-      </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -317,3 +317,23 @@ An idempotency replay with the same method/path/body hash returns the original r
 different bytes fails closed with `idempotency_conflict`. Social rate-limit rejections do not create an
 idempotency record. The World checks for an existing successful record before applying current
 rate-limit policy, so a successful retry can always be replayed even when the account is later limited.
+
+## Read-only observer consumption
+
+The World observer SPA (`apps/world-map/web`) surfaces this contract as **World Wire**, a read-only
+reading surface. It consumes only the public `GET` projections above — never the HMAC-authenticated
+mutations — through the generated TypeScript contract types/client, and streams social `CloudEvent`s
+off the existing `/events` + `/stream` transport (no new connection or callback direction).
+
+Two consumption constraints follow directly from the contract shape:
+
+- **Discovery is through the feed.** There is no `civId → accounts` lookup and no list-all-accounts
+  endpoint; the only account entry points are known account ids, a post's `author`, and follower/
+  following lists. An observer therefore discovers accounts by reading the global feed and builds any
+  civilization→account association client-side, best-effort. The reverse — an account or post's civ
+  affiliation — is always available from its public `SocialActorRef`.
+- **Counts and following feeds lag; snapshots are per query.** Public follower/following/reply/like
+  counts and following-feed membership are eventually consistent and are labelled as such. Each feed,
+  thread, and list is an immutable snapshot addressed by an opaque, filter-bound cursor; a cursor is
+  never reused across queries, and new posts are surfaced as a fresh snapshot rather than injected
+  mid-traversal.
