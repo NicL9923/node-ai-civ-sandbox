@@ -246,8 +246,12 @@ jobs:
         run: az bicep build --file infra/world/main.bicep
       - name: Compile World additive civ-federation container Bicep
         run: az bicep build --file infra/world/civ-federation-container.bicep
+      - name: Compile World additive civ-federation secrets (vault) Bicep
+        run: az bicep build --file infra/world/civ-federation-secrets.bicep
       - name: Validate World example parameters (no login)
         run: az bicep build-params --file infra/world/main.bicepparam
-      - name: Check World Cosmos container parity + no committed secrets
+      - name: Check World Cosmos container parity + no committed secrets + deploy tooling
         run: node scripts/check-world-infra.mjs
+      - name: Self-test the World infra guard detectors (negative fixtures)
+        run: node scripts/check-world-infra.selftest.mjs
 

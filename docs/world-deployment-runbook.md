@@ -13,9 +13,12 @@ Templates & tooling:
 - `infra/world/main.bicep` — plan + Web App + App Insights + Key Vault + Cosmos `worldmap` DB/containers + RBAC.
 - `infra/world/containers.json` — Cosmos container / PK / TTL source of truth (lockstep with the runtime).
 - `infra/world/civ-federation-container.bicep` — additive `federation` container for the existing civ DB.
+- `infra/world/civ-federation-secrets.bicep` — additive dedicated civ Key Vault + civ MI Secrets User role.
 - `infra/world/main.bicepparam` — example parameters (no secrets).
-- `scripts/check-world-infra.mjs` — parity + no-secret + onboarding-record + secret-handling guard (`npm run check:world-infra`).
-- `Justfile` — `world-infra-*`, `world-publish`, `world-package`, `world-deploy-app`, `world-provision-secret`, `civ-*` recipes.
+- `scripts/check-world-infra.mjs` (+ `.selftest.mjs`) — parity + no-secret + onboarding + secret-handling + deploy-tooling guard (`npm run check:world-infra`).
+- `scripts/provision-world-onboarding.ps1` / `remove-secure-temp.ps1` — CSPRNG secret provisioning + secure cleanup.
+- `scripts/package-world-app.ps1` / `deploy-world-app.ps1` — checksummed package + health-gated deploy/rollback.
+- `Justfile` — `world-infra-*`, `world-publish`, `world-package`, `world-deploy-app`, `world-deploy-prev`, `world-provision-onboarding`, `world-civ-secrets-vault`, `civ-*` recipes.
 
 ## 0. Known sandbox environment
 
@@ -123,49 +126,24 @@ Idempotent. Capture the outputs (`worldAppName`, `worldAppUrl`, `worldBaseUrl`, 
 
 ## 6. Securely generate & store onboarding tokens + HMAC secrets
 
-Secrets are provisioned **out-of-band** — never in Bicep, app settings, source, CLI value arguments,
-or console output. Use a CSPRNG, write material only to a restricted-ACL temp directory, provision to
-Key Vault from a **file** (never `--value`), and securely delete the temp directory afterward.
+Secrets are provisioned **out-of-band** by the CSPRNG helper `scripts/provision-world-onboarding.ps1`
+— never in Bicep, app settings, source, CLI value arguments, or console output. The helper generates
+the token + HMAC with a cryptographically secure RNG, writes them only to a restricted-ACL temp
+directory, provisions them to Key Vault via `--file`, emits **only** the non-secret `tokenHash` +
+names, and cleans up after all provisioning succeeds.
+
+For a World-only provision (civ secrets handled in step 10):
 
 ```powershell
-# --- CSPRNG generation (use RandomNumberGenerator; never a non-cryptographic PRNG for secrets) ---
-$rng = [System.Security.Cryptography.RandomNumberGenerator]
-$tokBytes = [byte[]]::new(32); $rng::Fill($tokBytes)
-$onboardingToken = [Convert]::ToHexString($tokBytes).ToLower()   # raw one-time token (secret)
-$tokenHash = [Convert]::ToHexString(
-  [System.Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes($onboardingToken))
-).ToLower()                                                       # SHA-256 hash (non-secret config)
-$hmacBytes = [byte[]]::new(48); $rng::Fill($hmacBytes)
-$hmacSecret = [Convert]::ToHexString($hmacBytes).ToLower()        # shared HMAC secret
-
-# --- Restricted temp dir (remove inheritance; grant only the current user) ---
-$secureDir = Join-Path $env:TEMP ("world-secrets-" + [Guid]::NewGuid())
-New-Item -ItemType Directory -Path $secureDir | Out-Null
-icacls $secureDir /inheritance:r /grant:r "$($env:USERNAME):(OI)(CI)F" | Out-Null
-try {
-  # Store the HMAC secret to a file and provision it to the WORLD vault via --file (no value on the CLI).
-  $hmacFile = Join-Path $secureDir 'aurora-hmac-v1.txt'
-  Set-Content -Path $hmacFile -Value $hmacSecret -NoNewline
-  just world-provision-secret <worldKeyVaultName> aurora-hmac-v1 $hmacFile
-
-  # The civ operator needs the raw onboarding token + the same HMAC secret out-of-band. Write them to
-  # the restricted dir and transfer them over an approved secure channel by OPENING these files —
-  # do NOT echo them to the console or any log.
-  Set-Content -Path (Join-Path $secureDir 'onboarding-token.txt') -Value $onboardingToken -NoNewline
-
-  # Only the non-secret hash is safe to print (needed for onboardingRecords):
-  Write-Host "tokenHash (non-secret): $tokenHash"
-}
-finally {
-  # Securely delete the temp material once transferred. (In an interactive session, run this AFTER the
-  # operator has copied onboarding-token.txt via the secure channel.)
-  Remove-Item $secureDir -Recurse -Force -ErrorAction SilentlyContinue
-}
+$sub = "bce49949-4505-4c57-9207-a84ce0f5c935"
+$result = ./scripts/provision-world-onboarding.ps1 -WorldVault <worldKeyVaultName> `
+  -HmacSecretName aurora-hmac-v1 -Subscription $sub
+$result.TokenHash   # non-secret; copy into onboardingRecords[i].tokenHash
 ```
 
-> Cross-platform alternative: `openssl rand -hex 32` (token) / `openssl rand -hex 48` (HMAC) are also
-> CSPRNG-backed. Never reuse a token, and never place a raw token/secret in a param file, app setting,
-> deployment parameter, or process argument.
+> The helper never prints or returns the raw token/secret. It uses `RandomNumberGenerator` (or use
+> `openssl rand -hex 32` / `-hex 48`). Never reuse a token; never place a raw token/secret in a param
+> file, app setting, deployment parameter, or process argument.
 
 ## 7. Wire onboarding records & re-deploy (deterministic)
 
@@ -216,14 +194,20 @@ az webapp config appsettings list --subscription bce49949-4505-4c57-9207-a84ce0f
 ## 8. Publish, package (checksummed), & deploy the app
 
 `dotnet publish` builds + bundles the observer SPA (fail-closed) into `wwwroot`. `world-package`
-zips + checksums the output and preserves the previous ZIP for rollback. `world-deploy-app` deploys
-and then verifies `/health` + `/health/ready`.
+(`scripts/package-world-app.ps1`) zips + SHA-256-checksums the output and moves the previous ZIP **and
+its checksum** to `world.prev.zip` / `world.prev.zip.sha256`. `world-deploy-app`
+(`scripts/deploy-world-app.ps1`) verifies the ZIP against its checksum before deploying, then gates on
+health — it polls **both** `/health` and `/health/ready` to HTTP 200 within bounded deadlines and
+**throws** on timeout/connection failure/non-200 (it never reports success on an unhealthy app).
 
 ```powershell
 just world-publish
-just world-package          # -> ./publish/world.zip (+ .sha256); prior zip kept as world.prev.zip
+just world-package          # -> ./publish/world.zip (+ .sha256); prior kept as world.prev.zip(.sha256)
 just world-deploy-app bce49949-4505-4c57-9207-a84ce0f5c935 nicolas-node-ai-sandbox <worldAppName>
 ```
+
+If `world-deploy-app` throws on the health gate, the app may be unhealthy — roll back to the retained,
+checksum-verified previous artifact (see §11); it does **not** auto-roll-back.
 
 ## 9. Verify
 
@@ -256,36 +240,45 @@ The P3 connector is off until `WORLD_API_BASE_URL` is set on the existing civ ap
    just world-federation-container bce49949-4505-4c57-9207-a84ce0f5c935 nicolas-node-ai-sandbox
    ```
 
-2. **Store the civ's secrets with least privilege.** Put the civ's HMAC secret + onboarding token in
-   a Key Vault the civ MI can read, then grant the civ MI **secret-scoped** access — NOT vault-level
-   access to the World vault (which would expose other civs' secrets):
+2. **Provision a dedicated civ Key Vault (reproducible IaC).** Deploy the additive
+   `civ-federation-secrets.bicep` — it creates a civ-only Key Vault (RBAC, soft delete, unconditional
+   purge protection, no access policies) and grants the civ Web App's managed identity **Key Vault
+   Secrets User scoped to that vault only**. A civ-only vault keeps least privilege intact (the civ MI
+   never touches the World vault). It never redeploys the civ app and holds no secret values.
 
    ```powershell
    $sub = "bce49949-4505-4c57-9207-a84ce0f5c935"; $rg = "nicolas-node-ai-sandbox"
-   $civMi = az webapp identity show --subscription $sub --resource-group $rg `
-     --name nic-node-ai-0706162325 --query principalId -o tsv
-
-   # Secret-resource scope = <vault resource id>/secrets/<secretName>. Prefer a SEPARATE civ vault.
-   $civVault = "<civKeyVaultName>"
-   $secretScope = "/subscriptions/$sub/resourceGroups/$rg/providers/Microsoft.KeyVault/vaults/$civVault/secrets/civ-aurora-hmac-v1"
-   az role assignment create --assignee-object-id $civMi --assignee-principal-type ServicePrincipal `
-     --role "Key Vault Secrets User" --scope $secretScope
-
-   # Verify the secret-scoped assignment was accepted:
-   az role assignment list --assignee $civMi --scope $secretScope -o table
+   just world-civ-secrets-vault-whatif $sub $rg    # preview
+   just world-civ-secrets-vault $sub $rg           # deploy -> outputs civKeyVaultName / civKeyVaultUri
    ```
 
-   **If secret-level scope is rejected**, STOP and use a **separate civ vault** with a vault-level
-   `Key Vault Secrets User` assignment on that civ vault only. Do **not** broaden the civ MI to the
-   World vault. The World MI retains vault-level access to the **World** vault only.
+3. **Provision the civ's secrets into the civ vault** with the CSPRNG helper (`--file`, no printed
+   secrets). This sets the World-vault HMAC and the civ-vault HMAC + onboarding token together:
 
-3. Set the civ app's `WORLD_*` settings as Key Vault references (secrets), then flip
-   `WORLD_API_BASE_URL` **last** so federation only turns on once the credentials resolve:
+   ```powershell
+   $result = ./scripts/provision-world-onboarding.ps1 -WorldVault <worldKeyVaultName> `
+     -HmacSecretName aurora-hmac-v1 -CivVault <civKeyVaultName> `
+     -CivHmacSecretName civ-aurora-hmac-v1 -CivOnboardingSecretName civ-aurora-onboarding-v1 -Subscription $sub
+   $result.TokenHash   # non-secret; use for the World onboardingRecords (step 7)
+   ```
+
+   For an **external** civ whose vault you cannot reach, add `-RetainTransferFiles` (omit `-CivVault`):
+   the helper returns a secure temp path for manual transfer over an approved channel, after which you
+   run `./scripts/remove-secure-temp.ps1 -Path <path>`.
+
+   > **Alternative (shared vault, per-secret scope).** If you must reuse a shared vault instead of a
+   > dedicated civ vault, grant the civ MI a role assignment at the individual secret scope
+   > (`<vault id>/secrets/<name>`) and verify it — and STOP + fall back to a separate vault if
+   > secret-level scope is rejected. Never broaden the civ MI to the World vault.
+
+4. Set the civ app's `WORLD_*` settings as **versionless SecretUri** Key Vault references to the civ
+   vault, then flip `WORLD_API_BASE_URL` **last** so federation only turns on once the credentials
+   resolve:
 
    | Setting | Value |
    | --- | --- |
    | `WORLD_HMAC_SECRET` | `@Microsoft.KeyVault(SecretUri=https://<civVault>.vault.azure.net/secrets/civ-aurora-hmac-v1/)` |
-   | `WORLD_ONBOARDING_TOKEN` *or* `WORLD_CIV_ID`+`WORLD_KEY_ID` | KV reference / provisioned pair |
+   | `WORLD_ONBOARDING_TOKEN` | `@Microsoft.KeyVault(SecretUri=https://<civVault>.vault.azure.net/secrets/civ-aurora-onboarding-v1/)` |
    | `WORLD_DISPLAY_NAME` | optional display name |
    | `WORLD_API_BASE_URL` | the World `worldBaseUrl` output (set last) |
 
@@ -293,7 +286,7 @@ The P3 connector is off until `WORLD_API_BASE_URL` is set on the existing civ ap
    just civ-enable-federation $sub $rg nic-node-ai-0706162325 "https://<worldAppName>.azurewebsites.net/world/v1"
    ```
 
-4. Drive the connector via the civ admin API (behind `ADMIN_API_KEY`):
+5. Drive the connector via the civ admin API (behind `ADMIN_API_KEY`):
 
    ```powershell
    $civ = "https://nic-node-ai-0706162325.azurewebsites.net"
@@ -315,8 +308,15 @@ The P3 connector is off until `WORLD_API_BASE_URL` is set on the existing civ ap
   Removing `WORLD_API_BASE_URL` + restart disables the connector; the `federation` container and civ
   state are left intact.
 
-- **World app:** redeploy the retained previous artifact — `./publish/world.prev.zip` (checksum in
-  `./publish/world.zip.sha256`) — via `az webapp deploy --type zip --src-path ./publish/world.prev.zip`.
+- **World app:** roll back to the retained, checksum-verified previous artifact
+  (`./publish/world.prev.zip`, checksum `./publish/world.prev.zip.sha256`):
+
+  ```powershell
+  just world-deploy-prev bce49949-4505-4c57-9207-a84ce0f5c935 nicolas-node-ai-sandbox <worldAppName>
+  ```
+
+  `world-deploy-prev` verifies `world.prev.zip` against `world.prev.zip.sha256` before deploying and
+  re-gates on `/health` + `/health/ready`.
 - **World infra:** the templates are idempotent; re-deploy a known-good `main.bicepparam`. The
   `worldmap` database + durable containers persist independently of the app.
 
@@ -331,4 +331,5 @@ The P3 connector is off until `WORLD_API_BASE_URL` is set on the existing civ ap
 az deployment group what-if  -g nicolas-node-ai-sandbox --template-file infra/world/main.bicep --parameters infra/world/main.bicepparam
 az deployment group create   -g nicolas-node-ai-sandbox --template-file infra/world/main.bicep --parameters infra/world/main.bicepparam
 az deployment group create   -g nicolas-node-ai-sandbox --template-file infra/world/civ-federation-container.bicep
+az deployment group create   -g nicolas-node-ai-sandbox --template-file infra/world/civ-federation-secrets.bicep
 ```

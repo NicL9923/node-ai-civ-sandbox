@@ -1,16 +1,19 @@
 #!/usr/bin/env node
 // =====================================================================================================
-// check-world-infra.mjs — zero-dependency IaC guardrails for the World deployment.
+// check-world-infra.mjs — zero-dependency IaC + deployment-tooling guardrails for the World deployment.
 //
-//   (1) Container parity: infra/world/containers.json MUST match the runtime contract in
-//       WorldMap.Infrastructure.Cosmos.CosmosContainers (`All`, `TtlContainers`, `PartitionKeyPath`),
-//       so the Bicep-provisioned schema can't drift from what CosmosReadinessProbe validates.
-//   (2) No-secret scan: World Bicep/param/json files MUST NOT contain raw secret VALUES; the secret
-//       map MUST be wired via a versionless Key Vault SecretUri reference; purge protection MUST be
-//       unconditional (no param, never false).
+//   (1) Container parity: infra/world/containers.json MUST match WorldMap.Infrastructure.Cosmos
+//       .CosmosContainers (`All`, `TtlContainers`, `PartitionKeyPath`).
+//   (2) No-secret scan: World Bicep/param/json files AND the deployment tooling (Justfile, runbook,
+//       helper scripts) MUST NOT contain raw secret VALUES. The secret map MUST be wired via a
+//       versionless Key Vault SecretUri reference; purge protection MUST be unconditional.
 //   (3) Onboarding records: statically validate shape/format/uniqueness/ordering of onboardingRecords.
-//   (4) Secret-handling hygiene: deployment tooling (Justfile, runbook) MUST NOT use a non-CSPRNG
-//       generator, pass secrets as CLI --value args, or print raw token/HMAC/secret variables.
+//   (4) Secret-handling hygiene: deployment tooling MUST NOT use a non-CSPRNG generator, pass secrets
+//       as CLI --value args, or print/emit raw token/HMAC/secret variables.
+//   (5) Deploy tooling: the package/deploy scripts MUST verify checksums and gate on readiness.
+//
+// The detector primitives (RAW_VALUE_DENYLIST, SECRET_HANDLING_DENYLIST, scanContent) are exported so
+// scripts/check-world-infra.selftest.mjs can assert they catch adversarial fixtures.
 //
 // Exit code 0 = all checks pass; 1 = a check failed.
 // =====================================================================================================
@@ -23,25 +26,72 @@ const scriptDir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(scriptDir, '..');
 
 const WORLD_INFRA_DIR = resolve(repoRoot, 'infra/world');
+const SCRIPTS_DIR = resolve(repoRoot, 'scripts');
 const CONTAINERS_JSON = resolve(WORLD_INFRA_DIR, 'containers.json');
 const BICEPPARAM = resolve(WORLD_INFRA_DIR, 'main.bicepparam');
 const MAIN_BICEP = resolve(WORLD_INFRA_DIR, 'main.bicep');
+const DEPLOY_SCRIPT = resolve(SCRIPTS_DIR, 'deploy-world-app.ps1');
+const PACKAGE_SCRIPT = resolve(SCRIPTS_DIR, 'package-world-app.ps1');
 const COSMOS_CONTAINERS_CS = resolve(
   repoRoot,
   'apps/world-map/src/WorldMap.Infrastructure/Cosmos/CosmosContainers.cs',
 );
 
-// Scan EVERY hand-authored file in infra/world (not a fixed list) so a secret in a new file is covered.
-const SCAN_FILES = readdirSync(WORLD_INFRA_DIR)
+// Scan EVERY hand-authored file in infra/world so a secret in a new bicep/param/json file is covered.
+const INFRA_FILES = readdirSync(WORLD_INFRA_DIR)
   .filter((f) => /\.(bicep|bicepparam|json)$/.test(f))
   .map((f) => resolve(WORLD_INFRA_DIR, f));
 
-// Deployment tooling that handles secrets/tokens operationally.
+// Deployment tooling that handles secrets/tokens operationally: the Justfile, the runbook, and any
+// World/onboarding/secret helper script (dynamically discovered, so a new helper is auto-covered).
 const OPS_FILES = [
   resolve(repoRoot, 'Justfile'),
   resolve(repoRoot, 'docs/world-deployment-runbook.md'),
+  ...(existsSync(SCRIPTS_DIR)
+    ? readdirSync(SCRIPTS_DIR)
+        .filter((f) => f.endsWith('.ps1') && /world|onboarding|secret|secure/i.test(f))
+        .map((f) => resolve(SCRIPTS_DIR, f))
+    : []),
 ].filter(existsSync);
 
+// ---- Exported detector primitives -----------------------------------------------------------------
+
+// Raw secret VALUES that must never be committed. Key Vault references and secret NAMES/REFS are OK.
+export const RAW_VALUE_DENYLIST = [
+  { name: 'account key', re: /AccountKey\s*=\s*[A-Za-z0-9+/=]{10,}/ },
+  { name: 'shared access key', re: /SharedAccessKey\s*=\s*\S+/i },
+  { name: 'SAS token', re: /(sig|SharedAccessSignature)\s*=\s*[A-Za-z0-9%+/=]{20,}/ },
+  { name: 'PEM private key', re: /-----BEGIN [A-Z ]*PRIVATE KEY-----/ },
+  { name: 'cosmos/storage connection string', re: /AccountEndpoint\s*=.*AccountKey\s*=/i },
+  { name: 'inline password', re: /\bpassword\s*[:=]\s*['"][^'"\s]{6,}['"]/i },
+  // Raw onboarding token: only tokenHash is config. `\btoken\s*[:=]` matches `token:`/`Token =` but
+  // NOT `tokenHash:` nor `..._TOKEN=` (preceded by a word char, so no `\b`).
+  { name: 'raw onboarding token', re: /\btoken\s*[:=]\s*['"][^'"]+['"]/i },
+];
+
+// Unsafe secret HANDLING in deployment tooling.
+export const SECRET_HANDLING_DENYLIST = [
+  { name: 'non-CSPRNG Get-Random for secret material', re: /\bGet-Random\b/ },
+  { name: "'keyvault secret set' passing --value (use --file)", re: /keyvault\s+secret\s+set\b[^\n]*--value\b/i },
+  {
+    name: 'prints a raw secret/token variable',
+    re: /(Write-Host|Write-Output|Write-Information|Write-Verbose|Write-Debug|echo)\b[^\n]*\$(token|hmac|hmacSecret|secret|onboardingToken)\b/i,
+  },
+  { name: 'bare secret variable emitted to output', re: /^\s*\$(token|hmac|hmacSecret|secret|onboardingToken)\b\s*;?\s*$/i },
+];
+
+/** Scan file content line-by-line against a denylist; returns [{ name, line }] matches. */
+export function scanContent(content, denyList) {
+  const hits = [];
+  content.split(/\r?\n/).forEach((line, idx) => {
+    for (const { name, re } of denyList) {
+      if (re.test(line)) hits.push({ name, line: idx + 1 });
+    }
+  });
+  return hits;
+}
+
+// ---- Runtime state --------------------------------------------------------------------------------
 const rel = (p) => relative(repoRoot, p).replace(/\\/g, '/');
 const errors = [];
 
@@ -120,38 +170,22 @@ function checkContainerParity() {
 }
 
 // --------------------------------------------------------------------------------------------------
-// (2) No-secret scan + SecretUri enforcement + unconditional purge protection
+// (2) No-secret scan (infra + ops) + SecretUri enforcement + unconditional purge protection
 // --------------------------------------------------------------------------------------------------
 function checkNoSecrets() {
-  const denyList = [
-    { name: 'account key', re: /AccountKey\s*=\s*[A-Za-z0-9+/=]{10,}/ },
-    { name: 'shared access key', re: /SharedAccessKey\s*=\s*\S+/i },
-    { name: 'SAS token', re: /(sig|SharedAccessSignature)\s*=\s*[A-Za-z0-9%+/=]{20,}/ },
-    { name: 'PEM private key', re: /-----BEGIN [A-Z ]*PRIVATE KEY-----/ },
-    { name: 'cosmos/storage connection string', re: /AccountEndpoint\s*=.*AccountKey\s*=/i },
-    { name: 'inline password', re: /\bpassword\s*[:=]\s*['"][^'"\s]{6,}['"]/i },
-    // Raw onboarding token: only tokenHash is config. `\btoken\s*[:=]` matches `token:`/`Token =`
-    // but NOT `tokenHash:`/`TokenHash:`.
-    { name: 'raw onboarding token', re: /\btoken\s*[:=]\s*['"][^'"]+['"]/i },
-    // Purge protection must be unconditional: no parameter and never a false value.
-    { name: 're-introduced purge-protection parameter', re: /\bparam\s+enablePurgeProtection\b/ },
-    { name: 'purge protection disabled', re: /enablePurgeProtection\s*[:=]\s*false\b/i },
-  ];
-
   let clean = true;
-  for (const file of SCAN_FILES) {
-    const content = readFileSync(file, 'utf8');
-    content.split(/\r?\n/).forEach((line, idx) => {
-      for (const { name, re } of denyList) {
-        if (re.test(line)) {
-          clean = false;
-          errors.push(`no-secret: possible ${name} in ${rel(file)}:${idx + 1}`);
-        }
-      }
-    });
 
-    // The secret map MUST be a versionless Key Vault SecretUri reference — never a raw value and
-    // never the VaultName=;SecretName= form (which the security baseline rejects).
+  // Raw secret values must not appear in ANY infra or ops file.
+  for (const file of [...INFRA_FILES, ...OPS_FILES]) {
+    for (const { name, line } of scanContent(readFileSync(file, 'utf8'), RAW_VALUE_DENYLIST)) {
+      clean = false;
+      errors.push(`no-secret: possible ${name} in ${rel(file)}:${line}`);
+    }
+  }
+
+  // The secret map MUST be a versionless Key Vault SecretUri reference (never a raw value / VaultName=).
+  for (const file of INFRA_FILES) {
+    const content = readFileSync(file, 'utf8');
     if (content.includes('Secrets__Map__')) {
       if (/@Microsoft\.KeyVault\(VaultName=/.test(content)) {
         clean = false;
@@ -166,16 +200,20 @@ function checkNoSecrets() {
     }
   }
 
-  // main.bicep must positively assert unconditional purge protection.
-  const mainBicep = readFileSync(MAIN_BICEP, 'utf8');
-  if (!/enablePurgeProtection:\s*true\b/.test(mainBicep)) {
-    clean = false;
-    errors.push('no-secret: main.bicep must set Key Vault `enablePurgeProtection: true` unconditionally');
+  // Every Bicep vault MUST assert unconditional purge protection.
+  for (const file of INFRA_FILES.filter((f) => f.endsWith('.bicep'))) {
+    const content = readFileSync(file, 'utf8');
+    if (content.includes('Microsoft.KeyVault/vaults@')) {
+      if (!/enablePurgeProtection:\s*true\b/.test(content)) {
+        clean = false;
+        errors.push(`no-secret: ${rel(file)} declares a Key Vault without unconditional \`enablePurgeProtection: true\``);
+      }
+    }
   }
 
   if (clean) {
     console.log(
-      `no-secret: OK — scanned ${SCAN_FILES.length} files; SecretUri refs + unconditional purge protection`,
+      `no-secret: OK — scanned ${INFRA_FILES.length} infra + ${OPS_FILES.length} ops files; SecretUri refs + unconditional purge protection`,
     );
   }
 }
@@ -189,7 +227,7 @@ function extractActiveArrayLiteral(text, paramName) {
   const decl = new RegExp(`^param\\s+${paramName}\\s*=`);
   for (let i = 0; i < lines.length; i++) {
     const trimmed = lines[i].trim();
-    if (trimmed.startsWith('//')) continue; // skip commented example
+    if (trimmed.startsWith('//')) continue;
     if (decl.test(trimmed)) {
       start = i;
       break;
@@ -224,7 +262,6 @@ function checkOnboardingRecords() {
     return;
   }
 
-  // Each { ... } object block inside the array (records have no nested braces).
   const objectBlocks = [...literal.matchAll(/\{([^{}]*)\}/g)].map((m) => m[1]);
   const records = objectBlocks.map((block) => {
     const fields = {};
@@ -240,11 +277,11 @@ function checkOnboardingRecords() {
   }
 
   const patterns = {
-    tokenHash: /^[0-9a-f]{64}$/, // lowercase 64-hex SHA-256
+    tokenHash: /^[0-9a-f]{64}$/,
     civId: /^[A-Za-z0-9_-]{1,64}$/,
     keyId: /^[A-Za-z0-9_-]{1,64}$/,
-    secretRef: /^[A-Za-z0-9_-]{1,64}$/, // safe .NET env dictionary key
-    secretName: /^[0-9A-Za-z-]{1,127}$/, // valid Key Vault secret name
+    secretRef: /^[A-Za-z0-9_-]{1,64}$/,
+    secretName: /^[0-9A-Za-z-]{1,127}$/,
   };
   const uniqueness = {
     tokenHash: new Set(),
@@ -295,52 +332,79 @@ function checkOnboardingRecords() {
 }
 
 // --------------------------------------------------------------------------------------------------
-// (4) Secret-handling hygiene in deployment tooling (Justfile + runbook)
+// (4) Secret-handling hygiene in deployment tooling
 // --------------------------------------------------------------------------------------------------
 function checkSecretHandling() {
-  const denyList = [
-    { name: 'non-CSPRNG Get-Random for secret material', re: /\bGet-Random\b/ },
-    // `az keyvault secret set --value ...` exposes the secret in process args/shell history; use --file.
-    { name: "'keyvault secret set' passing --value (use --file)", re: /keyvault\s+secret\s+set\b[^\n]*--value\b/i },
-    // Printing a raw token/HMAC/secret variable. The trailing `\b` means `$token` matches but
-    // `$tokenHash` (a non-secret hash) does not.
-    {
-      name: 'prints a raw secret/token variable',
-      re: /(Write-Host|Write-Output|Write-Information|Write-Verbose|Write-Debug|echo)\b[^\n]*\$(token|hmac|hmacSecret|secret|onboardingToken)\b/i,
-    },
-    // A bare secret variable on its own line — PowerShell echoes it to the console.
-    { name: 'bare secret variable emitted to output', re: /^\s*\$(token|hmac|hmacSecret|secret|onboardingToken)\b\s*;?\s*$/i },
-  ];
-
   let clean = true;
   for (const file of OPS_FILES) {
-    const content = readFileSync(file, 'utf8');
-    content.split(/\r?\n/).forEach((line, idx) => {
-      for (const { name, re } of denyList) {
-        if (re.test(line)) {
-          clean = false;
-          errors.push(`secret-handling: ${name} in ${rel(file)}:${idx + 1}`);
-        }
-      }
-    });
+    for (const { name, line } of scanContent(readFileSync(file, 'utf8'), SECRET_HANDLING_DENYLIST)) {
+      clean = false;
+      errors.push(`secret-handling: ${name} in ${rel(file)}:${line}`);
+    }
   }
-
   if (clean) {
     console.log(`secret-handling: OK — scanned ${OPS_FILES.length} ops files (CSPRNG, --file, no printed secrets)`);
   }
 }
 
-checkContainerParity();
-checkNoSecrets();
-checkOnboardingRecords();
-checkSecretHandling();
+// --------------------------------------------------------------------------------------------------
+// (5) Deploy tooling: checksum verification + readiness gate must be present
+// --------------------------------------------------------------------------------------------------
+function checkDeployTooling() {
+  let clean = true;
+  const require = (file, needles) => {
+    if (!existsSync(file)) {
+      clean = false;
+      errors.push(`deploy-tooling: missing ${rel(file)}`);
+      return;
+    }
+    const content = readFileSync(file, 'utf8');
+    for (const { label, sub } of needles) {
+      if (!content.includes(sub)) {
+        clean = false;
+        errors.push(`deploy-tooling: ${rel(file)} is missing ${label} ('${sub}')`);
+      }
+    }
+  };
 
-if (errors.length > 0) {
-  console.error('\nWorld infra checks FAILED:');
-  for (const e of errors) {
-    console.error(`  - ${e}`);
+  // Deploy script: verify checksum before deploy AND gate on readiness, throwing on failure.
+  require(DEPLOY_SCRIPT, [
+    { label: 'checksum verification', sub: 'Get-FileHash' },
+    { label: 'checksum mismatch throw', sub: 'Checksum MISMATCH' },
+    { label: 'liveness probe', sub: '/health' },
+    { label: 'readiness probe', sub: '/health/ready' },
+    { label: 'readiness failure throw', sub: 'Health gate FAILED' },
+    { label: 'rollback pointer', sub: 'world.prev.zip' },
+  ]);
+
+  // Package script: retain the prior artifact AND its checksum, and checksum the new one.
+  require(PACKAGE_SCRIPT, [
+    { label: 'prior-artifact retention', sub: 'world.prev.zip' },
+    { label: 'prior-checksum retention', sub: 'world.prev.zip.sha256' },
+    { label: 'checksum generation', sub: 'Get-FileHash' },
+  ]);
+
+  if (clean) {
+    console.log('deploy-tooling: OK — checksum verification + readiness gate present');
   }
-  process.exit(1);
 }
 
-console.log('\nAll World infra checks passed.');
+function runAll() {
+  checkContainerParity();
+  checkNoSecrets();
+  checkOnboardingRecords();
+  checkSecretHandling();
+  checkDeployTooling();
+
+  if (errors.length > 0) {
+    console.error('\nWorld infra checks FAILED:');
+    for (const e of errors) console.error(`  - ${e}`);
+    process.exit(1);
+  }
+  console.log('\nAll World infra checks passed.');
+}
+
+// Only run when executed directly, so the self-test can import the detectors.
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  runAll();
+}

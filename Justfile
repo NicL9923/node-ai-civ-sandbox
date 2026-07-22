@@ -126,11 +126,14 @@ world:
 world-infra-build:
     az bicep build --file infra/world/main.bicep
     az bicep build --file infra/world/civ-federation-container.bicep
+    az bicep build --file infra/world/civ-federation-secrets.bicep
     az bicep build-params --file infra/world/main.bicepparam
 
-# Cosmos container parity (containers.json <-> CosmosContainers.cs) + no-committed-secret scan.
+# Cosmos container parity + no-secret + onboarding-record + secret-handling + deploy-tooling guard,
+# plus the guard's own detector self-test (negative fixtures).
 world-infra-check:
     node scripts/check-world-infra.mjs
+    node scripts/check-world-infra.selftest.mjs
 
 # Preview World infra changes without applying them.
 world-infra-whatif subscription resource_group:
@@ -144,35 +147,37 @@ world-infra-deploy subscription resource_group:
 world-federation-container subscription resource_group:
     az deployment group create --subscription {{subscription}} --resource-group {{resource_group}} --template-file infra/world/civ-federation-container.bicep
 
+# Provision the dedicated civ Key Vault (RBAC, purge protection) + civ MI Secrets User role. Additive.
+world-civ-secrets-vault subscription resource_group:
+    az deployment group create --subscription {{subscription}} --resource-group {{resource_group}} --template-file infra/world/civ-federation-secrets.bicep
+
+# Preview the civ Key Vault template.
+world-civ-secrets-vault-whatif subscription resource_group:
+    az deployment group what-if --subscription {{subscription}} --resource-group {{resource_group}} --template-file infra/world/civ-federation-secrets.bicep
+
 # Publish the World app (builds + bundles the observer SPA, fail-closed) to ./publish/world.
 world-publish:
     dotnet publish apps/world-map/src/WorldMap.Api/WorldMap.Api.csproj -c Release -o ./publish/world
 
-# Package the already-published World app (./publish/world) into a checksummed ZIP for deployment.
-# Preserves the prior ZIP as ./publish/world.prev.zip so a rollback artifact is always retained.
+# Package the published app into a checksummed ZIP, retaining the prior artifact + checksum for rollback.
 world-package:
-    if (-not (Test-Path ./publish/world/WorldMap.Api.dll)) { throw 'Run `just world-publish` first (no ./publish/world output).' }
-    if (Test-Path ./publish/world.zip) { Move-Item ./publish/world.zip ./publish/world.prev.zip -Force }
-    Compress-Archive -Path ./publish/world/* -DestinationPath ./publish/world.zip -Force
-    (Get-FileHash ./publish/world.zip -Algorithm SHA256).Hash | Tee-Object -FilePath ./publish/world.zip.sha256
+    ./scripts/package-world-app.ps1
 
-# ZIP-deploy the packaged World app, then verify liveness + readiness. Explicit sub/RG/app.
+# Deploy the packaged World app: verify checksum, then gate on /health + /health/ready (throws if unhealthy).
 world-deploy-app subscription resource_group app_name:
-    if (-not (Test-Path ./publish/world.zip)) { throw 'Run `just world-package` first (no ./publish/world.zip).' }
-    az webapp deploy --subscription {{subscription}} --resource-group {{resource_group}} --name {{app_name}} --type zip --src-path ./publish/world.zip
-    $base = "https://{{app_name}}.azurewebsites.net"; $ok = $false
-    foreach ($i in 1..30) { try { if ((Invoke-WebRequest "$base/health" -UseBasicParsing -TimeoutSec 10).StatusCode -eq 200) { $ok = $true; break } } catch {}; Start-Sleep 5 }
-    if (-not $ok) { throw "Liveness /health did not return 200 after deploy." }
-    try { $r = (Invoke-WebRequest "$base/health/ready" -UseBasicParsing -TimeoutSec 15).StatusCode } catch { $r = $_.Exception.Response.StatusCode.value__ }
-    Write-Host "Deployed. /health=200 /health/ready=$r (200 once schema + lease + secret refs are satisfied)."
+    ./scripts/deploy-world-app.ps1 -Subscription {{subscription}} -ResourceGroup {{resource_group}} -AppName {{app_name}}
 
-# Set a World HMAC secret in Key Vault out-of-band from a SECURE FILE (never a CLI value arg, which
-# would leak into process args/shell history). Create the file with restrictive ACLs, then delete it.
-world-provision-secret vault secret_name secret_file:
-    az keyvault secret set --vault-name {{vault}} --name {{secret_name}} --file {{secret_file}}
+# Roll back the World app to the retained previous artifact (checksum-verified, health-gated).
+world-deploy-prev subscription resource_group app_name:
+    ./scripts/deploy-world-app.ps1 -Rollback -Subscription {{subscription}} -ResourceGroup {{resource_group}} -AppName {{app_name}}
+
+# Securely generate + provision World (and optionally civ) onboarding credentials via the CSPRNG helper.
+# Emits only the non-secret tokenHash + names; raw material never touches args/output/history.
+world-provision-onboarding world_vault hmac_secret_name subscription:
+    ./scripts/provision-world-onboarding.ps1 -WorldVault {{world_vault}} -HmacSecretName {{hmac_secret_name}} -Subscription {{subscription}}
 
 # Enable civ->World federation on the EXISTING civ app (phase 2). Set the remaining WORLD_* settings
-# (HMAC/onboarding via Key Vault references) per the runbook before running this toggle.
+# (HMAC/onboarding via Key Vault SecretUri references to the civ vault) per the runbook before this toggle.
 civ-enable-federation subscription resource_group civ_app world_base_url:
     az webapp config appsettings set --subscription {{subscription}} --resource-group {{resource_group}} --name {{civ_app}} --settings WORLD_API_BASE_URL={{world_base_url}}
     az webapp restart --subscription {{subscription}} --resource-group {{resource_group}} --name {{civ_app}}

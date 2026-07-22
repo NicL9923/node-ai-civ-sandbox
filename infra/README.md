@@ -10,6 +10,7 @@ infra/
     main.bicep                      # World runtime (App Service + Cosmos worldmap DB + App Insights + Key Vault + RBAC)
     containers.json                 # Cosmos container / PK / TTL source of truth (lockstep with the runtime)
     civ-federation-container.bicep  # Additive `federation` container for the existing civ database
+    civ-federation-secrets.bicep    # Additive dedicated civ Key Vault + civ MI Secrets User role
     main.bicepparam                 # Example parameters (no secrets)
 ```
 
@@ -49,16 +50,19 @@ source of truth consumed by the Bicep (`loadJsonContent`) and asserted against t
 `CosmosContainers` by `scripts/check-world-infra.mjs` (run in CI + `npm run check:world-infra`).
 
 Secrets are never in the template: onboarding records carry only hashes/refs/names, and HMAC secret
-values are provisioned out-of-band into Key Vault (via a CSPRNG + `az keyvault secret set --file`
-workflow) and surfaced to the app via versionless **Key Vault SecretUri references**. Key Vault
-purge protection is enabled unconditionally. `world/civ-federation-container.bicep` additively ensures
-the `federation` container exists in the existing civ `sandbox` database without redeploying the
-civilization template.
+values are generated with a CSPRNG (`scripts/provision-world-onboarding.ps1`) and provisioned
+out-of-band into Key Vault (`az keyvault secret set --file`), surfaced to the app via versionless
+**Key Vault SecretUri references**. Key Vault purge protection is enabled unconditionally. Two additive
+templates touch the existing civ deployment without redeploying it:
+`world/civ-federation-container.bicep` (the `federation` container in the civ `sandbox` DB) and
+`world/civ-federation-secrets.bicep` (a dedicated civ Key Vault + the civ MI's vault-scoped Secrets
+User role, for least-privilege civ secret access).
 
-`scripts/check-world-infra.mjs` (CI + `npm run check:world-infra`) guards: container parity, no
-committed secret values, SecretUri-only references, unconditional purge protection, onboarding-record
-shape/format/uniqueness/ordering, and safe secret-handling in the deployment tooling (CSPRNG, no
-`--value` args, no printed secrets).
+`scripts/check-world-infra.mjs` + `check-world-infra.selftest.mjs` (CI + `npm run check:world-infra`)
+guard: container parity, no committed secret values (across infra **and** the Justfile/runbook/helper
+scripts), SecretUri-only references, unconditional purge protection, onboarding-record
+shape/format/uniqueness/ordering, safe secret-handling (CSPRNG, no `--value` args, no printed secrets),
+and the deploy tooling's checksum verification + readiness gate — with a negative-fixture self-test.
 
 Full provisioning (including a Cosmos capability inventory before choosing throughput mode), secure
 secret generation, checksummed publish/ZIP-deploy, verification, least-privilege civ enablement, and
