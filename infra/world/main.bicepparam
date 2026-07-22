@@ -33,10 +33,13 @@ param existingLogAnalyticsWorkspaceResourceId = ''
 
 // --- Key Vault ---
 // param keyVaultName = 'nicworldkvXXXXXXXX'
+// Purge protection is unconditionally enabled by the template (no parameter).
 param keyVaultPublicNetworkAccess = 'Enabled'
-param enablePurgeProtection = true
 
 // --- Onboarding (NON-SECRET; empty for the first deploy) ---
+// Keep records stably sorted by civId; each tokenHash/civId/keyId/secretRef/secretName must be unique.
+// tokenHash = lowercase 64-hex SHA-256; secretRef matches [A-Za-z0-9_-]{1,64}; secretName matches
+// [0-9A-Za-z-]{1,127}. Never include a raw `token`/`Token` value. (Enforced by scripts/check-world-infra.mjs.)
 // Example populated form (uncomment + edit AFTER the Key Vault secret exists):
 // param onboardingRecords = [
 //   {

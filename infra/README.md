@@ -49,14 +49,22 @@ source of truth consumed by the Bicep (`loadJsonContent`) and asserted against t
 `CosmosContainers` by `scripts/check-world-infra.mjs` (run in CI + `npm run check:world-infra`).
 
 Secrets are never in the template: onboarding records carry only hashes/refs/names, and HMAC secret
-values are provisioned out-of-band into Key Vault and surfaced to the app via Key Vault references.
-`world/civ-federation-container.bicep` additively ensures the `federation` container exists in the
-existing civ `sandbox` database without redeploying the civilization template.
+values are provisioned out-of-band into Key Vault (via a CSPRNG + `az keyvault secret set --file`
+workflow) and surfaced to the app via versionless **Key Vault SecretUri references**. Key Vault
+purge protection is enabled unconditionally. `world/civ-federation-container.bicep` additively ensures
+the `federation` container exists in the existing civ `sandbox` database without redeploying the
+civilization template.
 
-Full provisioning, secret generation, publish/ZIP-deploy, verification, civ enablement, and rollback
-steps are in [`docs/world-deployment-runbook.md`](../docs/world-deployment-runbook.md). Helper
-recipes: `just world-infra-build | world-infra-check | world-infra-whatif | world-infra-deploy |
-world-publish | world-deploy-app`. CI compiles all World templates + runs the parity/no-secret check
+`scripts/check-world-infra.mjs` (CI + `npm run check:world-infra`) guards: container parity, no
+committed secret values, SecretUri-only references, unconditional purge protection, onboarding-record
+shape/format/uniqueness/ordering, and safe secret-handling in the deployment tooling (CSPRNG, no
+`--value` args, no printed secrets).
+
+Full provisioning (including a Cosmos capability inventory before choosing throughput mode), secure
+secret generation, checksummed publish/ZIP-deploy, verification, least-privilege civ enablement, and
+rollback steps are in [`docs/world-deployment-runbook.md`](../docs/world-deployment-runbook.md).
+Helper recipes: `just world-infra-build | world-infra-check | world-infra-whatif | world-infra-deploy |
+world-publish | world-package | world-deploy-app`. CI compiles all World templates + runs the guard
 (no login, no deployment).
 
 ## Not included here

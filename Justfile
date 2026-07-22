@@ -148,14 +148,28 @@ world-federation-container subscription resource_group:
 world-publish:
     dotnet publish apps/world-map/src/WorldMap.Api/WorldMap.Api.csproj -c Release -o ./publish/world
 
-# ZIP-deploy a previously published World app.
-world-deploy-app subscription resource_group app_name:
+# Package the already-published World app (./publish/world) into a checksummed ZIP for deployment.
+# Preserves the prior ZIP as ./publish/world.prev.zip so a rollback artifact is always retained.
+world-package:
+    if (-not (Test-Path ./publish/world/WorldMap.Api.dll)) { throw 'Run `just world-publish` first (no ./publish/world output).' }
+    if (Test-Path ./publish/world.zip) { Move-Item ./publish/world.zip ./publish/world.prev.zip -Force }
     Compress-Archive -Path ./publish/world/* -DestinationPath ./publish/world.zip -Force
-    az webapp deploy --subscription {{subscription}} --resource-group {{resource_group}} --name {{app_name}} --type zip --src-path ./publish/world.zip
+    (Get-FileHash ./publish/world.zip -Algorithm SHA256).Hash | Tee-Object -FilePath ./publish/world.zip.sha256
 
-# Set a World HMAC secret in Key Vault out-of-band. The value is supplied at runtime; never committed.
-world-provision-secret vault secret_name secret_value:
-    az keyvault secret set --vault-name {{vault}} --name {{secret_name}} --value {{secret_value}}
+# ZIP-deploy the packaged World app, then verify liveness + readiness. Explicit sub/RG/app.
+world-deploy-app subscription resource_group app_name:
+    if (-not (Test-Path ./publish/world.zip)) { throw 'Run `just world-package` first (no ./publish/world.zip).' }
+    az webapp deploy --subscription {{subscription}} --resource-group {{resource_group}} --name {{app_name}} --type zip --src-path ./publish/world.zip
+    $base = "https://{{app_name}}.azurewebsites.net"; $ok = $false
+    foreach ($i in 1..30) { try { if ((Invoke-WebRequest "$base/health" -UseBasicParsing -TimeoutSec 10).StatusCode -eq 200) { $ok = $true; break } } catch {}; Start-Sleep 5 }
+    if (-not $ok) { throw "Liveness /health did not return 200 after deploy." }
+    try { $r = (Invoke-WebRequest "$base/health/ready" -UseBasicParsing -TimeoutSec 15).StatusCode } catch { $r = $_.Exception.Response.StatusCode.value__ }
+    Write-Host "Deployed. /health=200 /health/ready=$r (200 once schema + lease + secret refs are satisfied)."
+
+# Set a World HMAC secret in Key Vault out-of-band from a SECURE FILE (never a CLI value arg, which
+# would leak into process args/shell history). Create the file with restrictive ACLs, then delete it.
+world-provision-secret vault secret_name secret_file:
+    az keyvault secret set --vault-name {{vault}} --name {{secret_name}} --file {{secret_file}}
 
 # Enable civ->World federation on the EXISTING civ app (phase 2). Set the remaining WORLD_* settings
 # (HMAC/onboarding via Key Vault references) per the runbook before running this toggle.

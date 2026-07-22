@@ -73,8 +73,8 @@ param keyVaultName string = 'nicworldkv${take(uniqueString(resourceGroup().id), 
 @description('Key Vault public network access. Acceptable to leave Enabled for sandbox; Disabled for locked-down environments.')
 param keyVaultPublicNetworkAccess string = 'Enabled'
 
-@description('Enable Key Vault purge protection. Irreversible once enabled; leave true for production, may be false for throwaway sandboxes.')
-param enablePurgeProtection bool = true
+// NOTE: Key Vault purge protection is UNCONDITIONALLY enabled below (no parameter / disable switch),
+// per the security baseline — a soft-deleted secret store must not be permanently purged by bypass.
 
 @description('''Operator-preprovisioned onboarding bindings (NON-SECRET). Each object:
   { tokenHash: lowercase-hex SHA-256 of the onboarding token, civId, keyId, secretRef, secretName }.
@@ -90,6 +90,11 @@ var worldHostName = '${worldAppName}.azurewebsites.net'
 var worldBaseUrl = 'https://${worldHostName}/world/v1'
 
 var createWorkspace = empty(existingLogAnalyticsWorkspaceResourceId)
+
+// Deterministic Key Vault URI (usable at deploy start, unlike keyVault.properties.vaultUri which is a
+// runtime value). environment().suffixes.keyvaultDns already includes the leading dot and the value
+// ends with a trailing slash, so `${keyVaultUri}secrets/<name>/` yields a valid versionless SecretUri.
+var keyVaultUri = 'https://${keyVaultName}${environment().suffixes.keyvaultDns}/'
 
 // Cosmos data-plane RBAC built-in role: "Cosmos DB Built-in Data Contributor".
 var cosmosDataContributorRoleId = '00000000-0000-0000-0000-000000000002'
@@ -145,7 +150,7 @@ resource keyVault 'Microsoft.KeyVault/vaults@2023-07-01' = {
     enableRbacAuthorization: true
     enableSoftDelete: true
     softDeleteRetentionInDays: 90
-    enablePurgeProtection: enablePurgeProtection ? true : null
+    enablePurgeProtection: true
     publicNetworkAccess: keyVaultPublicNetworkAccess
     networkAcls: {
       defaultAction: 'Allow'
@@ -260,8 +265,21 @@ var baseAppSettings = [
     value: 'true'
   }
   {
+    name: 'WorldMap__Storage__SingleWriterLease__LeaseDurationSeconds'
+    value: '30'
+  }
+  {
+    name: 'WorldMap__Storage__SingleWriterLease__RenewIntervalSeconds'
+    value: '10'
+  }
+  {
     name: 'WorldMap__Telemetry__AzureMonitorConnectionString'
     value: appInsights.properties.ConnectionString
+  }
+  {
+    // ZIP deploy ships a pre-built publish output; never let Oryx rebuild on the server.
+    name: 'SCM_DO_BUILD_DURING_DEPLOYMENT'
+    value: 'false'
   }
 ]
 
@@ -290,11 +308,13 @@ var onboardingSettingGroups = [
 var onboardingSettings = flatten(onboardingSettingGroups)
 
 // Secret map: WorldMap__Secrets__Map__<secretRef> -> Key Vault reference to `secretName`.
+// Versionless SecretUri form (trailing slash => always latest version). keyVaultUri ends with a slash,
+// so `${keyVaultUri}secrets/${name}/` yields https://<vault>/secrets/<name>/ with no double slash.
 // The secret VALUE must be provisioned in Key Vault out-of-band before the reference resolves.
 var secretMapSettings = [
   for record in onboardingRecords: {
     name: 'WorldMap__Secrets__Map__${record.secretRef}'
-    value: '@Microsoft.KeyVault(VaultName=${keyVaultName};SecretName=${record.secretName})'
+    value: '@Microsoft.KeyVault(SecretUri=${keyVaultUri}secrets/${record.secretName}/)'
   }
 ]
 
@@ -334,7 +354,10 @@ resource cosmosDataContributor 'Microsoft.DocumentDB/databaseAccounts/sqlRoleAss
   properties: {
     principalId: worldApp.identity.principalId
     roleDefinitionId: '${existingCosmos.id}/sqlRoleDefinitions/${cosmosDataContributorRoleId}'
-    // Cosmos native RBAC data-plane scope (distinct from the ARM /sqlDatabases path).
+    // Cosmos native data-plane RBAC scope. The database-level form is the fully-qualified account
+    // resource id + `/dbs/<database>` (documented as a valid data-plane scope by Microsoft Learn:
+    // learn.microsoft.com/azure/cosmos-db/nosql — "Grant data plane role-based access"). This is the
+    // least-privilege scope: the World MI can read/write only the worldmap DB, not the civ sandbox DB.
     scope: '${existingCosmos.id}/dbs/${worldDatabaseName}'
   }
   dependsOn: [
