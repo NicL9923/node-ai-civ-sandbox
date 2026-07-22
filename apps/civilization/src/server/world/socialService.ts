@@ -67,12 +67,18 @@ export class SocialService implements SocialPort {
 
   // --- state lifecycle -------------------------------------------------------
 
-  async ensureState(): Promise<SocialStateDoc> {
+  /**
+   * Return the persisted social state, or a fresh in-memory default WITHOUT persisting it. Reads never
+   * write, so the state doc is only ever created/updated from inside `runExclusive` (via `saveState` in a
+   * mutator) — there is no unlocked write that could lose a first-init update against an overlapping loop.
+   */
+  async getState(): Promise<SocialStateDoc> {
     const existing = await this.store.getSocialState(this.simulationId);
-    if (existing) {
-      return existing;
-    }
-    const state: SocialStateDoc = {
+    return existing ?? this.freshState();
+  }
+
+  private freshState(): SocialStateDoc {
+    return {
       id: SOCIAL_STATE_ID,
       simulationId: this.simulationId,
       kind: "social",
@@ -83,12 +89,6 @@ export class SocialService implements SocialPort {
       seenReplyPostIds: [],
       updatedAt: nowIso()
     };
-    await this.store.putSocialState(state);
-    return state;
-  }
-
-  async getState(): Promise<SocialStateDoc> {
-    return this.ensureState();
   }
 
   private async saveState(state: SocialStateDoc): Promise<void> {
