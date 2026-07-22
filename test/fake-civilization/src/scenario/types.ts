@@ -4,6 +4,16 @@ import type { SigningFault, SyncResult } from "../fake-civilization.js";
 
 export type Primitive = string | number | boolean | null;
 
+export interface ScenarioValueReference {
+  valueFrom: string;
+}
+
+export type ScenarioInput<T> =
+  T extends Primitive ? T | ScenarioValueReference
+    : T extends Array<infer Item> ? Array<ScenarioInput<Item>>
+      : T extends object ? { [Key in keyof T]: ScenarioInput<T[Key]> }
+        : T;
+
 export interface ScenarioActor {
   displayName: string;
   credentialRef: string;
@@ -21,6 +31,11 @@ type NetworkStepMetadata = {
   expectError?: ExpectedScenarioError;
 };
 
+export type SocialPageInput = {
+  cursor?: ScenarioInput<string>;
+  limit?: number;
+};
+
 export type ReplayableScenarioStep = NetworkStepMetadata & (
   | { op: "register"; actor: string; idempotencyKey?: string }
   | { op: "heartbeat"; actor: string }
@@ -34,6 +49,39 @@ export type ReplayableScenarioStep = NetworkStepMetadata & (
   | { op: "listCivilizations"; actor: string; after?: string; limit?: number }
   | { op: "listRelationships"; actor: string; query?: { after?: string; limit?: number; civA?: string; civB?: string } }
   | { op: "listEvents"; actor: string; after?: string; limit?: number }
+  | { op: "syncSocialAccounts"; actor: string; body: ScenarioInput<components["schemas"]["SocialAccountSyncRequest"]>; idempotencyKey?: string }
+  | { op: "getSocialAccount"; actor: string; accountId: ScenarioInput<string> }
+  | ({ op: "listSocialAccountPosts"; actor: string; accountId: ScenarioInput<string> } & SocialPageInput)
+  | ({ op: "listSocialFollowingFeed"; actor: string; accountId: ScenarioInput<string> } & SocialPageInput)
+  | ({ op: "listSocialFollowers"; actor: string; accountId: ScenarioInput<string> } & SocialPageInput)
+  | ({ op: "listSocialFollowing"; actor: string; accountId: ScenarioInput<string> } & SocialPageInput)
+  | {
+      op: "setSocialFollow";
+      actor: string;
+      accountId: ScenarioInput<string>;
+      targetAccountId: ScenarioInput<string>;
+      body: ScenarioInput<components["schemas"]["SocialFollowSetRequest"]>;
+      idempotencyKey?: string;
+    }
+  | ({ op: "listSocialGlobalFeed"; actor: string } & SocialPageInput)
+  | { op: "createSocialPost"; actor: string; body: ScenarioInput<components["schemas"]["SocialPostCreateRequest"]>; idempotencyKey?: string }
+  | { op: "getSocialPost"; actor: string; postId: ScenarioInput<string> }
+  | ({ op: "getSocialThread"; actor: string; postId: ScenarioInput<string> } & SocialPageInput)
+  | {
+      op: "tombstoneSocialPost";
+      actor: string;
+      postId: ScenarioInput<string>;
+      body: ScenarioInput<components["schemas"]["SocialPostTombstoneRequest"]>;
+      idempotencyKey?: string;
+    }
+  | {
+      op: "setSocialPostLike";
+      actor: string;
+      postId: ScenarioInput<string>;
+      accountId: ScenarioInput<string>;
+      body: ScenarioInput<components["schemas"]["SocialReactionSetRequest"]>;
+      idempotencyKey?: string;
+    }
 );
 
 export type ScenarioStep =
@@ -41,7 +89,14 @@ export type ScenarioStep =
   | { id?: string; op: "setOnline"; actor: string; online: boolean }
   | { id?: string; op: "setAuthFault"; actor: string; fault: SigningFault }
   | { id?: string; op: "replay"; stepId: string; saveAs?: string; expectError?: ExpectedScenarioError }
-  | { id?: string; op: "assert"; actual: string; equals?: Primitive; contains?: Primitive }
+  | {
+      id?: string;
+      op: "assert";
+      actual: string;
+      exists?: boolean;
+      equals?: ScenarioInput<Primitive>;
+      contains?: ScenarioInput<Primitive>;
+    }
   | { id?: string; op: "arrange"; action: string; value?: unknown };
 
 export interface Scenario {
@@ -69,6 +124,19 @@ export interface ScenarioCivilization {
   listCivilizations(after?: string, limit?: number): Promise<components["schemas"]["CivilizationListPage"]>;
   listRelationships(query?: { after?: string; limit?: number; civA?: string; civB?: string }): Promise<components["schemas"]["RelationshipPage"]>;
   listEvents(after?: string, limit?: number): Promise<components["schemas"]["EventPage"]>;
+  syncSocialAccounts(body: components["schemas"]["SocialAccountSyncRequest"], idempotencyKey?: string): Promise<components["schemas"]["SocialAccountSyncResponse"]>;
+  getSocialAccount(accountId: string): Promise<components["schemas"]["SocialAccount"]>;
+  listSocialAccountPosts(accountId: string, query?: SocialPageInput): Promise<components["schemas"]["SocialPostPage"]>;
+  listSocialFollowingFeed(accountId: string, query?: SocialPageInput): Promise<components["schemas"]["SocialPostPage"]>;
+  listSocialFollowers(accountId: string, query?: SocialPageInput): Promise<components["schemas"]["SocialAccountPage"]>;
+  listSocialFollowing(accountId: string, query?: SocialPageInput): Promise<components["schemas"]["SocialAccountPage"]>;
+  setSocialFollow(accountId: string, targetAccountId: string, body: components["schemas"]["SocialFollowSetRequest"], idempotencyKey?: string): Promise<components["schemas"]["SocialFollow"]>;
+  listSocialGlobalFeed(query?: SocialPageInput): Promise<components["schemas"]["SocialPostPage"]>;
+  createSocialPost(body: components["schemas"]["SocialPostCreateRequest"], idempotencyKey?: string): Promise<components["schemas"]["SocialPost"]>;
+  getSocialPost(postId: string): Promise<components["schemas"]["SocialPost"]>;
+  getSocialThread(postId: string, query?: SocialPageInput): Promise<components["schemas"]["SocialThreadPage"]>;
+  tombstoneSocialPost(postId: string, body: components["schemas"]["SocialPostTombstoneRequest"], idempotencyKey?: string): Promise<components["schemas"]["SocialPost"]>;
+  setSocialPostLike(postId: string, accountId: string, body: components["schemas"]["SocialReactionSetRequest"], idempotencyKey?: string): Promise<components["schemas"]["SocialReaction"]>;
   setSigningFault(fault: SigningFault): void;
 }
 

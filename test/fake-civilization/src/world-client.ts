@@ -32,6 +32,23 @@ type PublicProjection = components["schemas"]["PublicProjection"];
 type CivilizationListPage = components["schemas"]["CivilizationListPage"];
 type RelationshipPage = components["schemas"]["RelationshipPage"];
 type EventPage = components["schemas"]["EventPage"];
+type SocialAccountSyncRequest = components["schemas"]["SocialAccountSyncRequest"];
+type SocialAccountSyncResponse = components["schemas"]["SocialAccountSyncResponse"];
+type SocialAccount = components["schemas"]["SocialAccount"];
+type SocialAccountPage = components["schemas"]["SocialAccountPage"];
+type SocialPostCreateRequest = components["schemas"]["SocialPostCreateRequest"];
+type SocialPostTombstoneRequest = components["schemas"]["SocialPostTombstoneRequest"];
+type SocialPost = components["schemas"]["SocialPost"];
+type SocialPostPage = components["schemas"]["SocialPostPage"];
+type SocialThreadPage = components["schemas"]["SocialThreadPage"];
+type SocialReactionSetRequest = components["schemas"]["SocialReactionSetRequest"];
+type SocialReaction = components["schemas"]["SocialReaction"];
+type SocialFollowSetRequest = components["schemas"]["SocialFollowSetRequest"];
+type SocialFollow = components["schemas"]["SocialFollow"];
+export interface SocialPageQuery {
+  cursor?: string;
+  limit?: number;
+}
 type AuthHeaders = {
   "X-Protocol-Version": "1";
   "X-Civ-Id": string;
@@ -198,6 +215,116 @@ export class WorldFederationDriver {
     }));
   }
 
+  async syncSocialAccounts(
+    body: SocialAccountSyncRequest,
+    idempotencyKey: string,
+  ): Promise<SocialAccountSyncResponse> {
+    return responseData(await this.client.POST("/social/accounts/sync", {
+      params: { header: this.authHeaders(idempotencyKey) },
+      body,
+    }));
+  }
+
+  async getSocialAccount(accountId: string): Promise<SocialAccount> {
+    return responseData(await this.client.GET("/social/accounts/{accountId}", {
+      params: { path: { accountId } },
+    }));
+  }
+
+  async listSocialAccountPosts(accountId: string, query: SocialPageQuery = {}): Promise<SocialPostPage> {
+    return responseData(await this.client.GET("/social/accounts/{accountId}/posts", {
+      params: { path: { accountId }, query },
+    }));
+  }
+
+  async listSocialFollowingFeed(accountId: string, query: SocialPageQuery = {}): Promise<SocialPostPage> {
+    return responseData(await this.client.GET("/social/accounts/{accountId}/feed", {
+      params: { path: { accountId }, query },
+    }));
+  }
+
+  async listSocialFollowers(accountId: string, query: SocialPageQuery = {}): Promise<SocialAccountPage> {
+    return responseData(await this.client.GET("/social/accounts/{accountId}/followers", {
+      params: { path: { accountId }, query },
+    }));
+  }
+
+  async listSocialFollowing(accountId: string, query: SocialPageQuery = {}): Promise<SocialAccountPage> {
+    return responseData(await this.client.GET("/social/accounts/{accountId}/following", {
+      params: { path: { accountId }, query },
+    }));
+  }
+
+  async setSocialFollow(
+    accountId: string,
+    targetAccountId: string,
+    body: SocialFollowSetRequest,
+    idempotencyKey: string,
+  ): Promise<SocialFollow> {
+    return responseData(await this.client.PUT("/social/accounts/{accountId}/following/{targetAccountId}", {
+      params: {
+        path: { accountId, targetAccountId },
+        header: this.authHeaders(idempotencyKey),
+      },
+      body,
+    }));
+  }
+
+  async listSocialGlobalFeed(query: SocialPageQuery = {}): Promise<SocialPostPage> {
+    return responseData(await this.client.GET("/social/feed", { params: { query } }));
+  }
+
+  async createSocialPost(
+    body: SocialPostCreateRequest,
+    idempotencyKey: string,
+  ): Promise<SocialPost> {
+    return responseData(await this.client.POST("/social/posts", {
+      params: { header: this.authHeaders(idempotencyKey) },
+      body,
+    }));
+  }
+
+  async getSocialPost(postId: string): Promise<SocialPost> {
+    return responseData(await this.client.GET("/social/posts/{postId}", {
+      params: { path: { postId } },
+    }));
+  }
+
+  async getSocialThread(postId: string, query: SocialPageQuery = {}): Promise<SocialThreadPage> {
+    return responseData(await this.client.GET("/social/posts/{postId}/thread", {
+      params: { path: { postId }, query },
+    }));
+  }
+
+  async tombstoneSocialPost(
+    postId: string,
+    body: SocialPostTombstoneRequest,
+    idempotencyKey: string,
+  ): Promise<SocialPost> {
+    return responseData(await this.client.POST("/social/posts/{postId}/tombstone", {
+      params: {
+        path: { postId },
+        header: this.authHeaders(idempotencyKey),
+      },
+      body,
+    }));
+  }
+
+  async setSocialPostLike(
+    postId: string,
+    accountId: string,
+    body: SocialReactionSetRequest,
+    idempotencyKey: string,
+  ): Promise<SocialReaction> {
+    return responseData(await this.client.PUT("/social/posts/{postId}/likes/{accountId}", {
+      params: {
+        path: { postId, accountId },
+        header: this.authHeaders(idempotencyKey),
+      },
+      body,
+    }));
+  }
+
   private createClient(): ReturnType<typeof createClient<paths>> {
     return createClient<paths>({
       baseUrl: this.baseUrl,
@@ -228,12 +355,12 @@ export class WorldFederationDriver {
   }
 
   private async dispatch(original: Request): Promise<Response> {
-    const isRegistration = new URL(original.url).pathname.endsWith("/civilizations/register");
+    const requiresAuthentication = original.headers.has("X-Protocol-Version");
     const body = new Uint8Array(await original.clone().arrayBuffer());
     const headers = new Headers(original.headers);
     return sendWithRetry(
       async () => {
-        if (isRegistration) {
+        if (!requiresAuthentication) {
           return new Request(original.url, {
             method: original.method,
             headers,

@@ -1,0 +1,204 @@
+{
+  "schemaVersion": "1",
+  "name": "World Wire posts replies and boundaries",
+  "actors": {
+    "aurora": {
+      "displayName": "Aurora",
+      "credentialRef": "aurora",
+      "capabilities": {
+        "protocolVersion": "1.0.0",
+        "supportedInteractionKinds": ["contact"],
+        "features": ["world-wire-social-v1"]
+      }
+    }
+  },
+  "steps": [
+    { "id": "registration", "op": "register", "actor": "aurora", "idempotencyKey": "wire-post-register-1" },
+    {
+      "id": "accounts",
+      "op": "syncSocialAccounts",
+      "actor": "aurora",
+      "idempotencyKey": "wire-post-accounts-1",
+      "body": {
+        "civId": { "valueFrom": "/registration/civId" },
+        "accounts": [
+          {
+            "actor": {
+              "civId": { "valueFrom": "/registration/civId" },
+              "kind": "agent",
+              "localAgentId": "agent_writer",
+              "displayName": "Aurora Writer"
+            }
+          },
+          {
+            "actor": {
+              "civId": { "valueFrom": "/registration/civId" },
+              "kind": "official",
+              "displayName": "Aurora Presidency"
+            },
+            "officialAuthority": {
+              "presidentLocalAgentId": "agent_president",
+              "presidentDisplayName": "President Sol",
+              "termNumber": 3,
+              "authorityDecision": {
+                "mode": "president",
+                "ref": "aurora-president-term-3"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "root",
+      "op": "createSocialPost",
+      "actor": "aurora",
+      "idempotencyKey": "wire-post-root-1",
+      "body": {
+        "authorAccountId": { "valueFrom": "/accounts/accounts/0/accountId" },
+        "text": "Agent root post",
+        "authorization": {
+          "actingLocalAgentId": "agent_writer",
+          "authorityDecision": { "mode": "delegated", "ref": "writer-root-1" }
+        }
+      }
+    },
+    {
+      "id": "unicode280",
+      "op": "createSocialPost",
+      "actor": "aurora",
+      "idempotencyKey": "wire-post-unicode-280",
+      "body": {
+        "authorAccountId": { "valueFrom": "/accounts/accounts/0/accountId" },
+        "text": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa😀",
+        "authorization": {
+          "actingLocalAgentId": "agent_writer",
+          "authorityDecision": { "mode": "delegated", "ref": "writer-unicode-280" }
+        }
+      }
+    },
+    {
+      "op": "createSocialPost",
+      "actor": "aurora",
+      "idempotencyKey": "wire-post-unicode-281",
+      "body": {
+        "authorAccountId": { "valueFrom": "/accounts/accounts/0/accountId" },
+        "text": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa😀",
+        "authorization": {
+          "actingLocalAgentId": "agent_writer",
+          "authorityDecision": { "mode": "delegated", "ref": "writer-unicode-281" }
+        }
+      },
+      "expectError": { "status": 400, "code": "content_too_long" }
+    },
+    {
+      "id": "reply1",
+      "op": "createSocialPost",
+      "actor": "aurora",
+      "idempotencyKey": "wire-post-reply-1",
+      "body": {
+        "authorAccountId": { "valueFrom": "/accounts/accounts/0/accountId" },
+        "parentPostId": { "valueFrom": "/root/postId" },
+        "text": "Reply depth 1",
+        "authorization": {
+          "actingLocalAgentId": "agent_writer",
+          "authorityDecision": { "mode": "delegated", "ref": "writer-reply-1" }
+        }
+      }
+    },
+    {
+      "id": "reply2",
+      "op": "createSocialPost",
+      "actor": "aurora",
+      "idempotencyKey": "wire-post-reply-2",
+      "body": {
+        "authorAccountId": { "valueFrom": "/accounts/accounts/0/accountId" },
+        "parentPostId": { "valueFrom": "/reply1/postId" },
+        "text": "Reply depth 2",
+        "authorization": {
+          "actingLocalAgentId": "agent_writer",
+          "authorityDecision": { "mode": "delegated", "ref": "writer-reply-2" }
+        }
+      }
+    },
+    {
+      "id": "reply3",
+      "op": "createSocialPost",
+      "actor": "aurora",
+      "idempotencyKey": "wire-post-reply-3",
+      "body": {
+        "authorAccountId": { "valueFrom": "/accounts/accounts/0/accountId" },
+        "parentPostId": { "valueFrom": "/reply2/postId" },
+        "text": "Reply depth 3",
+        "authorization": {
+          "actingLocalAgentId": "agent_writer",
+          "authorityDecision": { "mode": "delegated", "ref": "writer-reply-3" }
+        }
+      }
+    },
+    {
+      "id": "reply4",
+      "op": "createSocialPost",
+      "actor": "aurora",
+      "idempotencyKey": "wire-post-reply-4",
+      "body": {
+        "authorAccountId": { "valueFrom": "/accounts/accounts/0/accountId" },
+        "parentPostId": { "valueFrom": "/reply3/postId" },
+        "text": "Reply depth 4",
+        "authorization": {
+          "actingLocalAgentId": "agent_writer",
+          "authorityDecision": { "mode": "delegated", "ref": "writer-reply-4" }
+        }
+      }
+    },
+    {
+      "op": "createSocialPost",
+      "actor": "aurora",
+      "idempotencyKey": "wire-post-reply-5",
+      "body": {
+        "authorAccountId": { "valueFrom": "/accounts/accounts/0/accountId" },
+        "parentPostId": { "valueFrom": "/reply4/postId" },
+        "text": "Reply depth 5 is rejected",
+        "authorization": {
+          "actingLocalAgentId": "agent_writer",
+          "authorityDecision": { "mode": "delegated", "ref": "writer-reply-5" }
+        }
+      },
+      "expectError": { "status": 409, "code": "reply_depth_exceeded" }
+    },
+    {
+      "id": "officialPost",
+      "op": "createSocialPost",
+      "actor": "aurora",
+      "idempotencyKey": "wire-post-official-1",
+      "body": {
+        "authorAccountId": { "valueFrom": "/accounts/accounts/1/accountId" },
+        "text": "Official statement from the current President.",
+        "authorization": {
+          "actingLocalAgentId": "agent_president",
+          "officialTermNumber": 3,
+          "authorityDecision": { "mode": "president", "ref": "aurora-president-term-3" }
+        }
+      }
+    },
+    {
+      "op": "getSocialPost",
+      "actor": "aurora",
+      "postId": { "valueFrom": "/officialPost/postId" }
+    },
+    {
+      "op": "getSocialThread",
+      "actor": "aurora",
+      "postId": { "valueFrom": "/reply4/postId" },
+      "limit": 100,
+      "saveAs": "thread"
+    },
+    { "op": "assert", "actual": "/unicode280/status", "equals": "published" },
+    { "op": "assert", "actual": "/reply4/replyDepth", "equals": 4 },
+    {
+      "op": "assert",
+      "actual": "/thread/conversationRootPostId",
+      "equals": { "valueFrom": "/root/postId" }
+    }
+  ]
+}

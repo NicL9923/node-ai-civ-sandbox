@@ -185,16 +185,15 @@ function retryAfterMilliseconds(
   response: Response,
   clock: RetryClock,
   fallbackDelay: number,
-  maxDelay: number,
 ): number {
   const value = response.headers.get("retry-after");
   if (!value) return fallbackDelay;
   if (/^\d+$/u.test(value.trim())) {
-    return Math.min(maxDelay, Number(value.trim()) * 1_000);
+    return Number(value.trim()) * 1_000;
   }
   const date = Date.parse(value);
   if (Number.isNaN(date)) return fallbackDelay;
-  return Math.min(maxDelay, Math.max(0, date - clock.now().getTime()));
+  return Math.max(0, date - clock.now().getTime());
 }
 
 function isRetryableResponse(response: Response, problem: ProblemDetails | undefined): boolean {
@@ -227,7 +226,7 @@ export async function sendWithRetry(
         policy.maxDelayMs,
         policy.initialDelayMs * 2 ** (attempt - 1),
       );
-      await sleeper.sleep(retryAfterMilliseconds(response, clock, fallbackDelay, policy.maxDelayMs));
+      await sleeper.sleep(retryAfterMilliseconds(response, clock, fallbackDelay));
     } catch (error) {
       if (!(error instanceof TransientTransportError)) throw error;
       lastError = error;

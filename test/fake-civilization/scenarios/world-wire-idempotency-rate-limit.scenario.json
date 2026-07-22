@@ -1,0 +1,85 @@
+{
+  "schemaVersion": "1",
+  "name": "World Wire idempotency and rate limit",
+  "actors": {
+    "aurora": {
+      "displayName": "Aurora",
+      "credentialRef": "aurora",
+      "capabilities": {
+        "protocolVersion": "1.0.0",
+        "supportedInteractionKinds": ["contact"],
+        "features": ["world-wire-social-v1"]
+      }
+    }
+  },
+  "steps": [
+    { "id": "registration", "op": "register", "actor": "aurora", "idempotencyKey": "wire-idem-register-1" },
+    {
+      "id": "accounts",
+      "op": "syncSocialAccounts",
+      "actor": "aurora",
+      "idempotencyKey": "wire-idem-accounts-1",
+      "body": {
+        "civId": { "valueFrom": "/registration/civId" },
+        "accounts": [
+          {
+            "actor": {
+              "civId": { "valueFrom": "/registration/civId" },
+              "kind": "agent",
+              "localAgentId": "agent_writer",
+              "displayName": "Aurora Writer"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "originalPost",
+      "op": "createSocialPost",
+      "actor": "aurora",
+      "idempotencyKey": "wire-idem-post-1",
+      "body": {
+        "authorAccountId": { "valueFrom": "/accounts/accounts/0/accountId" },
+        "text": "Stable bytes",
+        "authorization": {
+          "actingLocalAgentId": "agent_writer",
+          "authorityDecision": { "mode": "delegated", "ref": "writer-post-1" }
+        }
+      }
+    },
+    { "op": "replay", "stepId": "originalPost", "saveAs": "replayedPost" },
+    {
+      "op": "createSocialPost",
+      "actor": "aurora",
+      "idempotencyKey": "wire-idem-post-1",
+      "body": {
+        "authorAccountId": { "valueFrom": "/accounts/accounts/0/accountId" },
+        "text": "Different bytes",
+        "authorization": {
+          "actingLocalAgentId": "agent_writer",
+          "authorityDecision": { "mode": "delegated", "ref": "writer-post-1" }
+        }
+      },
+      "expectError": { "status": 409, "code": "idempotency_conflict" }
+    },
+    { "op": "arrange", "action": "rateLimitNextSocialMutation", "value": { "retryAfter": 2 } },
+    {
+      "op": "createSocialPost",
+      "actor": "aurora",
+      "idempotencyKey": "wire-rate-post-1",
+      "body": {
+        "authorAccountId": { "valueFrom": "/accounts/accounts/0/accountId" },
+        "text": "Retry this exact intent",
+        "authorization": {
+          "actingLocalAgentId": "agent_writer",
+          "authorityDecision": { "mode": "delegated", "ref": "writer-post-rate-1" }
+        }
+      }
+    },
+    {
+      "op": "assert",
+      "actual": "/replayedPost/postId",
+      "equals": { "valueFrom": "/originalPost/postId" }
+    }
+  ]
+}
