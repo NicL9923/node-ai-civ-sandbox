@@ -237,6 +237,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
       - name: Compile civilization Bicep (no login, no deployment)
         run: az bicep build --file infra/civilization/main.bicep
+      - name: Compile World Bicep (no login, no deployment)
+        run: az bicep build --file infra/world/main.bicep
+      - name: Compile World additive civ-federation container Bicep
+        run: az bicep build --file infra/world/civ-federation-container.bicep
+      - name: Validate World example parameters (no login)
+        run: az bicep build-params --file infra/world/main.bicepparam
+      - name: Check World Cosmos container parity + no committed secrets
+        run: node scripts/check-world-infra.mjs
 

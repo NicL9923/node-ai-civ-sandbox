@@ -117,3 +117,53 @@ world-web-build:
 # Build the whole .NET solution (contracts C# + world-map).
 world:
     dotnet build AiCivilization.slnx -c Debug
+
+# --- World-map Azure infrastructure (P7: Bicep IaC + deployment tooling) ---
+# See docs/world-deployment-runbook.md for the full provisioning + secret + rollout flow.
+# Mutation recipes take an explicit subscription/resource-group; none default a subscription.
+
+# Compile all World Bicep templates + validate the example parameters (no Azure login, no deployment).
+world-infra-build:
+    az bicep build --file infra/world/main.bicep
+    az bicep build --file infra/world/civ-federation-container.bicep
+    az bicep build-params --file infra/world/main.bicepparam
+
+# Cosmos container parity (containers.json <-> CosmosContainers.cs) + no-committed-secret scan.
+world-infra-check:
+    node scripts/check-world-infra.mjs
+
+# Preview World infra changes without applying them.
+world-infra-whatif subscription resource_group:
+    az deployment group what-if --subscription {{subscription}} --resource-group {{resource_group}} --template-file infra/world/main.bicep --parameters infra/world/main.bicepparam
+
+# Provision/update the World infra (idempotent). Never touches civ resources.
+world-infra-deploy subscription resource_group:
+    az deployment group create --subscription {{subscription}} --resource-group {{resource_group}} --template-file infra/world/main.bicep --parameters infra/world/main.bicepparam
+
+# Ensure the additive `federation` container exists in the existing civ sandbox database.
+world-federation-container subscription resource_group:
+    az deployment group create --subscription {{subscription}} --resource-group {{resource_group}} --template-file infra/world/civ-federation-container.bicep
+
+# Publish the World app (builds + bundles the observer SPA, fail-closed) to ./publish/world.
+world-publish:
+    dotnet publish apps/world-map/src/WorldMap.Api/WorldMap.Api.csproj -c Release -o ./publish/world
+
+# ZIP-deploy a previously published World app.
+world-deploy-app subscription resource_group app_name:
+    Compress-Archive -Path ./publish/world/* -DestinationPath ./publish/world.zip -Force
+    az webapp deploy --subscription {{subscription}} --resource-group {{resource_group}} --name {{app_name}} --type zip --src-path ./publish/world.zip
+
+# Set a World HMAC secret in Key Vault out-of-band. The value is supplied at runtime; never committed.
+world-provision-secret vault secret_name secret_value:
+    az keyvault secret set --vault-name {{vault}} --name {{secret_name}} --value {{secret_value}}
+
+# Enable civ->World federation on the EXISTING civ app (phase 2). Set the remaining WORLD_* settings
+# (HMAC/onboarding via Key Vault references) per the runbook before running this toggle.
+civ-enable-federation subscription resource_group civ_app world_base_url:
+    az webapp config appsettings set --subscription {{subscription}} --resource-group {{resource_group}} --name {{civ_app}} --settings WORLD_API_BASE_URL={{world_base_url}}
+    az webapp restart --subscription {{subscription}} --resource-group {{resource_group}} --name {{civ_app}}
+
+# Roll back civ federation: remove WORLD_API_BASE_URL (the kill switch) and restart.
+civ-rollback-federation subscription resource_group civ_app:
+    az webapp config appsettings delete --subscription {{subscription}} --resource-group {{resource_group}} --name {{civ_app}} --setting-names WORLD_API_BASE_URL
+    az webapp restart --subscription {{subscription}} --resource-group {{resource_group}} --name {{civ_app}}

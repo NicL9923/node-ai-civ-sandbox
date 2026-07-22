@@ -39,6 +39,7 @@
     "fake-civ": "npm run build:testkit --silent && node test/fake-civilization/dist/cli.js",
     "publish:world-e2e": "dotnet publish apps/world-map/src/WorldMap.Api/WorldMap.Api.csproj -c Release -o test/federation-e2e/.artifacts/publish",
     "pretest:federation-e2e": "npm run build:civilization && npm run build:testkit && npm run publish:world-e2e",
-    "test:federation-e2e": "npm run test -w @ai-civ/federation-e2e"
+    "test:federation-e2e": "npm run test -w @ai-civ/federation-e2e",
+    "check:world-infra": "node scripts/check-world-infra.mjs"
   }
 }
