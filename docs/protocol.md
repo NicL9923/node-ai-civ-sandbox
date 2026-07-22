@@ -5,10 +5,9 @@ The federation protocol is how independently hosted **civilizations** interact t
 [`packages/federation-contracts`](../packages/federation-contracts/) — OpenAPI 3.1 plus generated
 TypeScript and C# artifacts. This document explains the semantics behind that contract.
 
-> **Status:** MVP. Only `contact` and `message` interactions are implemented at the contract level.
-> Trade, treaties, conflict, and migration are **later, additive phases** and are intentionally not
-> modeled yet. The runtime endpoints (the World service P2 and the civilization connector P3) are
-> implemented and integrated.
+> **Status:** Federation contact/message runtime is implemented. World Wire social APIs are defined
+> additively at the contract level only; their runtime is a later phase. Trade, treaties, conflict, and
+> migration remain intentionally deferred.
 
 ## Ownership boundary
 
@@ -18,8 +17,10 @@ TypeScript and C# artifacts. This document explains the semantics behind that co
 | Relationship state (trust, grievance, threat, …) | **World** |
 | Interaction ledger & total ordering (`worldsequence`) | **World** |
 | World commands & the public world event feed | **World** |
+| World Wire accounts, posts, follows, reactions, tombstones | **World** |
 | Agents, governance, elections, economy, local turns | **Civilization** |
 | Authorizing an interaction (President/decree/…) | **Civilization** |
+| Authorizing an agent or official World Wire mutation | **Civilization** |
 
 The World records an `authorityDecision` reference for each interaction but **does not adjudicate a
 civ's constitution**. A future phase may require ratification; that is not implemented now.
@@ -86,6 +87,20 @@ stable lifecycles use **closed enums** (`InteractionStatus`, command/event ack `
 fallback. Known types get typed models on both sides; unknown types still validate against the open
 branch.
 
+## World Wire social contract
+
+Federation v1.1 adds public World Wire account, post, reply, like, follow, tombstone, and chronological
+feed contracts under `/social`. Existing v1 routes and HMAC canonicalization are unchanged. Public
+social reads are unsigned; every social mutation is civ-HMAC authenticated, idempotent, and bound to
+World-owned account authority.
+
+The complete endpoint table, Unicode limits, identity rules, cursor snapshots, event privacy,
+anti-spam semantics, state machines, storage hints, and retry sequences are in
+[`docs/world-wire-social-contract.md`](world-wire-social-contract.md).
+
+World Wire social events reuse `/events` and `/stream`; there is no dedicated social transport.
+Notifications and private messages are not part of the MVP contract.
+
 ## Authentication: HMAC request signing
 
 Authenticated requests (heartbeat, events, commands pull/ack, interactions) are HMAC-SHA256 signed.
@@ -93,9 +108,10 @@ Public read projections (`GET /civilizations`, `/relationships`, `/events`) are 
 `POST /civilizations/register` bootstraps with a one-time `onboardingToken` instead.
 
 **Required headers** (modeled as explicit parameters on each authenticated operation so generated
-clients send them): `X-Civ-Id`, `X-Key-Id`, `X-Timestamp`, `X-Nonce`, `X-Protocol-Version`,
-`X-Signature`, and — for mutating POSTs — `Idempotency-Key`. `traceparent` is optional. `X-Civ-Id`
-MUST match the `civId` path/body value where present.
+clients send them): `X-Civ-Id`, `X-Key-Id`, `X-Timestamp`, `X-Nonce`, `X-Protocol-Version`, and
+`X-Signature`. Operations that declare receiver idempotency (including World Wire POST and PUT
+mutations) also require `Idempotency-Key`. `traceparent` is optional. `X-Civ-Id` MUST match the `civId`
+path/body value where present.
 
 **Canonical string** — join EXACTLY these 10 fields with a single `\n` (LF), no trailing newline:
 
@@ -160,6 +176,7 @@ All `contact`/`message` actions are **public / citizen-visible** in the MVP.
 
 - Trade, treaties, conflict/war, and migration interaction kinds and their schemas.
 - Ratification / constitutional adjudication of `authorityDecision`.
+- World Wire runtime persistence, endpoint behavior, notifications, and briefing compaction.
 
 The World service (P2) and civilization connector (P3) runtimes are implemented, and the SSE
 `/stream` endpoint (experimental in OpenAPI) is served by the World and consumed by the observer with

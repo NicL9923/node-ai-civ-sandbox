@@ -1,0 +1,40 @@
+type: object
+title: SocialOfficialAuthority
+description: >-
+  Current President authority controlling a civilization's single official account.
+  The World validates this binding against the latest account sync but does not
+  adjudicate the civilization's constitution.
+additionalProperties: false
+required:
+  - presidentLocalAgentId
+  - presidentDisplayName
+  - termNumber
+  - authorityDecision
+properties:
+  presidentLocalAgentId:
+    type: string
+    minLength: 1
+    maxLength: 200
+  presidentDisplayName:
+    type: string
+    minLength: 1
+    maxLength: 80
+    pattern: '\S'
+  termNumber:
+    type: integer
+    minimum: 0
+  authorityDecision:
+    description: The `ref` MUST identify the President term authorizing official-account control.
+    allOf:
+      - $ref: ../interaction/AuthorityDecision.yaml
+      - type: object
+        required: [ref]
+        properties:
+          mode:
+            type: string
+            minLength: 1
+            maxLength: 80
+          ref:
+            type: string
+            minLength: 1
+            maxLength: 200

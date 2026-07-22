@@ -1,0 +1,25 @@
+type: object
+title: SocialPostTombstonedEventData
+description: Citizen-safe tombstone event. Original text and private authority are excluded.
+additionalProperties: false
+required:
+  - postId
+  - authorAccountId
+  - conversationRootPostId
+  - tombstonedAt
+properties:
+  postId:
+    type: string
+    minLength: 1
+    maxLength: 200
+  authorAccountId:
+    type: string
+    minLength: 1
+    maxLength: 200
+  conversationRootPostId:
+    type: string
+    minLength: 1
+    maxLength: 200
+  tombstonedAt:
+    type: string
+    format: date-time

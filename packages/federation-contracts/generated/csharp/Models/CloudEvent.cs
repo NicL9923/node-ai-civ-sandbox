@@ -31,7 +31,7 @@ namespace AiCiv.FederationContracts.Models
 #else
         public string Correlationid { get; set; }
 #endif
-        /// <summary>Type-specific payload. Known command types use ContactCommandData or MessageCommandData; other types (e.g. civ domain events) use the open object form. The open `anyOf` branch preserves forward compatibility — a new payload shape validates against it without breaking existing clients.</summary>
+        /// <summary>Type-specific payload. Known command and World Wire social event payloads are typed; other types (e.g. civ domain events) use the open object form. The open `anyOf` branch preserves forward compatibility.</summary>
 #if NETSTANDARD2_1_OR_GREATER || NETCOREAPP3_1_OR_GREATER
 #nullable enable
         public global::AiCiv.FederationContracts.Models.CloudEvent.CloudEvent_data? Data { get; set; }
@@ -97,7 +97,7 @@ namespace AiCiv.FederationContracts.Models
 #endif
         /// <summary>Timestamp of when the occurrence happened.</summary>
         public DateTimeOffset? Time { get; set; }
-        /// <summary>Event/command type in reverse-DNS, versioned form. Open set. Examples: `world.civilization.contact.v1`, `world.civilization.message.v1`, `civ.agent.acted.v1`.</summary>
+        /// <summary>Event/command type in reverse-DNS, versioned form. Open set. Examples: `world.civilization.contact.v1`, `world.civilization.message.v1`, `world.social.post.created.v1`, `civ.agent.acted.v1`.</summary>
 #if NETSTANDARD2_1_OR_GREATER || NETCOREAPP3_1_OR_GREATER
 #nullable enable
         public string? Type { get; set; }
@@ -177,7 +177,7 @@ namespace AiCiv.FederationContracts.Models
             writer.WriteAdditionalData(AdditionalData);
         }
         /// <summary>
-        /// Composed type wrapper for classes <see cref="global::AiCiv.FederationContracts.Models.CloudEvent_dataMember1"/>, <see cref="global::AiCiv.FederationContracts.Models.ContactCommandData"/>, <see cref="global::AiCiv.FederationContracts.Models.MessageCommandData"/>
+        /// Composed type wrapper for classes <see cref="global::AiCiv.FederationContracts.Models.CloudEvent_dataMember1"/>, <see cref="global::AiCiv.FederationContracts.Models.ContactCommandData"/>, <see cref="global::AiCiv.FederationContracts.Models.MessageCommandData"/>, <see cref="global::AiCiv.FederationContracts.Models.SocialAccountSyncedEventData"/>, <see cref="global::AiCiv.FederationContracts.Models.SocialFollowChangedEventData"/>, <see cref="global::AiCiv.FederationContracts.Models.SocialPostCreatedEventData"/>, <see cref="global::AiCiv.FederationContracts.Models.SocialPostReactionChangedEventData"/>, <see cref="global::AiCiv.FederationContracts.Models.SocialPostTombstonedEventData"/>, <see cref="global::AiCiv.FederationContracts.Models.SocialReplyCreatedEventData"/>
         /// </summary>
         [global::System.CodeDom.Compiler.GeneratedCode("Kiota", "1.0.0")]
         public partial class CloudEvent_data : IComposedTypeWrapper, IParsable
@@ -206,6 +206,54 @@ namespace AiCiv.FederationContracts.Models
 #else
             public global::AiCiv.FederationContracts.Models.MessageCommandData MessageCommandData { get; set; }
 #endif
+            /// <summary>Composed type representation for type <see cref="global::AiCiv.FederationContracts.Models.SocialAccountSyncedEventData"/></summary>
+#if NETSTANDARD2_1_OR_GREATER || NETCOREAPP3_1_OR_GREATER
+#nullable enable
+            public global::AiCiv.FederationContracts.Models.SocialAccountSyncedEventData? SocialAccountSyncedEventData { get; set; }
+#nullable restore
+#else
+            public global::AiCiv.FederationContracts.Models.SocialAccountSyncedEventData SocialAccountSyncedEventData { get; set; }
+#endif
+            /// <summary>Composed type representation for type <see cref="global::AiCiv.FederationContracts.Models.SocialFollowChangedEventData"/></summary>
+#if NETSTANDARD2_1_OR_GREATER || NETCOREAPP3_1_OR_GREATER
+#nullable enable
+            public global::AiCiv.FederationContracts.Models.SocialFollowChangedEventData? SocialFollowChangedEventData { get; set; }
+#nullable restore
+#else
+            public global::AiCiv.FederationContracts.Models.SocialFollowChangedEventData SocialFollowChangedEventData { get; set; }
+#endif
+            /// <summary>Composed type representation for type <see cref="global::AiCiv.FederationContracts.Models.SocialPostCreatedEventData"/></summary>
+#if NETSTANDARD2_1_OR_GREATER || NETCOREAPP3_1_OR_GREATER
+#nullable enable
+            public global::AiCiv.FederationContracts.Models.SocialPostCreatedEventData? SocialPostCreatedEventData { get; set; }
+#nullable restore
+#else
+            public global::AiCiv.FederationContracts.Models.SocialPostCreatedEventData SocialPostCreatedEventData { get; set; }
+#endif
+            /// <summary>Composed type representation for type <see cref="global::AiCiv.FederationContracts.Models.SocialPostReactionChangedEventData"/></summary>
+#if NETSTANDARD2_1_OR_GREATER || NETCOREAPP3_1_OR_GREATER
+#nullable enable
+            public global::AiCiv.FederationContracts.Models.SocialPostReactionChangedEventData? SocialPostReactionChangedEventData { get; set; }
+#nullable restore
+#else
+            public global::AiCiv.FederationContracts.Models.SocialPostReactionChangedEventData SocialPostReactionChangedEventData { get; set; }
+#endif
+            /// <summary>Composed type representation for type <see cref="global::AiCiv.FederationContracts.Models.SocialPostTombstonedEventData"/></summary>
+#if NETSTANDARD2_1_OR_GREATER || NETCOREAPP3_1_OR_GREATER
+#nullable enable
+            public global::AiCiv.FederationContracts.Models.SocialPostTombstonedEventData? SocialPostTombstonedEventData { get; set; }
+#nullable restore
+#else
+            public global::AiCiv.FederationContracts.Models.SocialPostTombstonedEventData SocialPostTombstonedEventData { get; set; }
+#endif
+            /// <summary>Composed type representation for type <see cref="global::AiCiv.FederationContracts.Models.SocialReplyCreatedEventData"/></summary>
+#if NETSTANDARD2_1_OR_GREATER || NETCOREAPP3_1_OR_GREATER
+#nullable enable
+            public global::AiCiv.FederationContracts.Models.SocialReplyCreatedEventData? SocialReplyCreatedEventData { get; set; }
+#nullable restore
+#else
+            public global::AiCiv.FederationContracts.Models.SocialReplyCreatedEventData SocialReplyCreatedEventData { get; set; }
+#endif
             /// <summary>
             /// Creates a new instance of the appropriate class based on discriminator value
             /// </summary>
@@ -218,6 +266,12 @@ namespace AiCiv.FederationContracts.Models
                 result.CloudEventDataMember1 = new global::AiCiv.FederationContracts.Models.CloudEvent_dataMember1();
                 result.ContactCommandData = new global::AiCiv.FederationContracts.Models.ContactCommandData();
                 result.MessageCommandData = new global::AiCiv.FederationContracts.Models.MessageCommandData();
+                result.SocialAccountSyncedEventData = new global::AiCiv.FederationContracts.Models.SocialAccountSyncedEventData();
+                result.SocialFollowChangedEventData = new global::AiCiv.FederationContracts.Models.SocialFollowChangedEventData();
+                result.SocialPostCreatedEventData = new global::AiCiv.FederationContracts.Models.SocialPostCreatedEventData();
+                result.SocialPostReactionChangedEventData = new global::AiCiv.FederationContracts.Models.SocialPostReactionChangedEventData();
+                result.SocialPostTombstonedEventData = new global::AiCiv.FederationContracts.Models.SocialPostTombstonedEventData();
+                result.SocialReplyCreatedEventData = new global::AiCiv.FederationContracts.Models.SocialReplyCreatedEventData();
                 return result;
             }
             /// <summary>
@@ -226,9 +280,9 @@ namespace AiCiv.FederationContracts.Models
             /// <returns>A IDictionary&lt;string, Action&lt;IParseNode&gt;&gt;</returns>
             public virtual IDictionary<string, Action<IParseNode>> GetFieldDeserializers()
             {
-                if(CloudEventDataMember1 != null || ContactCommandData != null || MessageCommandData != null)
+                if(CloudEventDataMember1 != null || ContactCommandData != null || MessageCommandData != null || SocialAccountSyncedEventData != null || SocialFollowChangedEventData != null || SocialPostCreatedEventData != null || SocialPostReactionChangedEventData != null || SocialPostTombstonedEventData != null || SocialReplyCreatedEventData != null)
                 {
-                    return ParseNodeHelper.MergeDeserializersForIntersectionWrapper(CloudEventDataMember1, ContactCommandData, MessageCommandData);
+                    return ParseNodeHelper.MergeDeserializersForIntersectionWrapper(CloudEventDataMember1, ContactCommandData, MessageCommandData, SocialAccountSyncedEventData, SocialFollowChangedEventData, SocialPostCreatedEventData, SocialPostReactionChangedEventData, SocialPostTombstonedEventData, SocialReplyCreatedEventData);
                 }
                 return new Dictionary<string, Action<IParseNode>>();
             }
@@ -239,7 +293,7 @@ namespace AiCiv.FederationContracts.Models
             public virtual void Serialize(ISerializationWriter writer)
             {
                 if(ReferenceEquals(writer, null)) throw new ArgumentNullException(nameof(writer));
-                writer.WriteObjectValue<global::AiCiv.FederationContracts.Models.CloudEvent_dataMember1>(null, CloudEventDataMember1, ContactCommandData, MessageCommandData);
+                writer.WriteObjectValue<global::AiCiv.FederationContracts.Models.CloudEvent_dataMember1>(null, CloudEventDataMember1, ContactCommandData, MessageCommandData, SocialAccountSyncedEventData, SocialFollowChangedEventData, SocialPostCreatedEventData, SocialPostReactionChangedEventData, SocialPostTombstonedEventData, SocialReplyCreatedEventData);
             }
         }
         /// <summary>

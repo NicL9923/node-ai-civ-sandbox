@@ -1,0 +1,9 @@
+type: object
+title: SocialPostTombstoneRequest
+description: Author-authorized terminal tombstone request. No reason text is made public.
+additionalProperties: false
+required:
+  - authorization
+properties:
+  authorization:
+    $ref: ./SocialMutationAuthorization.yaml

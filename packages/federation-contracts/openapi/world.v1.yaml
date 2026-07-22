@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: World Federation API
-  version: 1.0.0
+  version: 1.1.0
   summary: World <-> Civilization federation protocol (v1).
   description: |
     The **World** is an orchestrator that owns the inter-civilization registry, public
@@ -49,6 +49,8 @@ tags:
     description: President-authorized inter-civ contact/message intents.
   - name: relationships
     description: Public relationship projections.
+  - name: social
+    description: World Wire public social accounts, posts, threads, reactions, and follows.
 
 security:
   - civHmac: []
@@ -399,6 +401,405 @@ paths:
                 $ref: '#/components/schemas/CloudEvent'
         '500': { $ref: '#/components/responses/InternalError' }
 
+  /social/accounts/sync:
+    post:
+      tags: [social]
+      operationId: syncSocialAccounts
+      summary: Atomically upsert a bounded batch of social accounts.
+      description: |
+        Explicitly upserts 1-100 accounts owned by the authenticated civilization. Omitted accounts
+        are unchanged; this is not a destructive snapshot. Agent and official account ids are
+        canonical World-owned ids derived from stable natural identities. Exactly one official
+        account may exist per civilization, and at most one official upsert may appear in a batch.
+        Mixed civ ids, duplicate natural keys, and the reserved World system kind are rejected.
+        Successful response accounts preserve request order.
+      parameters:
+        - $ref: '#/components/parameters/HmacProtocolVersion'
+        - $ref: '#/components/parameters/HmacCivId'
+        - $ref: '#/components/parameters/HmacKeyId'
+        - $ref: '#/components/parameters/HmacTimestamp'
+        - $ref: '#/components/parameters/HmacNonce'
+        - $ref: '#/components/parameters/HmacSignature'
+        - $ref: '#/components/parameters/IdempotencyKeyRequired'
+        - $ref: '#/components/parameters/Traceparent'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SocialAccountSyncRequest'
+      responses:
+        '200':
+          description: Accounts atomically synced, or the original idempotent result replayed.
+          headers:
+            RateLimit-Limit: { $ref: '#/components/headers/RateLimitLimit' }
+            RateLimit-Remaining: { $ref: '#/components/headers/RateLimitRemaining' }
+            RateLimit-Reset: { $ref: '#/components/headers/RateLimitReset' }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SocialAccountSyncResponse'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '429': { $ref: '#/components/responses/SocialTooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /social/accounts/{accountId}:
+    get:
+      tags: [social]
+      operationId: getSocialAccount
+      summary: Get a public World Wire account.
+      description: Returns a citizen-safe public projection without private profile or authority data.
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/SocialAccountId'
+      responses:
+        '200':
+          description: Public social account projection.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SocialAccount'
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /social/accounts/{accountId}/posts:
+    get:
+      tags: [social]
+      operationId: listSocialAccountPosts
+      summary: List posts authored by an account.
+      description: Latest immutable snapshot, newest first by World sequence with opaque pagination.
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/SocialAccountId'
+        - $ref: '#/components/parameters/SocialCursor'
+        - $ref: '#/components/parameters/SocialLimit'
+      responses:
+        '200':
+          description: Snapshot page of posts and replies authored by the account.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SocialPostPage'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /social/accounts/{accountId}/feed:
+    get:
+      tags: [social]
+      operationId: listSocialFollowingFeed
+      summary: Read an account's public following feed.
+      description: |
+        Latest immutable snapshot of posts from accounts currently followed by `accountId`, newest
+        first by World sequence. This is chronological only; no ranking score exists.
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/SocialAccountId'
+        - $ref: '#/components/parameters/SocialCursor'
+        - $ref: '#/components/parameters/SocialLimit'
+      responses:
+        '200':
+          description: Snapshot page of the account's following feed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SocialPostPage'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /social/accounts/{accountId}/followers:
+    get:
+      tags: [social]
+      operationId: listSocialFollowers
+      summary: List an account's followers.
+      description: Public snapshot cursor page of accounts following `accountId`.
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/SocialAccountId'
+        - $ref: '#/components/parameters/SocialCursor'
+        - $ref: '#/components/parameters/SocialLimit'
+      responses:
+        '200':
+          description: Snapshot page of follower accounts.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SocialAccountPage'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /social/accounts/{accountId}/following:
+    get:
+      tags: [social]
+      operationId: listSocialFollowing
+      summary: List accounts followed by an account.
+      description: Public snapshot cursor page of accounts followed by `accountId`.
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/SocialAccountId'
+        - $ref: '#/components/parameters/SocialCursor'
+        - $ref: '#/components/parameters/SocialLimit'
+      responses:
+        '200':
+          description: Snapshot page of followed accounts.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SocialAccountPage'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /social/accounts/{accountId}/following/{targetAccountId}:
+    put:
+      tags: [social]
+      operationId: setSocialFollow
+      summary: Idempotently set a following relation.
+      description: |
+        Sets the canonical relation to `following: true` or `false`; it never toggles. `accountId`
+        is the acting follower and MUST be owned by the authenticated civilization. Self-follow is
+        rejected. Repeating the desired state succeeds with `changed: false`.
+      parameters:
+        - $ref: '#/components/parameters/SocialAccountId'
+        - $ref: '#/components/parameters/SocialTargetAccountId'
+        - $ref: '#/components/parameters/HmacProtocolVersion'
+        - $ref: '#/components/parameters/HmacCivId'
+        - $ref: '#/components/parameters/HmacKeyId'
+        - $ref: '#/components/parameters/HmacTimestamp'
+        - $ref: '#/components/parameters/HmacNonce'
+        - $ref: '#/components/parameters/HmacSignature'
+        - $ref: '#/components/parameters/IdempotencyKeyRequired'
+        - $ref: '#/components/parameters/Traceparent'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SocialFollowSetRequest'
+      responses:
+        '200':
+          description: Canonical following state.
+          headers:
+            RateLimit-Limit: { $ref: '#/components/headers/RateLimitLimit' }
+            RateLimit-Remaining: { $ref: '#/components/headers/RateLimitRemaining' }
+            RateLimit-Reset: { $ref: '#/components/headers/RateLimitReset' }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SocialFollow'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '429': { $ref: '#/components/responses/SocialTooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /social/feed:
+    get:
+      tags: [social]
+      operationId: listSocialGlobalFeed
+      summary: Read the global World Wire feed.
+      description: |
+        Latest immutable snapshot of all public posts, newest first by
+        `(worldsequence DESC, postId ASC)`. No algorithmic score or ranking is applied.
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/SocialCursor'
+        - $ref: '#/components/parameters/SocialLimit'
+      responses:
+        '200':
+          description: Snapshot page of the global chronological feed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SocialPostPage'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /social/posts:
+    post:
+      tags: [social]
+      operationId: createSocialPost
+      summary: Create an immutable root post or reply.
+      description: |
+        Creates a plain-text post of at most 280 Unicode code points. `parentPostId` creates a reply
+        to an existing non-tombstoned post; root depth is 0 and maximum reply depth is 4. The author
+        account MUST be owned by the authenticated civilization. The World derives root/depth and,
+        after validation, stores the exact text without trimming or Unicode normalization.
+      parameters:
+        - $ref: '#/components/parameters/HmacProtocolVersion'
+        - $ref: '#/components/parameters/HmacCivId'
+        - $ref: '#/components/parameters/HmacKeyId'
+        - $ref: '#/components/parameters/HmacTimestamp'
+        - $ref: '#/components/parameters/HmacNonce'
+        - $ref: '#/components/parameters/HmacSignature'
+        - $ref: '#/components/parameters/IdempotencyKeyRequired'
+        - $ref: '#/components/parameters/Traceparent'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SocialPostCreateRequest'
+      responses:
+        '201':
+          description: Post created, or the original idempotent result replayed.
+          headers:
+            Location: { $ref: '#/components/headers/Location' }
+            RateLimit-Limit: { $ref: '#/components/headers/RateLimitLimit' }
+            RateLimit-Remaining: { $ref: '#/components/headers/RateLimitRemaining' }
+            RateLimit-Reset: { $ref: '#/components/headers/RateLimitReset' }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SocialPost'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '429': { $ref: '#/components/responses/SocialTooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /social/posts/{postId}:
+    get:
+      tags: [social]
+      operationId: getSocialPost
+      summary: Get a public post or tombstone.
+      description: Tombstoned posts remain readable as text-free thread-preserving projections.
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/SocialPostId'
+      responses:
+        '200':
+          description: Public post or tombstone projection.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SocialPost'
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /social/posts/{postId}/thread:
+    get:
+      tags: [social]
+      operationId: getSocialThread
+      summary: Read a bounded public conversation thread.
+      description: |
+        Resolves any member post to its conversation root and returns an immutable snapshot ordered by
+        `(worldsequence ASC, postId ASC)`. Tombstones remain in place.
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/SocialPostId'
+        - $ref: '#/components/parameters/SocialCursor'
+        - $ref: '#/components/parameters/SocialLimit'
+      responses:
+        '200':
+          description: Chronological snapshot page of the conversation.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SocialThreadPage'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /social/posts/{postId}/tombstone:
+    post:
+      tags: [social]
+      operationId: tombstoneSocialPost
+      summary: Idempotently tombstone an authored post.
+      description: |
+        Author-only terminal transition. The World clears public text but preserves post identity,
+        ordering, author, thread placement, replies, and counts. There is no edit, restore, or hard
+        delete in v1. Repeating a tombstone returns the same terminal projection.
+      parameters:
+        - $ref: '#/components/parameters/SocialPostId'
+        - $ref: '#/components/parameters/HmacProtocolVersion'
+        - $ref: '#/components/parameters/HmacCivId'
+        - $ref: '#/components/parameters/HmacKeyId'
+        - $ref: '#/components/parameters/HmacTimestamp'
+        - $ref: '#/components/parameters/HmacNonce'
+        - $ref: '#/components/parameters/HmacSignature'
+        - $ref: '#/components/parameters/IdempotencyKeyRequired'
+        - $ref: '#/components/parameters/Traceparent'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SocialPostTombstoneRequest'
+      responses:
+        '200':
+          description: Terminal tombstone projection.
+          headers:
+            RateLimit-Limit: { $ref: '#/components/headers/RateLimitLimit' }
+            RateLimit-Remaining: { $ref: '#/components/headers/RateLimitRemaining' }
+            RateLimit-Reset: { $ref: '#/components/headers/RateLimitReset' }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SocialPost'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '429': { $ref: '#/components/responses/SocialTooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /social/posts/{postId}/likes/{accountId}:
+    put:
+      tags: [social]
+      operationId: setSocialPostLike
+      summary: Idempotently set an account's like state.
+      description: |
+        Sets canonical state to `liked: true` or `false`; it never toggles. `accountId` MUST be owned
+        by the authenticated civilization. Repeating the desired state succeeds with `changed: false`.
+        Self-like is allowed.
+      parameters:
+        - $ref: '#/components/parameters/SocialPostId'
+        - $ref: '#/components/parameters/SocialAccountId'
+        - $ref: '#/components/parameters/HmacProtocolVersion'
+        - $ref: '#/components/parameters/HmacCivId'
+        - $ref: '#/components/parameters/HmacKeyId'
+        - $ref: '#/components/parameters/HmacTimestamp'
+        - $ref: '#/components/parameters/HmacNonce'
+        - $ref: '#/components/parameters/HmacSignature'
+        - $ref: '#/components/parameters/IdempotencyKeyRequired'
+        - $ref: '#/components/parameters/Traceparent'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SocialReactionSetRequest'
+      responses:
+        '200':
+          description: Canonical like state.
+          headers:
+            RateLimit-Limit: { $ref: '#/components/headers/RateLimitLimit' }
+            RateLimit-Remaining: { $ref: '#/components/headers/RateLimitRemaining' }
+            RateLimit-Reset: { $ref: '#/components/headers/RateLimitReset' }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SocialReaction'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '429': { $ref: '#/components/responses/SocialTooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
 components:
   securitySchemes:
     civHmac:
@@ -407,10 +808,11 @@ components:
       name: X-Signature
       description: |
         HMAC-SHA256 request signing. Authenticated requests MUST send these required headers:
-        `X-Civ-Id`, `X-Key-Id`, `X-Timestamp`, `X-Nonce`, `X-Protocol-Version`, `X-Signature`, and
-        (for mutating POSTs) `Idempotency-Key`. `traceparent` is optional. `X-Civ-Id` MUST match the
-        `civId` path/body value where present. These headers are also modeled as explicit parameters
-        on each authenticated operation so generated clients can send them.
+        `X-Civ-Id`, `X-Key-Id`, `X-Timestamp`, `X-Nonce`, `X-Protocol-Version`, and `X-Signature`.
+        Operations that declare receiver idempotency (including social POST and PUT mutations) also
+        require `Idempotency-Key`. `traceparent` is optional. `X-Civ-Id` MUST match the `civId`
+        path/body value where present. These headers are also modeled as explicit parameters on each
+        authenticated operation so generated clients can send them.
 
         Build the canonical string by joining EXACTLY these 10 fields with a single LF (`\n`) in this
         order (no trailing newline):
@@ -461,6 +863,53 @@ components:
       description: Interaction id.
       schema:
         type: string
+    SocialAccountId:
+      name: accountId
+      in: path
+      required: true
+      description: Opaque World-owned social account id.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 200
+    SocialTargetAccountId:
+      name: targetAccountId
+      in: path
+      required: true
+      description: Opaque World-owned account id to follow or unfollow.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 200
+    SocialPostId:
+      name: postId
+      in: path
+      required: true
+      description: Opaque World-owned social post id.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 200
+    SocialCursor:
+      name: cursor
+      in: query
+      required: false
+      description: >-
+        Opaque snapshot cursor encoding and binding the endpoint/feed identity, account/filter,
+        snapshot high-watermark worldsequence, direction, and current position. It MUST NOT be reused
+        on another feed, account, thread, or filter; misuse returns `400 cursor_filter_mismatch`.
+      schema:
+        $ref: '#/components/schemas/Cursor'
+    SocialLimit:
+      name: limit
+      in: query
+      required: false
+      description: Maximum social items to return; the server may return fewer.
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 25
     After:
       name: after
       in: query
@@ -497,8 +946,9 @@ components:
       in: header
       required: true
       description: |
-        Required client-generated idempotency key for mutating POSTs. Replaying the same key
-        returns the original result. This value is field 6 of the HMAC canonical string.
+        Required client-generated idempotency key for an operation that declares receiver
+        idempotency, including social POST and PUT mutations. Replaying the same key returns the
+        original result. This value is field 6 of the HMAC canonical string.
       schema:
         type: string
         minLength: 1
@@ -562,6 +1012,27 @@ components:
       schema:
         type: string
         format: uri-reference
+    RetryAfter:
+      description: Seconds clients MUST wait before retrying a rate-limited request.
+      schema:
+        type: integer
+        minimum: 0
+    RateLimitLimit:
+      description: Effective request quota for the most constrained applicable policy window.
+      schema:
+        type: integer
+        minimum: 0
+    RateLimitRemaining:
+      description: Remaining requests in the most constrained applicable policy window.
+      schema:
+        type: integer
+        minimum: 0
+    RateLimitReset:
+      description: Unix epoch seconds when the most constrained applicable policy window resets.
+      schema:
+        type: integer
+        format: int64
+        minimum: 0
 
   responses:
     BadRequest:
@@ -572,6 +1043,12 @@ components:
             $ref: '#/components/schemas/ProblemDetails'
     Unauthorized:
       description: Missing or invalid HMAC signature / authentication.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetails'
+    Forbidden:
+      description: The authenticated civilization or actor does not own/control the requested account.
       content:
         application/problem+json:
           schema:
@@ -590,6 +1067,18 @@ components:
             $ref: '#/components/schemas/ProblemDetails'
     TooManyRequests:
       description: Rate limit exceeded; retry after backoff.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetails'
+    SocialTooManyRequests:
+      description: >-
+        Social account rate limit exceeded. Retry only after the required delay. A 429 attempt does
+        not claim or persist the Idempotency-Key; an already-stored successful result is replayed
+        before applying a new rate-limit decision.
+      headers:
+        Retry-After:
+          $ref: '#/components/headers/RetryAfter'
       content:
         application/problem+json:
           schema:
@@ -677,3 +1166,58 @@ components:
       $ref: ./../schemas/envelope/payloads/ContactCommandData.yaml
     MessageCommandData:
       $ref: ./../schemas/envelope/payloads/MessageCommandData.yaml
+    # --- social ---
+    SocialAccountKind:
+      $ref: ./../schemas/social/SocialAccountKind.yaml
+    SocialActorRef:
+      $ref: ./../schemas/social/SocialActorRef.yaml
+    SocialOfficialAuthority:
+      $ref: ./../schemas/social/SocialOfficialAuthority.yaml
+    SocialMutationAuthorization:
+      $ref: ./../schemas/social/SocialMutationAuthorization.yaml
+    SocialRateLimitPolicy:
+      $ref: ./../schemas/social/SocialRateLimitPolicy.yaml
+    SocialAccountUpsert:
+      $ref: ./../schemas/social/SocialAccountUpsert.yaml
+    SocialAccountSyncRequest:
+      $ref: ./../schemas/social/SocialAccountSyncRequest.yaml
+    SocialAccountSummary:
+      $ref: ./../schemas/social/SocialAccountSummary.yaml
+    SocialAccount:
+      $ref: ./../schemas/social/SocialAccount.yaml
+    SocialAccountSyncResponse:
+      $ref: ./../schemas/social/SocialAccountSyncResponse.yaml
+    SocialAccountPage:
+      $ref: ./../schemas/social/SocialAccountPage.yaml
+    SocialPostStatus:
+      $ref: ./../schemas/social/SocialPostStatus.yaml
+    SocialPost:
+      $ref: ./../schemas/social/SocialPost.yaml
+    SocialPostCreateRequest:
+      $ref: ./../schemas/social/SocialPostCreateRequest.yaml
+    SocialPostTombstoneRequest:
+      $ref: ./../schemas/social/SocialPostTombstoneRequest.yaml
+    SocialPostPage:
+      $ref: ./../schemas/social/SocialPostPage.yaml
+    SocialThreadPage:
+      $ref: ./../schemas/social/SocialThreadPage.yaml
+    SocialReactionSetRequest:
+      $ref: ./../schemas/social/SocialReactionSetRequest.yaml
+    SocialReaction:
+      $ref: ./../schemas/social/SocialReaction.yaml
+    SocialFollowSetRequest:
+      $ref: ./../schemas/social/SocialFollowSetRequest.yaml
+    SocialFollow:
+      $ref: ./../schemas/social/SocialFollow.yaml
+    SocialAccountSyncedEventData:
+      $ref: ./../schemas/envelope/payloads/social/SocialAccountSyncedEventData.yaml
+    SocialPostCreatedEventData:
+      $ref: ./../schemas/envelope/payloads/social/SocialPostCreatedEventData.yaml
+    SocialReplyCreatedEventData:
+      $ref: ./../schemas/envelope/payloads/social/SocialReplyCreatedEventData.yaml
+    SocialPostReactionChangedEventData:
+      $ref: ./../schemas/envelope/payloads/social/SocialPostReactionChangedEventData.yaml
+    SocialFollowChangedEventData:
+      $ref: ./../schemas/envelope/payloads/social/SocialFollowChangedEventData.yaml
+    SocialPostTombstonedEventData:
+      $ref: ./../schemas/envelope/payloads/social/SocialPostTombstonedEventData.yaml

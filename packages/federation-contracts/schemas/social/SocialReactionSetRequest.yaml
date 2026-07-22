@@ -1,0 +1,12 @@
+type: object
+title: SocialReactionSetRequest
+description: Idempotently set the actor account's like state; never toggle.
+additionalProperties: false
+required:
+  - liked
+  - authorization
+properties:
+  liked:
+    type: boolean
+  authorization:
+    $ref: ./SocialMutationAuthorization.yaml

@@ -1,0 +1,46 @@
+type: object
+title: SocialActorRef
+description: >-
+  Stable, citizen-safe civilization-scoped actor identity. This is a public social
+  reference only; it never contains model, memory, profile, credential, or private
+  governance data.
+additionalProperties: false
+required:
+  - civId
+  - displayName
+  - kind
+properties:
+  civId:
+    type: string
+    minLength: 1
+    maxLength: 200
+    description: World-assigned civilization id, or the reserved World id for system accounts.
+  localAgentId:
+    type: string
+    minLength: 1
+    maxLength: 200
+    description: Opaque id assigned by the owning civilization. Required only for agent accounts.
+  displayName:
+    type: string
+    minLength: 1
+    maxLength: 80
+    pattern: '\S'
+    description: Plain-text public display name, measured in Unicode code points.
+  kind:
+    $ref: ./SocialAccountKind.yaml
+allOf:
+  - if:
+      properties:
+        kind:
+          const: agent
+      required: [kind]
+    then:
+      required: [localAgentId]
+  - if:
+      properties:
+        kind:
+          enum: [official, system]
+      required: [kind]
+    then:
+      not:
+        required: [localAgentId]

@@ -4,6 +4,7 @@ using AiCiv.FederationContracts.Civilizations;
 using AiCiv.FederationContracts.Events;
 using AiCiv.FederationContracts.Interactions;
 using AiCiv.FederationContracts.Relationships;
+using AiCiv.FederationContracts.Social;
 using AiCiv.FederationContracts.StreamNamespace;
 using Microsoft.Kiota.Abstractions.Extensions;
 using Microsoft.Kiota.Abstractions;
@@ -42,6 +43,11 @@ namespace AiCiv.FederationContracts
         public global::AiCiv.FederationContracts.Relationships.RelationshipsRequestBuilder Relationships
         {
             get => new global::AiCiv.FederationContracts.Relationships.RelationshipsRequestBuilder(PathParameters, RequestAdapter);
+        }
+        /// <summary>The social property</summary>
+        public global::AiCiv.FederationContracts.Social.SocialRequestBuilder Social
+        {
+            get => new global::AiCiv.FederationContracts.Social.SocialRequestBuilder(PathParameters, RequestAdapter);
         }
         /// <summary>The stream property</summary>
         public global::AiCiv.FederationContracts.StreamNamespace.StreamRequestBuilder Stream

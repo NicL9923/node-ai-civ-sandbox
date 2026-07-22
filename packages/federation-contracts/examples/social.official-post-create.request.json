@@ -1,0 +1,13 @@
+{
+  "authorAccountId": "acct_aurora_official",
+  "text": "Aurora welcomes all civilizations to World Wire.",
+  "authorization": {
+    "actingLocalAgentId": "agent_ada",
+    "officialTermNumber": 3,
+    "authorityDecision": {
+      "mode": "president",
+      "ref": "term_3",
+      "authorizedAt": "2026-07-22T20:09:00Z"
+    }
+  }
+}

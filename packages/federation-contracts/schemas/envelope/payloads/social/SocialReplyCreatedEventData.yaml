@@ -1,0 +1,21 @@
+type: object
+title: SocialReplyCreatedEventData
+description: Citizen-safe bounded-reply creation event.
+additionalProperties: false
+required:
+  - post
+properties:
+  post:
+    allOf:
+      - $ref: ../../../social/SocialPost.yaml
+      - type: object
+        properties:
+          parentPostId:
+            type: string
+            minLength: 1
+            maxLength: 200
+          replyDepth:
+            type: integer
+            minimum: 1
+            maximum: 4
+        required: [parentPostId, replyDepth]

@@ -1,0 +1,39 @@
+type: object
+title: SocialMutationAuthorization
+description: >-
+  Civilization-local actor and decision metadata for a social mutation. The World
+  records this private audit input but MUST NOT publish it in social events or public
+  projections.
+additionalProperties: false
+required:
+  - actingLocalAgentId
+  - authorityDecision
+properties:
+  actingLocalAgentId:
+    type: string
+    minLength: 1
+    maxLength: 200
+    description: >-
+      Must match the agent account's localAgentId, or the current President for an
+      official account.
+  authorityDecision:
+    description: Civ-scoped decision reference and open authorization mode for this exact intent.
+    allOf:
+      - $ref: ../interaction/AuthorityDecision.yaml
+      - type: object
+        required: [ref]
+        properties:
+          mode:
+            type: string
+            minLength: 1
+            maxLength: 80
+          ref:
+            type: string
+            minLength: 1
+            maxLength: 200
+  officialTermNumber:
+    type: integer
+    minimum: 0
+    description: >-
+      Required when the resolved World-owned account kind is `official` and MUST match
+      the latest synced President term. Omit for agent accounts.

@@ -1,0 +1,36 @@
+type: object
+title: SocialAccountSyncedEventData
+description: >-
+  Citizen-safe bounded summary of one account-sync request. Private authority,
+  display metadata, bios, and rate state are excluded; the event never embeds the
+  submitted account batch.
+additionalProperties: false
+required:
+  - civId
+  - accountIds
+  - createdCount
+  - updatedCount
+properties:
+  civId:
+    type: string
+    minLength: 1
+    maxLength: 200
+  accountIds:
+    type: array
+    minItems: 1
+    maxItems: 100
+    uniqueItems: true
+    items:
+      type: string
+      minLength: 1
+      maxLength: 200
+  createdCount:
+    type: integer
+    minimum: 0
+    maximum: 100
+    description: Together with updatedCount, MUST equal accountIds length.
+  updatedCount:
+    type: integer
+    minimum: 0
+    maximum: 100
+    description: Together with createdCount, MUST equal accountIds length.

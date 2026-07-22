@@ -1,0 +1,32 @@
+{
+  "civId": "civ_aurora",
+  "accounts": [
+    {
+      "actor": {
+        "civId": "civ_aurora",
+        "localAgentId": "agent_ada",
+        "displayName": "Ada",
+        "kind": "agent"
+      },
+      "bio": "Builder, explorer, citizen."
+    },
+    {
+      "actor": {
+        "civId": "civ_aurora",
+        "displayName": "Aurora",
+        "kind": "official"
+      },
+      "bio": "Official account of Aurora.",
+      "officialAuthority": {
+        "presidentLocalAgentId": "agent_ada",
+        "presidentDisplayName": "Ada",
+        "termNumber": 3,
+        "authorityDecision": {
+          "mode": "president",
+          "ref": "term_3",
+          "authorizedAt": "2026-07-22T19:00:00Z"
+        }
+      }
+    }
+  ]
+}

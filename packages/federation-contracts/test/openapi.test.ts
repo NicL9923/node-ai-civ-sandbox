@@ -7,8 +7,22 @@ const pkgRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
 type OpenApiDoc = {
   openapi: string;
-  paths: Record<string, Record<string, { operationId?: string }>>;
-  components: { schemas: Record<string, unknown> };
+  paths: Record<
+    string,
+    Record<
+      string,
+      {
+        operationId?: string;
+        parameters?: Array<{ $ref?: string; name?: string }>;
+        security?: Array<Record<string, string[]>>;
+      }
+    >
+  >;
+  components: {
+    schemas: Record<string, unknown>;
+    parameters: Record<string, { description?: string }>;
+    responses: Record<string, { headers?: Record<string, unknown> }>;
+  };
 };
 
 const bundled = JSON.parse(
@@ -64,6 +78,19 @@ describe("bundled OpenAPI document", () => {
       "listRelationships",
       "listWorldEvents",
       "streamWorldEvents",
+      "syncSocialAccounts",
+      "getSocialAccount",
+      "listSocialAccountPosts",
+      "listSocialFollowingFeed",
+      "listSocialFollowers",
+      "listSocialFollowing",
+      "setSocialFollow",
+      "listSocialGlobalFeed",
+      "createSocialPost",
+      "getSocialPost",
+      "getSocialThread",
+      "tombstoneSocialPost",
+      "setSocialPostLike",
     ];
     for (const id of required) expect(ids.has(id)).toBe(true);
   });
@@ -105,5 +132,57 @@ describe("bundled OpenAPI document", () => {
     expect(refsFor("/civilizations/{civId}/events/batch", "post").join(" ")).toContain(
       "IdempotencyKeyRequired",
     );
+  });
+
+  it("keeps every social read public and every social mutation HMAC-authenticated and idempotent", () => {
+    const publicReads: Array<[string, string]> = [
+      ["/social/accounts/{accountId}", "get"],
+      ["/social/accounts/{accountId}/posts", "get"],
+      ["/social/accounts/{accountId}/feed", "get"],
+      ["/social/accounts/{accountId}/followers", "get"],
+      ["/social/accounts/{accountId}/following", "get"],
+      ["/social/feed", "get"],
+      ["/social/posts/{postId}", "get"],
+      ["/social/posts/{postId}/thread", "get"],
+    ];
+    for (const [path, method] of publicReads) {
+      expect(bundled.paths[path]?.[method]?.security).toEqual([]);
+    }
+
+    const mutations: Array<[string, string]> = [
+      ["/social/accounts/sync", "post"],
+      ["/social/accounts/{accountId}/following/{targetAccountId}", "put"],
+      ["/social/posts", "post"],
+      ["/social/posts/{postId}/tombstone", "post"],
+      ["/social/posts/{postId}/likes/{accountId}", "put"],
+    ];
+    const requiredHeaders = [
+      "HmacProtocolVersion",
+      "HmacCivId",
+      "HmacKeyId",
+      "HmacTimestamp",
+      "HmacNonce",
+      "HmacSignature",
+      "IdempotencyKeyRequired",
+    ];
+    for (const [path, method] of mutations) {
+      const refs = (bundled.paths[path]?.[method]?.parameters ?? [])
+        .map((p) => p.$ref ?? p.name ?? "")
+        .join(" ");
+      for (const header of requiredHeaders) expect(refs).toContain(header);
+    }
+  });
+
+  it("isolates required social rate-limit headers from legacy v1 responses", () => {
+    expect(bundled.components.responses.TooManyRequests.headers).toBeUndefined();
+    expect(bundled.components.responses.SocialTooManyRequests.headers).toHaveProperty("Retry-After");
+  });
+
+  it("binds social cursors to snapshot identity, watermark, direction, and position", () => {
+    const description = bundled.components.parameters.SocialCursor.description ?? "";
+    for (const semantic of ["endpoint/feed identity", "account/filter", "high-watermark", "direction", "position"]) {
+      expect(description).toContain(semantic);
+    }
+    expect(description).toContain("cursor_filter_mismatch");
   });
 });

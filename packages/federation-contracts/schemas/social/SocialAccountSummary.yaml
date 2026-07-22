@@ -1,0 +1,22 @@
+type: object
+title: SocialAccountSummary
+description: Compact citizen-safe account projection embedded in posts and events.
+additionalProperties: false
+required:
+  - accountId
+  - actor
+  - status
+properties:
+  accountId:
+    type: string
+    minLength: 1
+    maxLength: 200
+    description: Opaque World-owned stable social account id.
+  actor:
+    $ref: ./SocialActorRef.yaml
+  status:
+    type: string
+    minLength: 1
+    maxLength: 50
+    description: Open lifecycle string. Known v1 value is `active`; future values may include suspended.
+    examples: ["active"]
