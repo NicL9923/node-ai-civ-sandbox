@@ -36,6 +36,7 @@ const COSMOS_CONTAINERS_CS = resolve(
   repoRoot,
   'apps/world-map/src/WorldMap.Infrastructure/Cosmos/CosmosContainers.cs',
 );
+const RUNBOOK = resolve(repoRoot, 'docs/world-deployment-runbook.md');
 
 // Scan EVERY hand-authored file in infra/world so a secret in a new bicep/param/json file is covered.
 const INFRA_FILES = readdirSync(WORLD_INFRA_DIR)
@@ -89,6 +90,30 @@ export function scanContent(content, denyList) {
     }
   });
   return hits;
+}
+
+/**
+ * Classify every `provision-world-onboarding.ps1` invocation in a document, after collapsing
+ * PowerShell backtick line-continuations so a multi-line call is a single unit:
+ *   - managed  = has -CivVault (provisions World + civ vaults in ONE run)
+ *   - external = has -RetainTransferFiles (World vault + retained files for an external civ)
+ *   - worldOnly = neither (the buggy pattern: a World-only run that mints a token the civ never gets)
+ * Credentials must be generated exactly once per civ, so the managed-civ flow requires exactly one
+ * `managed` call and zero `worldOnly` calls.
+ */
+export function categorizeOnboardingInvocations(content) {
+  const joined = content.replace(/`[ \t]*\r?\n[ \t]*/g, ' ');
+  let managed = 0;
+  let external = 0;
+  let worldOnly = 0;
+  for (const line of joined.split(/\r?\n/)) {
+    if (!/provision-world-onboarding\.ps1/.test(line)) continue;
+    if (!/-WorldVault\b/.test(line)) continue; // an actual invocation, not prose
+    if (/-CivVault\b/.test(line)) managed++;
+    else if (/-RetainTransferFiles\b/.test(line)) external++;
+    else worldOnly++;
+  }
+  return { managed, external, worldOnly };
 }
 
 // ---- Runtime state --------------------------------------------------------------------------------
@@ -389,10 +414,36 @@ function checkDeployTooling() {
   }
 }
 
+// --------------------------------------------------------------------------------------------------
+// (4b) Onboarding flow: credentials generated exactly once (managed-civ) — no World-only re-run
+// --------------------------------------------------------------------------------------------------
+function checkOnboardingFlow() {
+  const { managed, external, worldOnly } = categorizeOnboardingInvocations(readFileSync(RUNBOOK, 'utf8'));
+  let ok = true;
+  if (worldOnly > 0) {
+    ok = false;
+    errors.push(
+      `onboarding-flow: runbook has ${worldOnly} World-only provision-world-onboarding call(s) (neither -CivVault nor -RetainTransferFiles) — the managed-civ flow must generate credentials ONCE with both -WorldVault and -CivVault`,
+    );
+  }
+  if (managed !== 1) {
+    ok = false;
+    errors.push(
+      `onboarding-flow: runbook must contain exactly ONE managed-civ helper call (-WorldVault + -CivVault), found ${managed}`,
+    );
+  }
+  if (ok) {
+    console.log(
+      `onboarding-flow: OK — 1 managed-civ call, ${external} external-civ call(s), 0 World-only calls`,
+    );
+  }
+}
+
 function runAll() {
   checkContainerParity();
   checkNoSecrets();
   checkOnboardingRecords();
+  checkOnboardingFlow();
   checkSecretHandling();
   checkDeployTooling();
 

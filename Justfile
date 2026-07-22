@@ -171,10 +171,10 @@ world-deploy-app subscription resource_group app_name:
 world-deploy-prev subscription resource_group app_name:
     ./scripts/deploy-world-app.ps1 -Rollback -Subscription {{subscription}} -ResourceGroup {{resource_group}} -AppName {{app_name}}
 
-# Securely generate + provision World (and optionally civ) onboarding credentials via the CSPRNG helper.
-# Emits only the non-secret tokenHash + names; raw material never touches args/output/history.
-world-provision-onboarding world_vault hmac_secret_name subscription:
-    ./scripts/provision-world-onboarding.ps1 -WorldVault {{world_vault}} -HmacSecretName {{hmac_secret_name}} -Subscription {{subscription}}
+# Credential generation is a one-time, multi-parameter security operation — run the helper directly per
+# the runbook (§7): ./scripts/provision-world-onboarding.ps1 -WorldVault <w> -CivVault <c> ... (once,
+# both vaults). There is intentionally no World-only recipe (a second/World-only run mints a mismatched
+# token/HMAC and breaks civ registration).
 
 # Enable civ->World federation on the EXISTING civ app (phase 2). Set the remaining WORLD_* settings
 # (HMAC/onboarding via Key Vault SecretUri references to the civ vault) per the runbook before this toggle.

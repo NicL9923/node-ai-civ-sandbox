@@ -9,7 +9,7 @@
 // Exit 0 = all assertions hold; 1 = a detector regressed.
 // =====================================================================================================
 
-import { RAW_VALUE_DENYLIST, SECRET_HANDLING_DENYLIST, scanContent } from './check-world-infra.mjs';
+import { RAW_VALUE_DENYLIST, SECRET_HANDLING_DENYLIST, scanContent, categorizeOnboardingInvocations } from './check-world-infra.mjs';
 
 const failures = [];
 const hitNames = (content, denyList) => scanContent(content, denyList).map((h) => h.name);
@@ -68,6 +68,38 @@ expectHit('bare secret var', '  $hmacSecret', SECRET_HANDLING_DENYLIST, 'bare se
 expectClean('printed tokenHash (non-secret)', 'Write-Host "tokenHash: $tokenHash"', SECRET_HANDLING_DENYLIST);
 expectClean('keyvault secret set --file', 'az keyvault secret set --vault-name v --name n --file $f', SECRET_HANDLING_DENYLIST);
 expectClean('CSPRNG RandomNumberGenerator', '$rng = [System.Security.Cryptography.RandomNumberGenerator]', SECRET_HANDLING_DENYLIST);
+
+// --- Onboarding-flow categorization (single-generation invariant) ---
+function expectCounts(label, content, expected) {
+  const got = categorizeOnboardingInvocations(content);
+  for (const k of ['managed', 'external', 'worldOnly']) {
+    if (got[k] !== expected[k]) {
+      failures.push(`flow ${label}: expected ${k}=${expected[k]}, got ${got[k]}`);
+    }
+  }
+}
+// Correct managed flow: one call with both vaults (across backtick-continued lines) + one external.
+expectCounts(
+  'managed + external',
+  "$r = ./scripts/provision-world-onboarding.ps1 -WorldVault w `\n  -HmacSecretName h -CivVault c -Subscription s\n" +
+    '$r = ./scripts/provision-world-onboarding.ps1 -WorldVault w -RetainTransferFiles -Subscription s',
+  { managed: 1, external: 1, worldOnly: 0 },
+);
+// The bug pattern: a World-only run (neither -CivVault nor -RetainTransferFiles).
+expectCounts(
+  'world-only bug',
+  '$r = ./scripts/provision-world-onboarding.ps1 -WorldVault w -HmacSecretName h -Subscription s',
+  { managed: 0, external: 0, worldOnly: 1 },
+);
+// Two managed runs (would mint mismatched credentials).
+expectCounts(
+  'two managed',
+  './scripts/provision-world-onboarding.ps1 -WorldVault w -CivVault c\n' +
+    './scripts/provision-world-onboarding.ps1 -WorldVault w -CivVault c2',
+  { managed: 2, external: 0, worldOnly: 0 },
+);
+// Prose mention (no -WorldVault) must not count.
+expectCounts('prose mention', 'See scripts/provision-world-onboarding.ps1 for details.', { managed: 0, external: 0, worldOnly: 0 });
 
 if (failures.length > 0) {
   console.error('World infra guard SELF-TEST FAILED:');

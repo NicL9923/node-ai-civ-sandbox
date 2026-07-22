@@ -61,8 +61,10 @@ User role, for least-privilege civ secret access).
 `scripts/check-world-infra.mjs` + `check-world-infra.selftest.mjs` (CI + `npm run check:world-infra`)
 guard: container parity, no committed secret values (across infra **and** the Justfile/runbook/helper
 scripts), SecretUri-only references, unconditional purge protection, onboarding-record
-shape/format/uniqueness/ordering, safe secret-handling (CSPRNG, no `--value` args, no printed secrets),
-and the deploy tooling's checksum verification + readiness gate — with a negative-fixture self-test.
+shape/format/uniqueness/ordering, the single-generation onboarding flow (credentials generated exactly
+once with both `-WorldVault` and `-CivVault`, never a World-only re-run), safe secret-handling (CSPRNG,
+no `--value` args, no printed secrets), and the deploy tooling's checksum verification + readiness gate
+— with a negative-fixture self-test.
 
 Full provisioning (including a Cosmos capability inventory before choosing throughput mode), secure
 secret generation, checksummed publish/ZIP-deploy, verification, least-privilege civ enablement, and
