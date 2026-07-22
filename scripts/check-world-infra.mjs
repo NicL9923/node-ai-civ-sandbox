@@ -306,8 +306,10 @@ function checkSecretHandling() {
     // `$tokenHash` (a non-secret hash) does not.
     {
       name: 'prints a raw secret/token variable',
-      re: /(Write-Host|Write-Output|Write-Information|echo)\b[^\n]*\$(token|hmac|hmacSecret|secret|onboardingToken)\b/i,
+      re: /(Write-Host|Write-Output|Write-Information|Write-Verbose|Write-Debug|echo)\b[^\n]*\$(token|hmac|hmacSecret|secret|onboardingToken)\b/i,
     },
+    // A bare secret variable on its own line — PowerShell echoes it to the console.
+    { name: 'bare secret variable emitted to output', re: /^\s*\$(token|hmac|hmacSecret|secret|onboardingToken)\b\s*;?\s*$/i },
   ];
 
   let clean = true;
