@@ -277,6 +277,38 @@ export type AgentAction =
         inReplyTo?: string;
         rationale: string;
       }
+    | {
+        // World Wire: publish a root post. `official` posts from the civ's official account
+        // (President only); otherwise it posts from the acting agent's own account.
+        type: "postSocial";
+        text: string;
+        official?: boolean;
+        rationale: string;
+      }
+    | {
+        // World Wire: reply to an existing post. `official` replies from the official account.
+        type: "replySocial";
+        parentPostId: string;
+        text: string;
+        official?: boolean;
+        rationale: string;
+      }
+    | {
+        // World Wire: set like state on a post (liked=false to unlike). Idempotent desired state.
+        type: "likeSocial";
+        postId: string;
+        liked?: boolean;
+        official?: boolean;
+        rationale: string;
+      }
+    | {
+        // World Wire: set follow state on another account (following=false to unfollow).
+        type: "followSocial";
+        targetAccountId: string;
+        following?: boolean;
+        official?: boolean;
+        rationale: string;
+      }
     | { type: "noop"; rationale: string }
   );
 
@@ -313,7 +345,13 @@ export type SimulationEventType =
   | "foreignMessageReceived"
   | "foreignInteractionAcked"
   | "foreignInteractionFailed"
-  | "foreignRegistered";
+  | "foreignRegistered"
+  // World Wire (social) local lifecycle (only recorded when the social connector is enabled).
+  | "socialPosted"
+  | "socialReplied"
+  | "socialLiked"
+  | "socialFollowed"
+  | "socialActionFailed";
 
 export interface SimulationEvent {
   id: string;
@@ -338,6 +376,38 @@ export interface WorldSnapshot {
   recentEvents: SimulationEvent[];
   /** Present only when the World federation connector is enabled. Citizen-safe; never carries secrets. */
   foreignAffairs?: ForeignAffairsSnapshot;
+  /** Present only when the World Wire social sub-feature is enabled. Citizen-safe; never carries secrets. */
+  social?: SocialPublicSummary;
+}
+
+/** A citizen-safe World Wire feed item for the observer UI. */
+export interface SocialPublicFeedItem {
+  postId: string;
+  authorAccountId: string;
+  authorName: string;
+  text: string | null;
+  parentPostId: string | null;
+  replyCount: number;
+  likeCount: number;
+}
+
+/**
+ * Citizen-safe public view of World Wire status for the observer. MUST NOT include credentials,
+ * authority audit, President term binding, model ids, memories, or private profile data.
+ */
+export interface SocialPublicSummary {
+  enabled: boolean;
+  connected: boolean;
+  /** Number of this civ's synced World Wire accounts (agents + official). */
+  accountCount: number;
+  /** Whether the official civ account has been synced. */
+  hasOfficialAccount: boolean;
+  /** Recent global feed, newest first, bounded. */
+  feed: SocialPublicFeedItem[];
+  /** Compact social briefing lines. */
+  briefing: string[];
+  pendingOutbox: number;
+  failedOutbox: number;
 }
 
 /** A known foreign civilization as a citizen-safe reference for prompts and the observer UI. */

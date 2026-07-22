@@ -329,6 +329,13 @@ export class FederationService implements FederationPort {
         event: this.buildForeignEvent("foreignMessageReceived", `${from} sent a message${data.subject ? ` (${data.subject})` : ""}: ${data.body}`, rawKey, turn, data.fromCiv)
       };
     }
+    // World Wire social activity may arrive as a typed command. We use it only to freshen the
+    // foreign-affairs briefing — never to duplicate posts into agent memories (the feed poll is the
+    // authoritative content source). The dedupe record is still written by the caller.
+    if (type.startsWith("world.social")) {
+      mutateAddWorldNote(state, "There's fresh activity on the World Wire.");
+      return { decision: { status: "applied" } };
+    }
     // Unknown command types must never crash or stall the cursor: reject with a stable reason. State is
     // left untouched (no world note), but the inbox dedupe record is still written by the caller.
     return { decision: { status: "rejected", detail: "unsupported_command_type" } };

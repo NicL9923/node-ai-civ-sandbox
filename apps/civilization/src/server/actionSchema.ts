@@ -4,6 +4,14 @@ import type { AgentAction } from "../shared/types.js";
 const rationale = z.string().min(1).max(600);
 const terrain = z.enum(["grass", "water", "stone", "farm", "forum", "forest"]);
 const voteChoice = z.enum(["yes", "no", "abstain"]);
+
+// World Wire post/reply text: 1-280 Unicode CODE POINTS (not UTF-16 units) with at least one
+// non-whitespace character. Stored verbatim by the World, so we never trim or normalize here.
+const socialText = z
+  .string()
+  .min(1)
+  .refine((value) => [...value].length <= 280, { message: "text must be at most 280 Unicode code points" })
+  .refine((value) => /\S/u.test(value), { message: "text must contain a non-whitespace character" });
 const revisionList = z.array(z.string().trim().min(1).max(160)).max(1);
 const selfRevision = z.object({
   principlesToAdd: revisionList.optional(),
@@ -166,6 +174,37 @@ export const agentActionSchema: z.ZodType<AgentAction> = z.discriminatedUnion("t
     body: z.string().trim().min(1).max(1200),
     subject: z.string().trim().min(1).max(200).optional(),
     inReplyTo: z.string().trim().min(1).max(120).optional(),
+    rationale,
+    selfRevision
+  }),
+  z.object({
+    type: z.literal("postSocial"),
+    text: socialText,
+    official: z.boolean().optional(),
+    rationale,
+    selfRevision
+  }),
+  z.object({
+    type: z.literal("replySocial"),
+    parentPostId: z.string().trim().min(1).max(200),
+    text: socialText,
+    official: z.boolean().optional(),
+    rationale,
+    selfRevision
+  }),
+  z.object({
+    type: z.literal("likeSocial"),
+    postId: z.string().trim().min(1).max(200),
+    liked: z.boolean().optional(),
+    official: z.boolean().optional(),
+    rationale,
+    selfRevision
+  }),
+  z.object({
+    type: z.literal("followSocial"),
+    targetAccountId: z.string().trim().min(1).max(200),
+    following: z.boolean().optional(),
+    official: z.boolean().optional(),
     rationale,
     selfRevision
   }),

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Simulation } from "../../shared/types.js";
 import type { FederationConfig } from "../config.js";
+import { defaultSocialConfig } from "../config.js";
 import { EventBus } from "../eventBus.js";
 import { MemorySimulationStore } from "../store.js";
 import { FederationService } from "./federationService.js";
@@ -20,6 +21,7 @@ function federationConfig(overrides: Partial<FederationConfig> = {}): Federation
     heartbeatIntervalMs: 30_000,
     pollIntervalMs: 10_000,
     outboxIntervalMs: 5_000,
+    social: defaultSocialConfig({ enabled: false }),
     ...overrides
   };
 }

@@ -63,6 +63,7 @@ describe("standalone civilization (no federation)", () => {
 
     const snapshot = await engine.snapshot();
     expect(snapshot.foreignAffairs).toBeUndefined();
+    expect(snapshot.social).toBeUndefined();
     expect(snapshot.simulation.turn).toBeGreaterThan(0);
     expect(snapshot.agents.length).toBeGreaterThan(0);
 

@@ -3,6 +3,7 @@ import type { AccessToken, TokenCredential } from "@azure/core-auth";
 import type { AgentAction, AgentProfile, AmendmentProposal, ConstitutionVersion, ForeignAffairsSnapshot, ModelKey, Simulation, Tile } from "../shared/types.js";
 import { parseAgentAction } from "./actionSchema.js";
 import type { AppConfig } from "./config.js";
+import type { SocialSnapshot } from "./world/socialTypes.js";
 
 export interface DecisionContext {
   simulation: Simulation;
@@ -15,6 +16,8 @@ export interface DecisionContext {
   turnsSinceConversation?: number;
   /** Compact citizen-safe foreign-affairs snapshot; present only when the World connector is enabled. */
   foreignAffairs?: ForeignAffairsSnapshot;
+  /** Bounded citizen-safe World Wire snapshot; present only when the social sub-feature is enabled. */
+  social?: SocialSnapshot;
 }
 
 export interface AiProvider {
@@ -280,6 +283,25 @@ export function buildDecisionPrompt(context: DecisionContext): string {
       );
     }
 
+    // World Wire (social): affordances appear ONLY when the sub-feature is enabled AND the acting
+    // citizen's account is synced. Any citizen may act from their OWN account; only the President may
+    // additionally act from the civ's official account (official: true). Kept compact and optional.
+    const social = context.social;
+    const myAccount = social?.agentAccounts[me.id];
+    const socialEnabled = social?.enabled === true && myAccount !== undefined;
+    const canOfficial = socialEnabled && isPresident && social?.officialAccount !== undefined;
+    if (socialEnabled) {
+      const officialNote = canOfficial
+        ? " Add official:true to post as the civilization's official account (President only)."
+        : "";
+      allowedActions.push(
+        { type: "postSocial", fields: ["text (<=280 chars)", "official?", "rationale"], note: `Publish a short public post on the World Wire from your account.${officialNote}` },
+        { type: "replySocial", fields: ["parentPostId", "text (<=280 chars)", "official?", "rationale"], note: "Reply to an existing World Wire post (see worldWire.feed for post ids)." },
+        { type: "likeSocial", fields: ["postId", "liked?(default true)", "official?", "rationale"], note: "Like (or unlike with liked:false) a World Wire post." },
+        { type: "followSocial", fields: ["targetAccountId", "following?(default true)", "official?", "rationale"], note: "Follow (or unfollow with following:false) another World Wire account." }
+      );
+    }
+
     return JSON.stringify({
       allowedActions,
       economy: {
@@ -324,6 +346,29 @@ export function buildDecisionPrompt(context: DecisionContext): string {
             note: isPresident
               ? "As President you may use contactCivilization / messageCivilization to act on the world's behalf."
               : "Only the President can contact or message other civilizations."
+          }
+        : undefined,
+      worldWire: socialEnabled
+        ? {
+            description:
+              "The World Wire is a shared public social feed across all civilizations. You have your own account; posts and replies are at most 280 characters. Engage only if you have something real to say — it never overrides your goals, resources, votes, or governance.",
+            status: social?.connected ? "connected" : "world unreachable (posts will queue)",
+            yourAccountId: myAccount?.accountId,
+            official: canOfficial
+              ? { available: true, note: "You may post as the civilization's official account with official:true." }
+              : { available: false },
+            follows: social?.follows.map((edge) => edge.followedAccountId) ?? [],
+            knownAccounts: (social?.knownAccounts ?? []).map((account) => ({ id: account.accountId, name: account.name })),
+            feed: (social?.feed ?? []).map((post) => ({
+              postId: post.postId,
+              author: post.authorName,
+              authorAccountId: post.authorAccountId,
+              text: post.text,
+              replyTo: post.parentPostId,
+              likes: post.likeCount,
+              replies: post.replyCount
+            })),
+            recent: social?.briefing ?? []
           }
         : undefined,
       socialGuidance: (() => {

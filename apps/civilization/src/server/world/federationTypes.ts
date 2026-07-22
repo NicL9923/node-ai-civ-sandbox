@@ -15,9 +15,22 @@ export type MessageCommandData = components["schemas"]["MessageCommandData"];
 /** Opaque forward-only command cursor (World `Cursor`). */
 export type CommandCursor = string;
 
-export type FederationDocKind = "state" | "outbox" | "inbox";
+// --- P10 World Wire (social) contract aliases (never re-declare DTOs) -------
+export type SocialAccountUpsert = components["schemas"]["SocialAccountUpsert"];
+export type SocialAccountSyncRequest = components["schemas"]["SocialAccountSyncRequest"];
+export type SocialAccount = components["schemas"]["SocialAccount"];
+export type SocialActorRef = components["schemas"]["SocialActorRef"];
+export type SocialOfficialAuthority = components["schemas"]["SocialOfficialAuthority"];
+export type SocialMutationAuthorization = components["schemas"]["SocialMutationAuthorization"];
+export type SocialPost = components["schemas"]["SocialPost"];
+export type SocialPostCreateRequest = components["schemas"]["SocialPostCreateRequest"];
+export type SocialReactionSetRequest = components["schemas"]["SocialReactionSetRequest"];
+export type SocialFollowSetRequest = components["schemas"]["SocialFollowSetRequest"];
+export type SocialPostPage = components["schemas"]["SocialPostPage"];
 
-interface FederationDocBase {
+export type FederationDocKind = "state" | "outbox" | "inbox" | "social";
+
+export interface FederationDocBase {
   id: string;
   simulationId: string;
   kind: FederationDocKind;
@@ -46,17 +59,46 @@ export interface FederationStateDoc extends FederationDocBase {
   updatedAt: string;
 }
 
-export type OutboxItemKind = "event" | "interaction";
+export type OutboxItemKind = "event" | "interaction" | "social";
 export type OutboxStatus = "pending" | "sent" | "failed";
 
-/** A durable outbound item (a CloudEvent export or a President-authorized interaction). */
+/**
+ * A durable World Wire mutation intent. Account/target ids are resolved from the synced social state
+ * at ENQUEUE time (in the AI turn); the connector flushes it to the network later. Never network in a
+ * turn. `op` selects the endpoint: `post` = createSocialPost (root or reply via parentPostId), `like` =
+ * setSocialPostLike, `follow` = setSocialFollow. unlike/unfollow are the boolean desired state.
+ */
+export type SocialOutboxPayload =
+  | {
+      op: "post";
+      authorAccountId: string;
+      text: string;
+      parentPostId?: string;
+      authorization: SocialMutationAuthorization;
+    }
+  | {
+      op: "like";
+      postId: string;
+      accountId: string;
+      liked: boolean;
+      authorization: SocialMutationAuthorization;
+    }
+  | {
+      op: "follow";
+      followerAccountId: string;
+      targetAccountId: string;
+      following: boolean;
+      authorization: SocialMutationAuthorization;
+    };
+
+/** A durable outbound item (a CloudEvent export, a President interaction, or a social mutation). */
 export interface OutboxItemDoc extends FederationDocBase {
   kind: "outbox";
   itemKind: OutboxItemKind;
   /** Stable idempotency key sent to the World; identical across retries. */
   idempotencyKey: string;
-  /** The exact payload to send (CloudEvent for events, InteractionRequest for interactions). */
-  payload: CloudEvent | InteractionRequest;
+  /** The exact payload to send (CloudEvent for events, InteractionRequest for interactions, SocialOutboxPayload for social). */
+  payload: CloudEvent | InteractionRequest | SocialOutboxPayload;
   status: OutboxStatus;
   attempts: number;
   nextAttemptAt?: string;
@@ -81,6 +123,58 @@ export interface InboxItemDoc extends FederationDocBase {
 }
 
 export const FEDERATION_STATE_ID = "fed_state";
+export const SOCIAL_STATE_ID = "fed_social";
+
+/** A compact, citizen-safe cached World Wire post projection (bounded ring, newest-first). */
+export interface SocialCachedPost {
+  postId: string;
+  authorAccountId: string;
+  authorName: string;
+  /** Post text; null once tombstoned. */
+  text: string | null;
+  parentPostId: string | null;
+  conversationRootPostId: string;
+  replyCount: number;
+  likeCount: number;
+  worldsequence: string;
+  createdAt: string;
+}
+
+/** One own social account learned from a sync response. */
+export interface SocialOwnAccount {
+  accountId: string;
+  displayName: string;
+}
+
+/**
+ * Singleton durable World Wire state (id === SOCIAL_STATE_ID). Holds the World-owned account ids learned
+ * from account sync, the last synced fingerprint (drives debounced re-sync), a bounded cached global
+ * feed + own-follows projection, a compact briefing, and a bounded dedupe set of already-surfaced direct
+ * replies. It NEVER holds secrets, model ids, memories, or private profile data.
+ */
+export interface SocialStateDoc extends FederationDocBase {
+  kind: "social";
+  /** localAgentId (internal agent id) -> synced agent account. */
+  agentAccounts: Record<string, SocialOwnAccount>;
+  /** The single official (President) account; its id is stable across term changes. */
+  officialAccount?: SocialOwnAccount;
+  /** President term whose authority was last synced onto the official account. */
+  officialTermNumber?: number;
+  /** Fingerprint of the last successfully synced desired account set. */
+  syncedFingerprint?: string;
+  lastSyncedAt?: string;
+  /** Last time the global feed was successfully polled (drives connection freshness). */
+  lastFeedPollAt?: string;
+  /** Bounded cached global feed (newest first by worldsequence). */
+  feed: SocialCachedPost[];
+  /** Own follows currently set to true: (followerAccountId -> followedAccountIds). Bounded. */
+  follows: Array<{ followerAccountId: string; followedAccountId: string }>;
+  /** Compact social briefing lines shown in prompts. */
+  briefing: string[];
+  /** Bounded dedupe set of reply postIds already surfaced as direct-reply memories. */
+  seenReplyPostIds: string[];
+  updatedAt: string;
+}
 
 /** Input for a President-authorized cross-civ interaction, produced by the engine. */
 export interface SubmitInteractionInput {
