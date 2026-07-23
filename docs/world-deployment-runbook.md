@@ -11,7 +11,7 @@ a .NET 10 ASP.NET Core federation service with a bundled React observer SPA, bac
 Templates & tooling:
 
 - `infra/world/main.bicep` — plan + Web App + App Insights + Key Vault + Cosmos `worldmap` DB/containers + RBAC.
-- `infra/world/containers.json` — Cosmos container / PK / TTL source of truth (lockstep with the runtime).
+- `infra/world/containers.json` — Cosmos container / PK / TTL / unique-key source of truth (lockstep with the runtime; `worldEvents` carries the `/payload/worldsequence` unique key backstop).
 - `infra/world/civ-federation-container.bicep` — additive `federation` container for the existing civ DB.
 - `infra/world/civ-federation-secrets.bicep` — additive dedicated civ Key Vault + civ MI Secrets User role.
 - `infra/world/main.bicepparam` — example parameters (no secrets).

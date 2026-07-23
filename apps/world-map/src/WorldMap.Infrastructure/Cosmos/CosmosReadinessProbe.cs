@@ -82,6 +82,20 @@ public sealed class CosmosReadinessProbe(CosmosClient client, IOptions<WorldMapO
                         $"Cosmos container '{name}' has a destructive positive default time-to-live ({properties.DefaultTimeToLive}s); durable containers must have none or -1.");
                 }
             }
+
+            // Structural sequence-uniqueness backstop: containers that declare unique-key paths (worldEvents
+            // on '/payload/worldsequence') MUST carry that exact Cosmos unique-key policy, or a duplicate
+            // global sequence becomes possible under an ambiguous commit. Fail closed if it is missing.
+            if (CosmosContainers.UniqueKeyPaths.TryGetValue(name, out _))
+            {
+                var actual = properties.UniqueKeyPolicy?.UniqueKeys.SelectMany(k => k.Paths) ?? [];
+                var missingPaths = CosmosContainers.MissingUniqueKeyPaths(name, actual);
+                if (missingPaths.Count > 0)
+                {
+                    return new ReadinessResult(false,
+                        $"Cosmos container '{name}' is missing required unique key path(s) [{string.Join(", ", missingPaths)}]; the world-sequence uniqueness backstop is not enforced.");
+                }
+            }
         }
 
         if (missing.Count > 0)

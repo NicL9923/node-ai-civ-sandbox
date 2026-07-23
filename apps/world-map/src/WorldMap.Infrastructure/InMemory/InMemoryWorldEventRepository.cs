@@ -13,8 +13,19 @@ public sealed class InMemoryWorldEventRepository : IWorldEventRepository
 {
     private readonly List<WorldEvent> _ordered = [];
     private readonly Dictionary<string, WorldEvent> _byDedupe = new(StringComparer.Ordinal);
+    private readonly HashSet<long> _bySequence = [];
     private readonly Lock _gate = new();
     private long _worldsequence;
+
+    // Structural parity with the Cosmos `/payload/worldsequence` unique key: a duplicate ordinal is
+    // impossible. Enforced explicitly so the invariant is asserted, not merely implied by the counter.
+    private void ClaimSequence(long ws)
+    {
+        if (!_bySequence.Add(ws))
+        {
+            throw new InvalidOperationException($"Duplicate world-event worldsequence {ws} (unique-key parity violation).");
+        }
+    }
 
     public Task<WorldEventAppend> AppendAsync(WorldEvent worldEvent, CancellationToken ct)
     {
@@ -28,6 +39,7 @@ public sealed class InMemoryWorldEventRepository : IWorldEventRepository
 
             var copy = InMemoryClone.Copy(worldEvent);
             copy.Worldsequence = ++_worldsequence;
+            ClaimSequence(copy.Worldsequence);
             _ordered.Add(copy);
             _byDedupe[copy.DedupeKey] = copy;
             return Task.FromResult(new WorldEventAppend(InMemoryClone.Copy(copy), false));
@@ -47,6 +59,7 @@ public sealed class InMemoryWorldEventRepository : IWorldEventRepository
             // Reserve the sequence, then build the public data FROM it so the embedded post worldsequence
             // equals this event's envelope worldsequence.
             var ws = ++_worldsequence;
+            ClaimSequence(ws);
             var copy = InMemoryClone.Copy(template);
             copy.Worldsequence = ws;
             copy.PublicData = buildPublicData(ws);

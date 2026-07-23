@@ -81,7 +81,43 @@ export const SECRET_HANDLING_DENYLIST = [
   { name: 'bare secret variable emitted to output', re: /^\s*\$(token|hmac|hmacSecret|secret|onboardingToken)\b\s*;?\s*$/i },
 ];
 
-/** Scan file content line-by-line against a denylist; returns [{ name, line }] matches. */
+/** Build the `const string Name = "value";` map from CosmosContainers.cs text. */
+export function parseConstMap(csText) {
+  const constMap = new Map();
+  for (const m of csText.matchAll(/public\s+const\s+string\s+(\w+)\s*=\s*"([^"]+)"\s*;/g)) {
+    constMap.set(m[1], m[2]);
+  }
+  return constMap;
+}
+
+/** Parse CosmosContainers.UniqueKeyPaths into a Map(containerName -> sorted paths[]). */
+export function parseCsUniqueKeys(csText) {
+  const constMap = parseConstMap(csText);
+  const result = new Map();
+  const dictBlock = csText.match(/UniqueKeyPaths\s*=\s*new\s+Dictionary[\s\S]*?\{([\s\S]*?)\};/m);
+  if (!dictBlock) return result;
+  for (const entry of dictBlock[1].matchAll(/\[(\w+)\]\s*=\s*\[([^\]]*)\]/g)) {
+    const containerName = constMap.get(entry[1]);
+    if (!containerName) continue;
+    const paths = [...entry[2].matchAll(/([A-Za-z_]\w*)/g)]
+      .map((m) => constMap.get(m[1]))
+      .filter((v) => v !== undefined)
+      .sort();
+    result.set(containerName, paths);
+  }
+  return result;
+}
+
+/** Parse containers.json into a Map(containerName -> sorted uniqueKeyPaths[]) for declared containers. */
+export function parseJsonUniqueKeys(spec) {
+  const result = new Map();
+  for (const c of spec.containers) {
+    if (Array.isArray(c.uniqueKeyPaths) && c.uniqueKeyPaths.length > 0) {
+      result.set(c.name, [...c.uniqueKeyPaths].sort());
+    }
+  }
+  return result;
+}
 export function scanContent(content, denyList) {
   const hits = [];
   content.split(/\r?\n/).forEach((line, idx) => {
@@ -191,6 +227,51 @@ function checkContainerParity() {
     console.log(
       `parity: OK — ${jsonAll.length} containers, PK '${spec.partitionKeyPath}', TTL on [${sortedSet(jsonTtl).join(', ')}]`,
     );
+  }
+
+  checkUniqueKeyParity(spec, cs, constMap);
+}
+
+// --------------------------------------------------------------------------------------------------
+// (1b) Unique-key parity: containers.json `uniqueKeyPaths` MUST match CosmosContainers.UniqueKeyPaths,
+// and worldEvents MUST carry exactly `/payload/worldsequence` (the structural duplicate-sequence
+// backstop). main.bicep MUST emit a uniqueKeyPolicy from the declared paths.
+// --------------------------------------------------------------------------------------------------
+function checkUniqueKeyParity(spec, cs, constMap) {
+  const jsonUnique = parseJsonUniqueKeys(spec);
+  const csUnique = parseCsUniqueKeys(cs);
+  if (csUnique.size === 0) {
+    errors.push('unique-key: could not find UniqueKeyPaths dictionary in CosmosContainers.cs');
+  }
+
+  // Every declared container must match on both sides.
+  const names = sortedSet([...jsonUnique.keys(), ...csUnique.keys()]);
+  for (const name of names) {
+    const j = jsonUnique.get(name);
+    const c = csUnique.get(name);
+    if (!j || !c || !eqSet(j, c)) {
+      errors.push(
+        `unique-key: unique-key path mismatch for '${name}'\n  C#:   ${(c ?? []).join(', ') || '(none)'}\n  JSON: ${(j ?? []).join(', ') || '(none)'}`,
+      );
+    }
+  }
+
+  // Hard requirement: worldEvents carries exactly `/payload/worldsequence`.
+  const weJson = jsonUnique.get('worldEvents') ?? [];
+  if (!eqSet(weJson, ['/payload/worldsequence'])) {
+    errors.push(
+      `unique-key: worldEvents must declare exactly ['/payload/worldsequence'] in containers.json (found [${weJson.join(', ')}])`,
+    );
+  }
+
+  // main.bicep must actually emit a unique-key policy from the declared paths.
+  const bicep = readFileSync(MAIN_BICEP, 'utf8');
+  if (!/uniqueKeyPolicy/.test(bicep) || !/uniqueKeyPaths/.test(bicep)) {
+    errors.push('unique-key: main.bicep does not emit a uniqueKeyPolicy from containers.json uniqueKeyPaths');
+  }
+
+  if (names.length > 0 && names.every((n) => eqSet(jsonUnique.get(n) ?? [], csUnique.get(n) ?? [])) && eqSet(weJson, ['/payload/worldsequence'])) {
+    console.log(`unique-key: OK — worldEvents unique key '/payload/worldsequence' parity (JSON/C#/Bicep)`);
   }
 }
 

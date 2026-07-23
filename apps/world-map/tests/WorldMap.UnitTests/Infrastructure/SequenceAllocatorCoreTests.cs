@@ -165,4 +165,35 @@ public sealed class SequenceAllocatorCoreTests
         Assert.Equal([1, 2, 3, 4, 5], assigned);
         Assert.Equal(assigned.Count, assigned.Distinct().Count());
     }
+
+    // An Occupied outcome (a different record already holds the proposed value, proven via the unique key)
+    // advances past it and retries at the next — never returning a duplicate, no gap beyond the occupied one.
+    [Fact]
+    public async Task Occupied_outcome_advances_past_the_consumed_value_and_retries()
+    {
+        var core = new SequenceAllocatorCore();
+        var store = new FakeStore { Counter = 0 };
+        store.Committed.Add(1); // seq 1 is already owned by a different record (e.g. an ambiguous prior commit)
+
+        // Seed is stale (0), so the first proposal is 1 — occupied. The core must advance to 2.
+        var proposals = new List<long>();
+        var result = await core.AllocateAsync<long>(
+            _ => Task.FromResult(0L), // deliberately stale seed
+            (next, ct) =>
+            {
+                proposals.Add(next);
+                if (store.Committed.Contains(next))
+                {
+                    return Task.FromResult(SequenceInsert<long>.Occupied());
+                }
+
+                store.Committed.Add(next);
+                return Task.FromResult(new SequenceInsert<long>(true, next));
+            },
+            store.Persist,
+            CT);
+
+        Assert.Equal([1, 2], proposals); // proposed 1 (occupied) then 2 (consumed)
+        Assert.Equal(2, result);
+    }
 }

@@ -49,6 +49,19 @@ public sealed class CosmosBootstrapper(
             properties.DefaultTimeToLive = ttl;
         }
 
+        // Structural sequence-uniqueness backstop (worldEvents on '/payload/worldsequence'). Unique-key
+        // policies are immutable after creation, so this only applies on first provisioning.
+        if (CosmosContainers.UniqueKeyPaths.TryGetValue(name, out var uniquePaths))
+        {
+            var uniqueKey = new UniqueKey();
+            foreach (var path in uniquePaths)
+            {
+                uniqueKey.Paths.Add(path);
+            }
+
+            properties.UniqueKeyPolicy.UniqueKeys.Add(uniqueKey);
+        }
+
         await database.CreateContainerIfNotExistsAsync(properties, cancellationToken: ct).ConfigureAwait(false);
     }
 }

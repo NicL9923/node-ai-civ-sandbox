@@ -106,10 +106,48 @@ internal sealed class CosmosSequenceAllocator(Container counters, string stream)
     }
 }
 
-/// <summary>Outcome of a sequence allocator insert callback.</summary>
-/// <param name="Consumed">True when the allocated value was durably used (advance the counter).</param>
-/// <param name="Result">The value returned to the allocator caller.</param>
-internal readonly record struct SequenceInsert<T>(bool Consumed, T Result);
+/// <summary>How an allocator insert callback resolved the proposed sequence value.</summary>
+internal enum SequenceOutcome
+{
+    /// <summary>The value was durably consumed by this record; advance the high-water mark.</summary>
+    Consumed,
+
+    /// <summary>A same-identity/dedupe record already owns an earlier value; release the proposal (no advance).</summary>
+    ReleasedDuplicate,
+
+    /// <summary>A DIFFERENT record already occupies the proposed value; advance past it and retry at the next.</summary>
+    Occupied,
+}
+
+/// <summary>
+/// Outcome of a sequence allocator insert callback. Construct with the <c>(consumed, result)</c> ctor for
+/// the common consumed/dedupe cases (back-compat), or the <see cref="Occupied"/> factory when a structural
+/// unique key proves a different record already holds the proposed number.
+/// </summary>
+internal readonly record struct SequenceInsert<T>
+{
+    public SequenceOutcome Kind { get; private init; }
+    public T Result { get; private init; }
+
+    /// <summary><c>true</c> ⇒ Consumed; <c>false</c> ⇒ ReleasedDuplicate (dedupe conflict).</summary>
+    public SequenceInsert(bool consumed, T result)
+    {
+        Kind = consumed ? SequenceOutcome.Consumed : SequenceOutcome.ReleasedDuplicate;
+        Result = result;
+    }
+
+    private SequenceInsert(SequenceOutcome kind, T result)
+    {
+        Kind = kind;
+        Result = result;
+    }
+
+    public static SequenceInsert<T> Consumed(T result) => new(SequenceOutcome.Consumed, result);
+    public static SequenceInsert<T> ReleasedDuplicate(T result) => new(SequenceOutcome.ReleasedDuplicate, result);
+
+    /// <summary>The proposed value is occupied by a different record; the allocator advances past it and retries.</summary>
+    public static SequenceInsert<T> Occupied() => new(SequenceOutcome.Occupied, default!);
+}
 
 /// <summary>Persisted high-water mark for a sequence stream (stored in the <c>sequences</c> container).</summary>
 internal sealed class CosmosSequenceCounter

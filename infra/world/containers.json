@@ -1,16 +1,23 @@
 {
-  "//": "SINGLE SOURCE OF TRUTH for the worldmap Cosmos schema. Consumed by infra/world/main.bicep (loadJsonContent) AND asserted against apps/world-map/src/WorldMap.Infrastructure/Cosmos/CosmosContainers.cs by scripts/check-world-infra.mjs. Keep this in lockstep with CosmosContainers.All / TtlContainers / PartitionKeyPath. ttl:true => DefaultTimeToLive -1 (per-item ttl drives expiry); ttl:false => no default TTL (durable). Order mirrors CosmosContainers.All.",
+  "//": "SINGLE SOURCE OF TRUTH for the worldmap Cosmos schema. Consumed by infra/world/main.bicep (loadJsonContent) AND asserted against apps/world-map/src/WorldMap.Infrastructure/Cosmos/CosmosContainers.cs by scripts/check-world-infra.mjs. Keep this in lockstep with CosmosContainers.All / TtlContainers / PartitionKeyPath / UniqueKeyPaths. ttl:true => DefaultTimeToLive -1 (per-item ttl drives expiry); ttl:false => no default TTL (durable). uniqueKeyPaths (optional) => a Cosmos unique-key policy within the logical partition. Order mirrors CosmosContainers.All.",
   "partitionKeyPath": "/pk",
   "containers": [
     { "name": "civilizations", "ttl": false },
     { "name": "credentials", "ttl": false },
     { "name": "interactions", "ttl": false },
     { "name": "commands", "ttl": false },
-    { "name": "worldEvents", "ttl": false },
+    { "name": "worldEvents", "ttl": false, "uniqueKeyPaths": ["/payload/worldsequence"] },
     { "name": "relationships", "ttl": false },
     { "name": "idempotency", "ttl": true },
     { "name": "nonces", "ttl": true },
     { "name": "onboarding", "ttl": false },
+    { "name": "socialAccounts", "ttl": false },
+    { "name": "socialPosts", "ttl": false },
+    { "name": "socialFollows", "ttl": false },
+    { "name": "socialLikes", "ttl": false },
+    { "name": "socialFeed", "ttl": false },
+    { "name": "socialSnapshots", "ttl": true },
+    { "name": "socialRateLimit", "ttl": true },
     { "name": "sequences", "ttl": false },
     { "name": "lock", "ttl": false }
   ]

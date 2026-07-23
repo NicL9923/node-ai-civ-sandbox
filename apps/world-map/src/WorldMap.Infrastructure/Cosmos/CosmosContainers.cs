@@ -47,6 +47,39 @@ internal static class CosmosContainers
     public const string PartitionKeyPath = "/pk";
 
     /// <summary>
+    /// The public world-event ordinal path. A Cosmos <b>unique key</b> on this path (unique within the
+    /// single <see cref="WorldEventFeedPartition"/> logical partition) makes a duplicate global
+    /// <c>worldsequence</c> structurally impossible under ANY account consistency level — the durable
+    /// backstop for the sequence allocator's ambiguous-commit recovery. Kept in lockstep with
+    /// <c>infra/world/containers.json</c> (<c>uniqueKeyPaths</c>) by <c>scripts/check-world-infra.mjs</c>.
+    /// </summary>
+    public const string WorldEventSequencePath = "/payload/worldsequence";
+
+    /// <summary>Per-container Cosmos unique-key policy paths (empty ⇒ no unique key).</summary>
+    public static readonly IReadOnlyDictionary<string, IReadOnlyList<string>> UniqueKeyPaths =
+        new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal)
+        {
+            [WorldEvents] = [WorldEventSequencePath],
+        };
+
+    /// <summary>
+    /// Returns the required unique-key paths for <paramref name="name"/> that are absent from
+    /// <paramref name="actualPaths"/> (the container's live policy). Empty ⇒ compliant (either the
+    /// container requires no unique key, or every required path is present). Pure, so the readiness
+    /// fail-closed decision is testable without a live Cosmos account.
+    /// </summary>
+    public static IReadOnlyList<string> MissingUniqueKeyPaths(string name, IEnumerable<string> actualPaths)
+    {
+        if (!UniqueKeyPaths.TryGetValue(name, out var required))
+        {
+            return [];
+        }
+
+        var actual = new HashSet<string>(actualPaths, StringComparer.Ordinal);
+        return required.Where(p => !actual.Contains(p)).ToList();
+    }
+
+    /// <summary>
     /// The single logical partition backing the ordered public event feed. This intentionally
     /// concentrates all world events in one partition to preserve global ordering for the MVP;
     /// it is a known hot-partition tradeoff to revisit at scale (e.g. time-bucketed partitions).

@@ -197,14 +197,17 @@ the lease holder is ready and runs mutations. True horizontal scale-out would re
 allocator or a dedicated sequence service — intentionally **not** implemented here, and the code makes
 no false distributed-atomicity claims.
 
-**Consistency prerequisite (P7 infra).** The allocator's recovery from an *ambiguous* insert failure
-(Cosmos commits the event doc but the client sees a timeout/5xx/cancellation) works by invalidating its
-in-memory seed and re-reading the persisted counter **plus a live `MAX(worldsequence)` scan** on the next
-allocation, then advancing past whatever committed. This is only safe if that read observes the writer's
-own just-committed (possibly un-acked) write — i.e. it requires **read-your-writes** for the single writer.
-The Cosmos account backing the `sequences` and `worldEvents` containers must therefore run at **Strong**
-consistency (or, for a strictly single-region + single-writer deployment, **Session** where the writer
-reads its own region). Under **Eventual/Bounded-Staleness** an immediate `MAX` scan may read a lagging
-replica and return `N-1`, letting a later distinct append re-propose `N` and duplicate the global sequence.
-Configure this at the account level (Cosmos does not allow strengthening consistency per request above the
-account default); the durable alternative is a server-side atomic counter / stored-proc allocator.
+**Duplicate-sequence backstop (structural, consistency-independent).** The allocator's recovery from an
+*ambiguous* insert failure (Cosmos commits the event doc but the client sees a timeout/5xx/cancellation)
+re-reads the persisted counter **plus a live `MAX(worldsequence)` scan** and advances past whatever
+committed. Because that read runs under the account's own consistency it may momentarily lag the
+committed write, so correctness does **not** rely on read-your-writes. Instead the `worldEvents` container
+carries a Cosmos **unique key on `/payload/worldsequence`** (unique within the single `public` feed
+partition): re-proposing an already-consumed ordinal is rejected by the store. The repository observes that
+409 — bounded, jittered, cancellation-aware — to distinguish a same-dedupe replay (returns the original
+sequence) from an occupied ordinal (the allocator advances past the proven-consumed value and retries at
+the next), so a committed sequence can **never** be reused under **any** account consistency, and no gap
+forms when the prior insert did not actually land. The account may remain **Session**; the hard
+prerequisite is the unique-key policy, which the readiness probe validates (fail-closed) and the
+bootstrapper/`main.bicep` provision. Unique-key policies are immutable after container creation, so this is
+set at first provisioning.
