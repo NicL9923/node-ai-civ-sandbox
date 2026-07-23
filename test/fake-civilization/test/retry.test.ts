@@ -213,11 +213,11 @@ describe("Retry-After handling", () => {
   const now = new Date("2026-01-01T00:00:00.000Z");
 
   it.each([
-    ["huge delta", "999999", 100, 100],
-    ["future HTTP-date", "Thu, 01 Jan 2026 00:00:10 GMT", 1_000, 1_000],
+    ["huge delta", "999999", 100, 999_999_000],
+    ["future HTTP-date", "Thu, 01 Jan 2026 00:00:10 GMT", 1_000, 10_000],
     ["past HTTP-date", "Wed, 31 Dec 2025 23:59:59 GMT", 1_000, 0],
     ["invalid value", "eventually", 1_000, 25],
-  ])("bounds %s", async (_name, retryAfter, maxDelayMs, expectedDelay) => {
+  ])("handles %s", async (_name, retryAfter, maxDelayMs, expectedDelay) => {
     let attempts = 0;
     const delays: number[] = [];
     const transport: WorldTransport = {
@@ -236,5 +236,87 @@ describe("Retry-After handling", () => {
       { now: () => now },
     );
     expect(delays).toEqual([expectedDelay]);
+  });
+
+  it("retries a social PUT with stable bytes/key and fresh signing material", async () => {
+    const transport = new ScriptedTransport();
+    const body = JSON.stringify({
+      liked: true,
+      authorization: {
+        actingLocalAgentId: "agent-1",
+        authorityDecision: { mode: "delegated", ref: "like-1" },
+      },
+    });
+    transport.enqueue({
+      method: "PUT",
+      path: "/world/v1/social/posts/post-1/likes/acct-1",
+      body,
+      headers: { "Idempotency-Key": "like-1" },
+      reply: new Response(JSON.stringify({
+        type: "about:blank",
+        title: "Rate limited",
+        status: 429,
+        code: "rate_limited",
+        retryable: true,
+      }), {
+        status: 429,
+        headers: {
+          "content-type": "application/problem+json",
+          "retry-after": "2",
+        },
+      }),
+    });
+    transport.enqueue({
+      method: "PUT",
+      path: "/world/v1/social/posts/post-1/likes/acct-1",
+      body,
+      headers: { "Idempotency-Key": "like-1" },
+      reply: json(200, {
+        postId: "post-1",
+        accountId: "acct-1",
+        liked: true,
+        changed: true,
+        likeCount: 1,
+        updatedAt: "2026-01-01T00:00:02.000Z",
+        worldsequence: "4",
+      }),
+    });
+    let nonce = 0;
+    const signatures: string[] = [];
+    const delays: number[] = [];
+    const driver = new WorldFederationDriver({
+      baseUrl: "https://world.test/world/v1",
+      transport,
+      credentials: () => ({ civId: "civ_aurora", keyId: "key_aurora", secret: "shared-secret" }),
+      clock: { now: () => now },
+      nonceSource: { next: () => `social-nonce-${++nonce}` },
+      sleeper: { sleep: async (milliseconds) => { delays.push(milliseconds); } },
+      retry: { maxAttempts: 2 },
+      signingHooks: {
+        afterSign: (request) => {
+          signatures.push(request.headers.get("X-Signature") ?? "");
+        },
+      },
+    });
+
+    await driver.setSocialPostLike("post-1", "acct-1", {
+      liked: true,
+      authorization: {
+        actingLocalAgentId: "agent-1",
+        authorityDecision: { mode: "delegated", ref: "like-1" },
+      },
+    }, "like-1");
+
+    expect(delays).toEqual([2_000]);
+    expect(transport.journal.map((entry) => entry.headers["x-nonce"])).toEqual([
+      "social-nonce-1",
+      "social-nonce-2",
+    ]);
+    expect(transport.journal.map((entry) => entry.headers["idempotency-key"])).toEqual([
+      "like-1",
+      "like-1",
+    ]);
+    expect(signatures).toHaveLength(2);
+    expect(signatures[0]).not.toBe(signatures[1]);
   });
 });

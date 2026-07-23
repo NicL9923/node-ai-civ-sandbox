@@ -22,11 +22,24 @@ const usedGeneratedPaths = [
   "/civilizations/{civId}",
   "/relationships",
   "/events",
+  "/social/accounts/sync",
+  "/social/accounts/{accountId}",
+  "/social/accounts/{accountId}/posts",
+  "/social/accounts/{accountId}/feed",
+  "/social/accounts/{accountId}/followers",
+  "/social/accounts/{accountId}/following",
+  "/social/accounts/{accountId}/following/{targetAccountId}",
+  "/social/feed",
+  "/social/posts",
+  "/social/posts/{postId}",
+  "/social/posts/{postId}/thread",
+  "/social/posts/{postId}/tombstone",
+  "/social/posts/{postId}/likes/{accountId}",
 ] satisfies Array<keyof paths>;
 
 describe("WorldFederationDriver", () => {
   it("keeps every driver route pinned to a generated OpenAPI path", () => {
-    expect(usedGeneratedPaths).toHaveLength(11);
+    expect(usedGeneratedPaths).toHaveLength(24);
   });
 
   it("uses the generated route shapes and signs serialized authenticated calls", async () => {

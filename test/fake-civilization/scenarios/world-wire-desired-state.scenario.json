@@ -1,0 +1,152 @@
+{
+  "schemaVersion": "1",
+  "name": "World Wire desired-state likes and follows",
+  "actors": {
+    "aurora": {
+      "displayName": "Aurora",
+      "credentialRef": "aurora",
+      "capabilities": {
+        "protocolVersion": "1.0.0",
+        "supportedInteractionKinds": ["contact"],
+        "features": ["world-wire-social-v1"]
+      }
+    }
+  },
+  "steps": [
+    { "id": "registration", "op": "register", "actor": "aurora", "idempotencyKey": "wire-state-register-1" },
+    {
+      "id": "accounts",
+      "op": "syncSocialAccounts",
+      "actor": "aurora",
+      "idempotencyKey": "wire-state-accounts-1",
+      "body": {
+        "civId": { "valueFrom": "/registration/civId" },
+        "accounts": [
+          {
+            "actor": {
+              "civId": { "valueFrom": "/registration/civId" },
+              "kind": "agent",
+              "localAgentId": "agent_one",
+              "displayName": "Agent One"
+            }
+          },
+          {
+            "actor": {
+              "civId": { "valueFrom": "/registration/civId" },
+              "kind": "agent",
+              "localAgentId": "agent_two",
+              "displayName": "Agent Two"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "post",
+      "op": "createSocialPost",
+      "actor": "aurora",
+      "idempotencyKey": "wire-state-post-1",
+      "body": {
+        "authorAccountId": { "valueFrom": "/accounts/accounts/0/accountId" },
+        "text": "A post may like itself.",
+        "authorization": {
+          "actingLocalAgentId": "agent_one",
+          "authorityDecision": { "mode": "delegated", "ref": "agent-one-post-1" }
+        }
+      }
+    },
+    {
+      "op": "setSocialPostLike",
+      "actor": "aurora",
+      "postId": { "valueFrom": "/post/postId" },
+      "accountId": { "valueFrom": "/accounts/accounts/0/accountId" },
+      "idempotencyKey": "wire-state-self-like-1",
+      "body": {
+        "liked": true,
+        "authorization": {
+          "actingLocalAgentId": "agent_one",
+          "authorityDecision": { "mode": "delegated", "ref": "agent-one-like-1" }
+        }
+      }
+    },
+    {
+      "op": "setSocialPostLike",
+      "actor": "aurora",
+      "postId": { "valueFrom": "/post/postId" },
+      "accountId": { "valueFrom": "/accounts/accounts/1/accountId" },
+      "idempotencyKey": "wire-state-unlike-absent-1",
+      "body": {
+        "liked": false,
+        "authorization": {
+          "actingLocalAgentId": "agent_two",
+          "authorityDecision": { "mode": "delegated", "ref": "agent-two-unlike-1" }
+        }
+      },
+      "saveAs": "unlikeNoop"
+    },
+    {
+      "op": "setSocialFollow",
+      "actor": "aurora",
+      "accountId": { "valueFrom": "/accounts/accounts/0/accountId" },
+      "targetAccountId": { "valueFrom": "/accounts/accounts/1/accountId" },
+      "idempotencyKey": "wire-state-follow-1",
+      "body": {
+        "following": true,
+        "authorization": {
+          "actingLocalAgentId": "agent_one",
+          "authorityDecision": { "mode": "delegated", "ref": "agent-one-follow-1" }
+        }
+      },
+      "saveAs": "followed"
+    },
+    {
+      "op": "setSocialFollow",
+      "actor": "aurora",
+      "accountId": { "valueFrom": "/accounts/accounts/0/accountId" },
+      "targetAccountId": { "valueFrom": "/accounts/accounts/1/accountId" },
+      "idempotencyKey": "wire-state-follow-2",
+      "body": {
+        "following": true,
+        "authorization": {
+          "actingLocalAgentId": "agent_one",
+          "authorityDecision": { "mode": "delegated", "ref": "agent-one-follow-2" }
+        }
+      },
+      "saveAs": "followNoop"
+    },
+    {
+      "op": "setSocialFollow",
+      "actor": "aurora",
+      "accountId": { "valueFrom": "/accounts/accounts/1/accountId" },
+      "targetAccountId": { "valueFrom": "/accounts/accounts/1/accountId" },
+      "idempotencyKey": "wire-state-self-follow-1",
+      "body": {
+        "following": true,
+        "authorization": {
+          "actingLocalAgentId": "agent_two",
+          "authorityDecision": { "mode": "delegated", "ref": "agent-two-self-follow-1" }
+        }
+      },
+      "expectError": { "status": 409, "code": "self_follow_forbidden" }
+    },
+    {
+      "op": "setSocialFollow",
+      "actor": "aurora",
+      "accountId": { "valueFrom": "/accounts/accounts/1/accountId" },
+      "targetAccountId": { "valueFrom": "/accounts/accounts/0/accountId" },
+      "idempotencyKey": "wire-state-unfollow-absent-1",
+      "body": {
+        "following": false,
+        "authorization": {
+          "actingLocalAgentId": "agent_two",
+          "authorityDecision": { "mode": "delegated", "ref": "agent-two-unfollow-1" }
+        }
+      },
+      "saveAs": "unfollowNoop"
+    },
+    { "op": "assert", "actual": "/unlikeNoop/changed", "equals": false },
+    { "op": "assert", "actual": "/followed/changed", "equals": true },
+    { "op": "assert", "actual": "/followNoop/changed", "equals": false },
+    { "op": "assert", "actual": "/unfollowNoop/changed", "equals": false }
+  ]
+}

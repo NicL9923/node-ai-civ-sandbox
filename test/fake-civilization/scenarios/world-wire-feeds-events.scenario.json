@@ -1,0 +1,167 @@
+{
+  "schemaVersion": "1",
+  "name": "World Wire feed snapshots tombstones and public events",
+  "actors": {
+    "aurora": {
+      "displayName": "Aurora",
+      "credentialRef": "aurora",
+      "capabilities": {
+        "protocolVersion": "1.0.0",
+        "supportedInteractionKinds": ["contact"],
+        "features": ["world-wire-social-v1"]
+      }
+    }
+  },
+  "steps": [
+    { "id": "registration", "op": "register", "actor": "aurora", "idempotencyKey": "wire-feed-register-1" },
+    { "op": "arrange", "action": "isolatePublicEventFeed" },
+    {
+      "id": "accounts",
+      "op": "syncSocialAccounts",
+      "actor": "aurora",
+      "idempotencyKey": "wire-feed-accounts-1",
+      "body": {
+        "civId": { "valueFrom": "/registration/civId" },
+        "accounts": [
+          {
+            "actor": {
+              "civId": { "valueFrom": "/registration/civId" },
+              "kind": "agent",
+              "localAgentId": "agent_reader",
+              "displayName": "Aurora Reader"
+            }
+          },
+          {
+            "actor": {
+              "civId": { "valueFrom": "/registration/civId" },
+              "kind": "agent",
+              "localAgentId": "agent_writer",
+              "displayName": "Aurora Writer"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "op": "setSocialFollow",
+      "actor": "aurora",
+      "accountId": { "valueFrom": "/accounts/accounts/0/accountId" },
+      "targetAccountId": { "valueFrom": "/accounts/accounts/1/accountId" },
+      "idempotencyKey": "wire-feed-follow-1",
+      "body": {
+        "following": true,
+        "authorization": {
+          "actingLocalAgentId": "agent_reader",
+          "authorityDecision": { "mode": "delegated", "ref": "reader-follow-1" }
+        }
+      }
+    },
+    {
+      "id": "post",
+      "op": "createSocialPost",
+      "actor": "aurora",
+      "idempotencyKey": "wire-feed-post-1",
+      "body": {
+        "authorAccountId": { "valueFrom": "/accounts/accounts/1/accountId" },
+        "text": "Text retained only by the historical creation event.",
+        "authorization": {
+          "actingLocalAgentId": "agent_writer",
+          "authorityDecision": { "mode": "delegated", "ref": "writer-feed-post-1" }
+        }
+      }
+    },
+    {
+      "id": "secondPost",
+      "op": "createSocialPost",
+      "actor": "aurora",
+      "idempotencyKey": "wire-feed-post-2",
+      "body": {
+        "authorAccountId": { "valueFrom": "/accounts/accounts/1/accountId" },
+        "text": "Second post ensures every feed returns a continuation cursor.",
+        "authorization": {
+          "actingLocalAgentId": "agent_writer",
+          "authorityDecision": { "mode": "delegated", "ref": "writer-feed-post-2" }
+        }
+      }
+    },
+    { "op": "arrange", "action": "freezeSocialSnapshot" },
+    { "op": "listSocialGlobalFeed", "actor": "aurora", "limit": 1, "saveAs": "globalPage" },
+    {
+      "op": "listSocialAccountPosts",
+      "actor": "aurora",
+      "accountId": { "valueFrom": "/accounts/accounts/1/accountId" },
+      "limit": 1,
+      "saveAs": "accountPage"
+    },
+    {
+      "op": "listSocialFollowingFeed",
+      "actor": "aurora",
+      "accountId": { "valueFrom": "/accounts/accounts/0/accountId" },
+      "limit": 1,
+      "saveAs": "followingPage"
+    },
+    { "op": "assert", "actual": "/globalPage/nextCursor", "exists": true },
+    { "op": "assert", "actual": "/accountPage/nextCursor", "exists": true },
+    { "op": "assert", "actual": "/followingPage/nextCursor", "exists": true },
+    {
+      "op": "listSocialAccountPosts",
+      "actor": "aurora",
+      "accountId": { "valueFrom": "/accounts/accounts/1/accountId" },
+      "cursor": { "valueFrom": "/globalPage/nextCursor" },
+      "expectError": { "status": 400, "code": "cursor_filter_mismatch" }
+    },
+    {
+      "op": "listSocialFollowingFeed",
+      "actor": "aurora",
+      "accountId": { "valueFrom": "/accounts/accounts/0/accountId" },
+      "cursor": { "valueFrom": "/accountPage/nextCursor" },
+      "expectError": { "status": 400, "code": "cursor_filter_mismatch" }
+    },
+    {
+      "op": "listSocialGlobalFeed",
+      "actor": "aurora",
+      "cursor": { "valueFrom": "/followingPage/nextCursor" },
+      "expectError": { "status": 400, "code": "cursor_filter_mismatch" }
+    },
+    {
+      "op": "tombstoneSocialPost",
+      "actor": "aurora",
+      "postId": { "valueFrom": "/post/postId" },
+      "idempotencyKey": "wire-feed-tombstone-1",
+      "body": {
+        "authorization": {
+          "actingLocalAgentId": "agent_writer",
+          "authorityDecision": { "mode": "delegated", "ref": "writer-tombstone-1" }
+        }
+      }
+    },
+    {
+      "op": "getSocialPost",
+      "actor": "aurora",
+      "postId": { "valueFrom": "/post/postId" },
+      "saveAs": "currentPost"
+    },
+    {
+      "op": "getSocialThread",
+      "actor": "aurora",
+      "postId": { "valueFrom": "/post/postId" },
+      "saveAs": "currentThread"
+    },
+    { "op": "listEvents", "actor": "aurora", "limit": 100, "saveAs": "publicEvents" },
+    { "op": "assert", "actual": "/currentPost/status", "equals": "tombstoned" },
+    { "op": "assert", "actual": "/currentPost/text", "equals": null },
+    { "op": "assert", "actual": "/currentThread/items/0/text", "equals": null },
+    { "op": "assert", "actual": "/publicEvents/items/2/type", "equals": "world.social.post.created.v1" },
+    {
+      "op": "assert",
+      "actual": "/publicEvents/items/2/data/post/text",
+      "equals": "Text retained only by the historical creation event."
+    },
+    { "op": "assert", "actual": "/publicEvents/items/2/data/authorization", "exists": false },
+    { "op": "assert", "actual": "/publicEvents/items/2/data/hmacSecret", "exists": false },
+    { "op": "assert", "actual": "/publicEvents/items/2/data/privateProfile", "exists": false },
+    { "op": "assert", "actual": "/publicEvents/items/4/type", "equals": "world.social.post.tombstoned.v1" },
+    { "op": "assert", "actual": "/publicEvents/items/4/data/text", "exists": false },
+    { "op": "assert", "actual": "/publicEvents/items/4/data/authorization", "exists": false }
+  ]
+}

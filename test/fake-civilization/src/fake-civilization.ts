@@ -1,11 +1,20 @@
 import type { components } from "@ai-civ/federation-contracts";
 import { ConfigurationError, type FakeCivilizationConfig } from "./config.js";
-import { createInitialState, type FakeCivilizationState, type ProcessedCommand } from "./state.js";
+import {
+  createInitialSocialState,
+  createInitialState,
+  type FakeCivilizationState,
+  type ProcessedCommand,
+} from "./state.js";
 import type { Clock, NonceSource } from "./signing.js";
 import { SystemClock } from "./signing.js";
 import type { Sleeper, WorldTransport } from "./transport.js";
 import { defaultRetryPolicy } from "./transport.js";
-import { WorldFederationDriver, type SigningMutationHooks } from "./world-client.js";
+import {
+  WorldFederationDriver,
+  type SigningMutationHooks,
+  type SocialPageQuery,
+} from "./world-client.js";
 
 export interface FakeCivilizationDependencies {
   clock?: Clock;
@@ -55,6 +64,7 @@ export class FakeCivilization {
       config.displayName,
       config.capabilities.protocolVersion,
     );
+    this.state.social ??= createInitialSocialState();
     this.driver = dependencies.driver ?? new WorldFederationDriver({
       baseUrl: config.worldBaseUrl,
       transport: dependencies.transport,
@@ -120,8 +130,8 @@ export class FakeCivilization {
   ): Promise<components["schemas"]["EventBatchResult"]> {
     const civId = this.requireRegistration().civId;
     const key = idempotencyKey ?? `${this.config.alias}-events-${this.state.nextRequestSequence}`;
-    const result = await this.driver.pushEvents(civId, { events }, key);
     if (!idempotencyKey) this.state.nextRequestSequence += 1;
+    const result = await this.driver.pushEvents(civId, { events }, key);
     return result;
   }
 
@@ -166,8 +176,8 @@ export class FakeCivilization {
     idempotencyKey?: string,
   ): Promise<components["schemas"]["Accepted"]> {
     const key = idempotencyKey ?? `${this.config.alias}-interaction-${this.state.nextRequestSequence}`;
-    const result = await this.driver.submitInteraction(request, key);
     if (!idempotencyKey) this.state.nextRequestSequence += 1;
+    const result = await this.driver.submitInteraction(request, key);
     return result;
   }
 
@@ -222,6 +232,114 @@ export class FakeCivilization {
 
   listEvents(after?: string, limit?: number): Promise<components["schemas"]["EventPage"]> {
     return this.driver.listEvents(after, limit);
+  }
+
+  async syncSocialAccounts(
+    body: components["schemas"]["SocialAccountSyncRequest"],
+    idempotencyKey?: string,
+  ): Promise<components["schemas"]["SocialAccountSyncResponse"]> {
+    const result = await this.socialMutation("social-accounts", idempotencyKey, (key) =>
+      this.driver.syncSocialAccounts(body, key));
+    result.accounts.forEach((account, index) => {
+      this.state.social.accounts[account.accountId] = account;
+      const authority = body.accounts[index]?.officialAuthority;
+      if (authority) this.state.social.officialAuthorities[account.accountId] = authority;
+    });
+    return result;
+  }
+
+  async getSocialAccount(accountId: string): Promise<components["schemas"]["SocialAccount"]> {
+    const account = await this.driver.getSocialAccount(accountId);
+    this.state.social.accounts[account.accountId] = account;
+    return account;
+  }
+
+  async listSocialAccountPosts(
+    accountId: string,
+    query?: SocialPageQuery,
+  ): Promise<components["schemas"]["SocialPostPage"]> {
+    return this.rememberPostPage(await this.driver.listSocialAccountPosts(accountId, query));
+  }
+
+  async listSocialFollowingFeed(
+    accountId: string,
+    query?: SocialPageQuery,
+  ): Promise<components["schemas"]["SocialPostPage"]> {
+    return this.rememberPostPage(await this.driver.listSocialFollowingFeed(accountId, query));
+  }
+
+  listSocialFollowers(
+    accountId: string,
+    query?: SocialPageQuery,
+  ): Promise<components["schemas"]["SocialAccountPage"]> {
+    return this.driver.listSocialFollowers(accountId, query);
+  }
+
+  listSocialFollowing(
+    accountId: string,
+    query?: SocialPageQuery,
+  ): Promise<components["schemas"]["SocialAccountPage"]> {
+    return this.driver.listSocialFollowing(accountId, query);
+  }
+
+  async setSocialFollow(
+    accountId: string,
+    targetAccountId: string,
+    body: components["schemas"]["SocialFollowSetRequest"],
+    idempotencyKey?: string,
+  ): Promise<components["schemas"]["SocialFollow"]> {
+    const result = await this.socialMutation("social-follow", idempotencyKey, (key) =>
+      this.driver.setSocialFollow(accountId, targetAccountId, body, key));
+    this.state.social.follows[this.socialEdgeKey(result.followerAccountId, result.followedAccountId)] = result;
+    return result;
+  }
+
+  async listSocialGlobalFeed(query?: SocialPageQuery): Promise<components["schemas"]["SocialPostPage"]> {
+    return this.rememberPostPage(await this.driver.listSocialGlobalFeed(query));
+  }
+
+  async createSocialPost(
+    body: components["schemas"]["SocialPostCreateRequest"],
+    idempotencyKey?: string,
+  ): Promise<components["schemas"]["SocialPost"]> {
+    const post = await this.socialMutation("social-post", idempotencyKey, (key) =>
+      this.driver.createSocialPost(body, key));
+    return this.rememberPost(post);
+  }
+
+  async getSocialPost(postId: string): Promise<components["schemas"]["SocialPost"]> {
+    return this.rememberPost(await this.driver.getSocialPost(postId));
+  }
+
+  async getSocialThread(
+    postId: string,
+    query?: SocialPageQuery,
+  ): Promise<components["schemas"]["SocialThreadPage"]> {
+    const page = await this.driver.getSocialThread(postId, query);
+    page.items.forEach((post) => this.rememberPost(post));
+    return page;
+  }
+
+  async tombstoneSocialPost(
+    postId: string,
+    body: components["schemas"]["SocialPostTombstoneRequest"],
+    idempotencyKey?: string,
+  ): Promise<components["schemas"]["SocialPost"]> {
+    const post = await this.socialMutation("social-tombstone", idempotencyKey, (key) =>
+      this.driver.tombstoneSocialPost(postId, body, key));
+    return this.rememberPost(post);
+  }
+
+  async setSocialPostLike(
+    postId: string,
+    accountId: string,
+    body: components["schemas"]["SocialReactionSetRequest"],
+    idempotencyKey?: string,
+  ): Promise<components["schemas"]["SocialReaction"]> {
+    const result = await this.socialMutation("social-like", idempotencyKey, (key) =>
+      this.driver.setSocialPostLike(postId, accountId, body, key));
+    this.state.social.likes[this.socialEdgeKey(result.postId, result.accountId)] = result;
+    return result;
   }
 
   async sync(): Promise<SyncResult> {
@@ -370,6 +488,34 @@ export class FakeCivilization {
   private requireRegistration(): NonNullable<FakeCivilizationState["registration"]> {
     if (!this.state.registration) throw new ConfigurationError("Fake civilization is not registered");
     return this.state.registration;
+  }
+
+  private async socialMutation<T>(
+    operation: string,
+    idempotencyKey: string | undefined,
+    send: (key: string) => Promise<T>,
+  ): Promise<T> {
+    this.requireRegistration();
+    const key = idempotencyKey ?? `${this.config.alias}-${operation}-${this.state.nextRequestSequence}`;
+    if (!idempotencyKey) this.state.nextRequestSequence += 1;
+    const result = await send(key);
+    return result;
+  }
+
+  private rememberPost(post: components["schemas"]["SocialPost"]): components["schemas"]["SocialPost"] {
+    this.state.social.posts[post.postId] = post;
+    return post;
+  }
+
+  private rememberPostPage(
+    page: components["schemas"]["SocialPostPage"],
+  ): components["schemas"]["SocialPostPage"] {
+    page.items.forEach((post) => this.rememberPost(post));
+    return page;
+  }
+
+  private socialEdgeKey(left: string, right: string): string {
+    return JSON.stringify([left, right]);
   }
 }
 

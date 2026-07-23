@@ -33,6 +33,14 @@ export interface AppliedMessage {
   subject?: string;
 }
 
+export interface FakeSocialState {
+  accounts: Record<string, components["schemas"]["SocialAccount"]>;
+  officialAuthorities: Record<string, components["schemas"]["SocialOfficialAuthority"]>;
+  posts: Record<string, components["schemas"]["SocialPost"]>;
+  follows: Record<string, components["schemas"]["SocialFollow"]>;
+  likes: Record<string, components["schemas"]["SocialReaction"]>;
+}
+
 export interface FakeCivilizationState {
   registration?: RegistrationState;
   projection: Omit<components["schemas"]["PublicProjection"], "civId"> & { civId?: string };
@@ -42,7 +50,18 @@ export interface FakeCivilizationState {
   processedCommands: Record<string, ProcessedCommand>;
   contacts: AppliedContact[];
   messages: AppliedMessage[];
+  social: FakeSocialState;
   online: boolean;
+}
+
+export function createInitialSocialState(): FakeSocialState {
+  return {
+    accounts: {},
+    officialAuthorities: {},
+    posts: {},
+    follows: {},
+    likes: {},
+  };
 }
 
 export function createInitialState(
@@ -64,6 +83,7 @@ export function createInitialState(
     processedCommands: {},
     contacts: [],
     messages: [],
+    social: createInitialSocialState(),
     online: true,
   };
 }
@@ -94,5 +114,14 @@ export async function loadState(path: string): Promise<FakeCivilizationState> {
   ) {
     throw new ConfigurationError("State file is not a fake civilization state");
   }
-  return parsed as FakeCivilizationState;
+  const state = parsed as FakeCivilizationState;
+  state.social = {
+    ...createInitialSocialState(),
+    ...(isRecord(state.social) ? state.social : {}),
+  };
+  return state;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

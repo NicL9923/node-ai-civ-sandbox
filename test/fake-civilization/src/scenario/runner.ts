@@ -1,3 +1,4 @@
+import type { components } from "@ai-civ/federation-contracts";
 import type {
   ExpectedScenarioError,
   ReplayableScenarioStep,
@@ -5,6 +6,7 @@ import type {
   ScenarioResult,
   ScenarioRunOptions,
   ScenarioStep,
+  ScenarioInput,
 } from "./types.js";
 import { ScenarioAssertionError, ScenarioHostControlError } from "./types.js";
 import { WorldHttpError } from "../transport.js";
@@ -14,8 +16,37 @@ function pointer(root: unknown, expression: string): unknown {
   if (!expression.startsWith("/")) throw new ScenarioAssertionError("Assertions require an absolute JSON Pointer");
   return expression.slice(1).split("/").reduce<unknown>((value, segment) => {
     if (value === null || typeof value !== "object") return undefined;
-    return (value as Record<string, unknown>)[segment.replace(/~1/g, "/").replace(/~0/g, "~")];
+    const decoded = segment.replace(/~1/g, "/").replace(/~0/g, "~");
+    if (!Object.hasOwn(value, decoded)) return undefined;
+    return (value as Record<string, unknown>)[decoded];
   }, root);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function resolveInput<T>(input: ScenarioInput<T>, values: Record<string, unknown>): T {
+  if (
+    isRecord(input)
+    && Object.keys(input).length === 1
+    && typeof input.valueFrom === "string"
+  ) {
+    const resolved = pointer(values, input.valueFrom);
+    if (resolved === undefined) {
+      throw new ScenarioAssertionError(`Value reference ${input.valueFrom} did not resolve`);
+    }
+    return resolved as T;
+  }
+  if (Array.isArray(input)) {
+    return input.map((item) => resolveInput(item, values)) as T;
+  }
+  if (isRecord(input)) {
+    return Object.fromEntries(
+      Object.entries(input).map(([key, value]) => [key, resolveInput(value, values)]),
+    ) as T;
+  }
+  return input as T;
 }
 
 function primitive(value: unknown): value is string | number | boolean | null {
@@ -24,19 +55,28 @@ function primitive(value: unknown): value is string | number | boolean | null {
 
 function assertStep(step: Extract<ScenarioStep, { op: "assert" }>, values: Record<string, unknown>): void {
   const actual = pointer(values, step.actual);
+  if (step.exists !== undefined) {
+    const exists = actual !== undefined;
+    if (exists !== step.exists) {
+      throw new ScenarioAssertionError(`Expected ${step.actual} existence to be ${step.exists}`);
+    }
+    if (!step.exists) return;
+  }
   if (!primitive(actual) && !Array.isArray(actual)) {
     throw new ScenarioAssertionError(`Assertion ${step.actual} did not resolve to a primitive or array`);
   }
-  if (step.equals !== undefined && actual !== step.equals) {
-    throw new ScenarioAssertionError(`Expected ${step.actual} to equal ${JSON.stringify(step.equals)}`);
+  const expectedEquals = step.equals === undefined ? undefined : resolveInput(step.equals, values);
+  if (step.equals !== undefined && actual !== expectedEquals) {
+    throw new ScenarioAssertionError(`Expected ${step.actual} to equal ${JSON.stringify(expectedEquals)}`);
   }
   if (step.contains !== undefined) {
+    const expectedContains = resolveInput(step.contains, values);
     const contains = typeof actual === "string"
-      ? actual.includes(String(step.contains))
+      ? actual.includes(String(expectedContains))
       : Array.isArray(actual)
-        ? actual.includes(step.contains)
+        ? actual.includes(expectedContains)
         : false;
-    if (!contains) throw new ScenarioAssertionError(`Expected ${step.actual} to contain ${JSON.stringify(step.contains)}`);
+    if (!contains) throw new ScenarioAssertionError(`Expected ${step.actual} to contain ${JSON.stringify(expectedContains)}`);
   }
 }
 
@@ -110,6 +150,70 @@ export async function runScenario(scenario: Scenario, options: ScenarioRunOption
         return actorFor(step.actor).listRelationships(step.query);
       case "listEvents":
         return actorFor(step.actor).listEvents(step.after, step.limit);
+      case "syncSocialAccounts":
+        return actorFor(step.actor).syncSocialAccounts(
+          resolveInput<components["schemas"]["SocialAccountSyncRequest"]>(step.body, values),
+          step.idempotencyKey,
+        );
+      case "getSocialAccount":
+        return actorFor(step.actor).getSocialAccount(resolveInput(step.accountId, values));
+      case "listSocialAccountPosts":
+        return actorFor(step.actor).listSocialAccountPosts(resolveInput(step.accountId, values), {
+          ...(step.cursor ? { cursor: resolveInput(step.cursor, values) } : {}),
+          ...(step.limit ? { limit: step.limit } : {}),
+        });
+      case "listSocialFollowingFeed":
+        return actorFor(step.actor).listSocialFollowingFeed(resolveInput(step.accountId, values), {
+          ...(step.cursor ? { cursor: resolveInput(step.cursor, values) } : {}),
+          ...(step.limit ? { limit: step.limit } : {}),
+        });
+      case "listSocialFollowers":
+        return actorFor(step.actor).listSocialFollowers(resolveInput(step.accountId, values), {
+          ...(step.cursor ? { cursor: resolveInput(step.cursor, values) } : {}),
+          ...(step.limit ? { limit: step.limit } : {}),
+        });
+      case "listSocialFollowing":
+        return actorFor(step.actor).listSocialFollowing(resolveInput(step.accountId, values), {
+          ...(step.cursor ? { cursor: resolveInput(step.cursor, values) } : {}),
+          ...(step.limit ? { limit: step.limit } : {}),
+        });
+      case "setSocialFollow":
+        return actorFor(step.actor).setSocialFollow(
+          resolveInput(step.accountId, values),
+          resolveInput(step.targetAccountId, values),
+          resolveInput<components["schemas"]["SocialFollowSetRequest"]>(step.body, values),
+          step.idempotencyKey,
+        );
+      case "listSocialGlobalFeed":
+        return actorFor(step.actor).listSocialGlobalFeed({
+          ...(step.cursor ? { cursor: resolveInput(step.cursor, values) } : {}),
+          ...(step.limit ? { limit: step.limit } : {}),
+        });
+      case "createSocialPost":
+        return actorFor(step.actor).createSocialPost(
+          resolveInput<components["schemas"]["SocialPostCreateRequest"]>(step.body, values),
+          step.idempotencyKey,
+        );
+      case "getSocialPost":
+        return actorFor(step.actor).getSocialPost(resolveInput(step.postId, values));
+      case "getSocialThread":
+        return actorFor(step.actor).getSocialThread(resolveInput(step.postId, values), {
+          ...(step.cursor ? { cursor: resolveInput(step.cursor, values) } : {}),
+          ...(step.limit ? { limit: step.limit } : {}),
+        });
+      case "tombstoneSocialPost":
+        return actorFor(step.actor).tombstoneSocialPost(
+          resolveInput(step.postId, values),
+          resolveInput<components["schemas"]["SocialPostTombstoneRequest"]>(step.body, values),
+          step.idempotencyKey,
+        );
+      case "setSocialPostLike":
+        return actorFor(step.actor).setSocialPostLike(
+          resolveInput(step.postId, values),
+          resolveInput(step.accountId, values),
+          resolveInput<components["schemas"]["SocialReactionSetRequest"]>(step.body, values),
+          step.idempotencyKey,
+        );
     }
   };
   const executeExpected = async (
