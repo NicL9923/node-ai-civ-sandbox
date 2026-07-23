@@ -232,10 +232,27 @@ export class FederationConnector {
   }
 
   async flushOutbox(): Promise<void> {
-    const items = await this.service.listPendingOutbox();
+    // Process oldest-first with a deterministic tie-break so causal (FIFO) order is well-defined
+    // regardless of store ordering. Social like/follow are DESIRED-STATE PUTs: a newer intent for the
+    // same target must never overtake an older, not-yet-delivered one, or the final World state could
+    // regress to the older value (e.g. like=true 429s and backs off, like=false sends, then the true
+    // retry lands last ⇒ final=true, the opposite of the newest intent). We therefore preserve FIFO PER
+    // desired-state target key while letting posts and unrelated targets progress independently.
+    const items = [...(await this.service.listPendingOutbox())].sort(compareFifo);
     const now = Date.now();
+    const blockedKeys = new Set<string>();
+
     for (const item of items) {
+      const key = desiredStateKey(item);
+      // A newer same-target intent is held behind an older one that has not yet been delivered.
+      if (key && blockedKeys.has(key)) {
+        continue;
+      }
       if (item.nextAttemptAt && new Date(item.nextAttemptAt).getTime() > now) {
+        // An older not-yet-due item owns this target; every newer same-key intent must wait.
+        if (key) {
+          blockedKeys.add(key);
+        }
         continue;
       }
       try {
@@ -250,6 +267,8 @@ export class FederationConnector {
         item.lastError = undefined;
         await this.service.saveOutboxItem(item);
         await this.service.markConnection(true);
+        // Success: the target is up to date, so a newer same-key intent may send later THIS cycle in
+        // FIFO order (the key is intentionally left unblocked).
       } catch (error) {
         item.attempts += 1;
         item.lastError = error instanceof Error ? error.message : String(error);
@@ -257,9 +276,14 @@ export class FederationConnector {
           // Honor a bounded 429 Retry-After when the World advertised one; otherwise use normal backoff.
           const retryAfterMs = this.retryAfterMsOf(error);
           item.nextAttemptAt = retryAfterMs !== undefined ? this.retryAfterAt(retryAfterMs) : this.backoffAt(item.attempts);
+          // Retryable failure: the older intent is still live, so hold newer same-key intents this cycle.
+          if (key) {
+            blockedKeys.add(key);
+          }
         } else {
           item.status = "failed";
           this.log(`outbox item ${item.id} permanently failed`, error);
+          // Permanent failure: the old request can NEVER apply, so a newer same-key intent may proceed.
         }
         await this.service.saveOutboxItem(item);
       }
@@ -491,6 +515,33 @@ function parseRetryAfterMs(header: string | null | undefined): number | undefine
   const dateMs = Date.parse(header);
   if (!Number.isNaN(dateMs)) {
     return Math.max(0, dateMs - Date.now());
+  }
+  return undefined;
+}
+
+/** Deterministic FIFO order for the outbox: oldest createdAt first, id as a stable tie-breaker. */
+function compareFifo(a: OutboxItemDoc, b: OutboxItemDoc): number {
+  if (a.createdAt !== b.createdAt) {
+    return a.createdAt < b.createdAt ? -1 : 1;
+  }
+  return a.id.localeCompare(b.id);
+}
+
+/**
+ * The desired-state target key for a social like/follow (whose final value depends on delivery order),
+ * or undefined for order-independent items (posts, events, interactions). FIFO is enforced only within a
+ * key so unrelated targets and posts still progress freely.
+ */
+function desiredStateKey(item: OutboxItemDoc): string | undefined {
+  if (item.itemKind !== "social") {
+    return undefined;
+  }
+  const payload = item.payload as SocialOutboxPayload;
+  if (payload.op === "like") {
+    return `like:${payload.accountId}:${payload.postId}`;
+  }
+  if (payload.op === "follow") {
+    return `follow:${payload.followerAccountId}:${payload.targetAccountId}`;
   }
   return undefined;
 }

@@ -20,10 +20,17 @@ class MockSocialWorld {
   posts: Array<{ body: unknown; idempotencyKey: string }> = [];
   likes: unknown[] = [];
   follows: unknown[] = [];
+  /** Every like/follow attempt in order, including those answered 429 (to assert delivery ordering). */
+  likeRequests: Array<{ liked: boolean }> = [];
+  followRequests: Array<{ following: boolean }> = [];
   eventsBatches: unknown[] = [];
   feedItems: unknown[] = [];
   /** When >0, the next N POST /social/posts calls answer 429 with this Retry-After (seconds). */
   postRateLimit = 0;
+  /** When >0, the next N PUT like calls answer 429. */
+  likeRateLimit = 0;
+  /** When >0, the next N PUT follow calls answer 429. */
+  followRateLimit = 0;
   retryAfterSeconds = 5;
 
   async start(): Promise<void> {
@@ -89,14 +96,28 @@ class MockSocialWorld {
       }
       const likeMatch = p.match(/\/social\/posts\/([^/]+)\/likes\/([^/]+)$/);
       if (method === "PUT" && likeMatch) {
-        this.likes.push(JSON.parse(body || "{}"));
-        json(200, { postId: likeMatch[1], accountId: likeMatch[2], liked: true, changed: true, likeCount: 1, updatedAt: new Date(0).toISOString(), worldsequence: "2" });
+        const parsed = JSON.parse(body || "{}") as { liked: boolean };
+        this.likeRequests.push({ liked: parsed.liked });
+        if (this.likeRateLimit > 0) {
+          this.likeRateLimit -= 1;
+          json(429, { type: "about:blank", title: "Too Many Requests", code: "rate_limited" }, { "Retry-After": String(this.retryAfterSeconds) });
+          return;
+        }
+        this.likes.push(parsed);
+        json(200, { postId: likeMatch[1], accountId: likeMatch[2], liked: parsed.liked, changed: true, likeCount: 1, updatedAt: new Date(0).toISOString(), worldsequence: "2" });
         return;
       }
       const followMatch = p.match(/\/social\/accounts\/([^/]+)\/following\/([^/]+)$/);
       if (method === "PUT" && followMatch) {
-        this.follows.push(JSON.parse(body || "{}"));
-        json(200, { followerAccountId: followMatch[1], followedAccountId: followMatch[2], following: true, changed: true, updatedAt: new Date(0).toISOString(), worldsequence: "3" });
+        const parsed = JSON.parse(body || "{}") as { following: boolean };
+        this.followRequests.push({ following: parsed.following });
+        if (this.followRateLimit > 0) {
+          this.followRateLimit -= 1;
+          json(429, { type: "about:blank", title: "Too Many Requests", code: "rate_limited" }, { "Retry-After": String(this.retryAfterSeconds) });
+          return;
+        }
+        this.follows.push(parsed);
+        json(200, { followerAccountId: followMatch[1], followedAccountId: followMatch[2], following: parsed.following, changed: true, updatedAt: new Date(0).toISOString(), worldsequence: "3" });
         return;
       }
       if (method === "POST" && p.endsWith("/events/batch")) {
@@ -248,5 +269,102 @@ describe("FederationConnector — World Wire", () => {
     const waitMs = new Date(item!.nextAttemptAt!).getTime() - before;
     // Clamped from a 1-hour Retry-After down to the ~2s bound (small wall-clock drift allowed).
     expect(waitMs).toBeLessThanOrEqual(5_000);
+  });
+
+  // --- FIFO-per-target desired-state ordering (regression) -------------------
+
+  /** Pin a durable causal order onto two same-target intents so createdAt is deterministic. */
+  async function pinOrder(store: MemorySimulationStore, match: (p: { op: string; liked?: boolean; following?: boolean }) => boolean, iso: string) {
+    for (const item of await store.listOutbox(SIM_ID)) {
+      if (item.itemKind === "social" && match(item.payload as { op: string })) {
+        item.createdAt = iso;
+        await store.putOutboxItem(item);
+      }
+    }
+  }
+
+  /** Force any backoff on matching items to be due (nextAttemptAt in the past). */
+  async function expireBackoff(store: MemorySimulationStore) {
+    for (const item of await store.listOutbox(SIM_ID, ["pending"])) {
+      if (item.nextAttemptAt) {
+        item.nextAttemptAt = "2000-01-01T00:00:00.000Z";
+        await store.putOutboxItem(item);
+      }
+    }
+  }
+
+  it("keeps FIFO per like target so a newer unlike never regresses to an older like", async () => {
+    const { store, social, connector } = await setup(world);
+    await connector.syncSocialAccounts();
+    await social.enqueue({ op: "like", actingLocalAgentId: "a1", useOfficialAccount: false, authorityMode: "citizen", authorityRef: "agent-a1", idempotencyKey: "like-true", targetPostId: "pX", liked: true });
+    await social.enqueue({ op: "like", actingLocalAgentId: "a1", useOfficialAccount: false, authorityMode: "citizen", authorityRef: "agent-a1", idempotencyKey: "like-false", targetPostId: "pX", liked: false });
+    await pinOrder(store, (p) => p.op === "like" && p.liked === true, "2020-01-01T00:00:00.000Z");
+    await pinOrder(store, (p) => p.op === "like" && p.liked === false, "2020-01-01T00:00:01.000Z");
+
+    // Cycle 1: the older like=true gets 429'd; the newer like=false MUST NOT overtake it.
+    world.likeRateLimit = 1;
+    world.retryAfterSeconds = 5;
+    await connector.flushOutbox();
+    expect(world.likeRequests.map((r) => r.liked)).toEqual([true]);
+
+    // Cycle 2: once the older is due and succeeds, both send in FIFO order and final state is false.
+    await expireBackoff(store);
+    await connector.flushOutbox();
+    expect(world.likeRequests.map((r) => r.liked)).toEqual([true, true, false]);
+    expect(world.likes.map((l) => (l as { liked: boolean }).liked)).toEqual([true, false]);
+  });
+
+  it("keeps FIFO per follow target so a newer unfollow never regresses to an older follow", async () => {
+    const { store, social, connector } = await setup(world);
+    await connector.syncSocialAccounts();
+    await social.enqueue({ op: "follow", actingLocalAgentId: "a1", useOfficialAccount: false, authorityMode: "citizen", authorityRef: "agent-a1", idempotencyKey: "f-true", targetAccountId: "acct_t", following: true });
+    await social.enqueue({ op: "follow", actingLocalAgentId: "a1", useOfficialAccount: false, authorityMode: "citizen", authorityRef: "agent-a1", idempotencyKey: "f-false", targetAccountId: "acct_t", following: false });
+    await pinOrder(store, (p) => p.op === "follow" && p.following === true, "2020-01-01T00:00:00.000Z");
+    await pinOrder(store, (p) => p.op === "follow" && p.following === false, "2020-01-01T00:00:01.000Z");
+
+    world.followRateLimit = 1;
+    await connector.flushOutbox();
+    expect(world.followRequests.map((r) => r.following)).toEqual([true]);
+
+    await expireBackoff(store);
+    await connector.flushOutbox();
+    expect(world.follows.map((f) => (f as { following: boolean }).following)).toEqual([true, false]);
+  });
+
+  it("blocks the newer same-key intent across multiple transient failures of the older one", async () => {
+    const { store, social, connector } = await setup(world);
+    await connector.syncSocialAccounts();
+    await social.enqueue({ op: "like", actingLocalAgentId: "a1", useOfficialAccount: false, authorityMode: "citizen", authorityRef: "agent-a1", idempotencyKey: "lt", targetPostId: "pY", liked: true });
+    await social.enqueue({ op: "like", actingLocalAgentId: "a1", useOfficialAccount: false, authorityMode: "citizen", authorityRef: "agent-a1", idempotencyKey: "lf", targetPostId: "pY", liked: false });
+    await pinOrder(store, (p) => p.op === "like" && p.liked === true, "2020-01-01T00:00:00.000Z");
+    await pinOrder(store, (p) => p.op === "like" && p.liked === false, "2020-01-01T00:00:01.000Z");
+
+    world.likeRateLimit = 2; // the older like=true 429s twice before succeeding
+    await connector.flushOutbox();
+    await expireBackoff(store);
+    await connector.flushOutbox();
+    // Two transient failures of the older intent; the newer unlike stayed blocked both cycles.
+    expect(world.likeRequests.map((r) => r.liked)).toEqual([true, true]);
+    expect(world.likes).toHaveLength(0);
+
+    await expireBackoff(store);
+    await connector.flushOutbox();
+    // Subsequent cycle: older succeeds, then newer sends; final state is false.
+    expect(world.likeRequests.map((r) => r.liked)).toEqual([true, true, true, false]);
+    expect(world.likes.map((l) => (l as { liked: boolean }).liked)).toEqual([true, false]);
+  });
+
+  it("lets unrelated targets and posts progress while one desired-state key is blocked", async () => {
+    const { social, connector } = await setup(world);
+    await connector.syncSocialAccounts();
+    await social.enqueue({ op: "like", actingLocalAgentId: "a1", useOfficialAccount: false, authorityMode: "citizen", authorityRef: "agent-a1", idempotencyKey: "blk", targetPostId: "pBlocked", liked: true });
+    await social.enqueue({ op: "post", actingLocalAgentId: "a1", useOfficialAccount: false, authorityMode: "citizen", authorityRef: "agent-a1", idempotencyKey: "pst", text: "still posting" });
+    await social.enqueue({ op: "follow", actingLocalAgentId: "a1", useOfficialAccount: false, authorityMode: "citizen", authorityRef: "agent-a1", idempotencyKey: "flw", targetAccountId: "acct_other", following: true });
+
+    world.likeRateLimit = 1; // block only the like target
+    await connector.flushOutbox();
+    expect(world.likes).toHaveLength(0); // like was 429'd/blocked
+    expect(world.posts).toHaveLength(1); // unrelated post still sent
+    expect(world.follows).toHaveLength(1); // unrelated follow target still sent
   });
 });
