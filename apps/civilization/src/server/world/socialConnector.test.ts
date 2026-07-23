@@ -382,4 +382,15 @@ describe("FederationConnector — World Wire", () => {
     // true was enqueued first (lower seq), so despite the createdAt tie it is delivered before false.
     expect(world.likes.map((l) => (l as { liked: boolean }).liked)).toEqual([true, false]);
   });
+
+  it("returns outbox items from the store in durable FIFO order (seq breaks a createdAt tie)", async () => {
+    const { store, social, connector } = await setup(world);
+    await connector.syncSocialAccounts();
+    await social.enqueue({ op: "like", actingLocalAgentId: "a1", useOfficialAccount: false, authorityMode: "citizen", authorityRef: "agent-a1", idempotencyKey: "store-1", targetPostId: "pQ", liked: true });
+    await social.enqueue({ op: "like", actingLocalAgentId: "a1", useOfficialAccount: false, authorityMode: "citizen", authorityRef: "agent-a1", idempotencyKey: "store-2", targetPostId: "pQ", liked: false });
+    await pinOrder(store, (p) => p.op === "like", "2020-01-01T00:00:00.000Z");
+    // The store itself (not just the connector's re-sort) is the source of truth for FIFO order.
+    const ordered = (await store.listOutbox(SIM_ID)).filter((i) => i.itemKind === "social");
+    expect(ordered.map((i) => (i.payload as { liked: boolean }).liked)).toEqual([true, false]);
+  });
 });

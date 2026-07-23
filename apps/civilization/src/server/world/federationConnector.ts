@@ -6,6 +6,7 @@ import type { FederationConfig } from "../config.js";
 import type { FederationService, AckDecision } from "./federationService.js";
 import type { SocialService } from "./socialService.js";
 import type { CloudEvent, Command, InteractionRequest, OutboxItemDoc, PublicProjection, SocialOutboxPayload } from "./federationTypes.js";
+import { compareOutboxFifo } from "./federationTypes.js";
 import { createWorldClient, type WorldClient, type WorldSigner } from "./worldClient.js";
 
 const BACKOFF_BASE_MS = 2_000;
@@ -238,7 +239,9 @@ export class FederationConnector {
     // regress to the older value (e.g. like=true 429s and backs off, like=false sends, then the true
     // retry lands last ⇒ final=true, the opposite of the newest intent). We therefore preserve FIFO PER
     // desired-state target key while letting posts and unrelated targets progress independently.
-    const items = [...(await this.service.listPendingOutbox())].sort(compareFifo);
+    // listPendingOutbox already returns durable FIFO order (createdAt→seq→id); re-sort defensively so the
+    // guarantee holds even if a store returned items unordered.
+    const items = [...(await this.service.listPendingOutbox())].sort(compareOutboxFifo);
     const now = Date.now();
     const blockedKeys = new Set<string>();
 
@@ -517,22 +520,6 @@ function parseRetryAfterMs(header: string | null | undefined): number | undefine
     return Math.max(0, dateMs - Date.now());
   }
   return undefined;
-}
-
-/**
- * Deterministic FIFO order for the outbox: oldest `createdAt` first, then the process-monotonic enqueue
- * `seq` as a causal tie-breaker for items sharing a millisecond (falling back to `id` only when a legacy
- * item predates `seq`). This guarantees a newer desired-state toggle never sorts ahead of an older one
- * for the same target, even when both were enqueued within the same millisecond.
- */
-function compareFifo(a: OutboxItemDoc, b: OutboxItemDoc): number {
-  if (a.createdAt !== b.createdAt) {
-    return a.createdAt < b.createdAt ? -1 : 1;
-  }
-  if (a.seq !== undefined && b.seq !== undefined && a.seq !== b.seq) {
-    return a.seq - b.seq;
-  }
-  return a.id.localeCompare(b.id);
 }
 
 /**

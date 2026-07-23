@@ -12,6 +12,7 @@ import type { AppConfig } from "./config.js";
 import {
   FEDERATION_STATE_ID,
   SOCIAL_STATE_ID,
+  compareOutboxFifo,
   type FederationStateDoc,
   type InboxItemDoc,
   type OutboxItemDoc,
@@ -145,7 +146,7 @@ export class MemorySimulationStore implements SimulationStore {
   async listOutbox(simulationId: string, statuses?: OutboxStatus[]): Promise<OutboxItemDoc[]> {
     const items = [...this.outbox.values()].filter((item) => item.simulationId === simulationId);
     const filtered = statuses ? items.filter((item) => statuses.includes(item.status)) : items;
-    return filtered.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+    return filtered.sort(compareOutboxFifo);
   }
 
   async putOutboxItem(item: OutboxItemDoc): Promise<void> {
@@ -348,7 +349,10 @@ export class CosmosSimulationStore implements SimulationStore {
       parameters: [{ name: "@simulationId", value: simulationId }]
     });
     const items = docs.filter((doc): doc is OutboxItemDoc => doc.kind === "outbox");
-    return statuses ? items.filter((item) => statuses.includes(item.status)) : items;
+    const scoped = statuses ? items.filter((item) => statuses.includes(item.status)) : items;
+    // Re-sort in-process with the durable FIFO comparator: the SQL ORDER BY only covers createdAt, so
+    // this applies the seq/id tie-break without requiring a Cosmos composite index.
+    return scoped.sort(compareOutboxFifo);
   }
 
   async putOutboxItem(item: OutboxItemDoc): Promise<void> {

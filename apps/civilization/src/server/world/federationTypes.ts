@@ -114,6 +114,24 @@ export interface OutboxItemDoc extends FederationDocBase {
 
 export type InboxAckStatus = "applied" | "rejected" | "duplicate";
 
+/**
+ * Deterministic durable FIFO order for outbox items: oldest `createdAt` first, then the process-monotonic
+ * enqueue `seq` (a causal tie-breaker for items sharing a millisecond), then `id` for any legacy item that
+ * predates `seq`. This is the single source of truth for outbox ordering — the store returns items in this
+ * order and the connector relies on it so a newer desired-state toggle never overtakes an older one for the
+ * same target. Keeping it here (not just in the connector) makes the durable intent order authoritative.
+ */
+export function compareOutboxFifo(a: OutboxItemDoc, b: OutboxItemDoc): number {
+  if (a.createdAt !== b.createdAt) {
+    return a.createdAt < b.createdAt ? -1 : 1;
+  }
+  if (a.seq !== undefined && b.seq !== undefined && a.seq !== b.seq) {
+    return a.seq - b.seq;
+  }
+  return a.id.localeCompare(b.id);
+}
+
+
 /** A dedupe record for a processed inbound command. id === `inbox_<dedupeKey>`. */
 export interface InboxItemDoc extends FederationDocBase {
   kind: "inbox";
