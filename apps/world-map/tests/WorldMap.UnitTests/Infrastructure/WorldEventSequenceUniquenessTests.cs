@@ -241,16 +241,25 @@ public sealed class WorldEventSequenceUniquenessTests
     // ---- Readiness fail-closed helper ---------------------------------------------------------------
 
     [Fact]
-    public void Readiness_flags_worldEvents_missing_the_unique_key()
+    public void Readiness_requires_an_exact_standalone_worldEvents_unique_key()
     {
-        // No unique key present ⇒ the required path is reported missing (fail closed).
-        Assert.Equal(["/payload/worldsequence"], CosmosContainers.MissingUniqueKeyPaths("worldEvents", []));
+        // No unique key ⇒ non-compliant (fail closed).
+        Assert.False(CosmosContainers.HasRequiredUniqueKey("worldEvents", []));
 
-        // Present ⇒ compliant.
-        Assert.Empty(CosmosContainers.MissingUniqueKeyPaths("worldEvents", ["/payload/worldsequence"]));
+        // Exactly the standalone key ⇒ compliant.
+        Assert.True(CosmosContainers.HasRequiredUniqueKey("worldEvents", [new[] { "/payload/worldsequence" }]));
+
+        // A COMPOSITE key with an extra path does NOT uniquely constrain the ordinal ⇒ fail closed.
+        Assert.False(CosmosContainers.HasRequiredUniqueKey("worldEvents", [new[] { "/payload/worldsequence", "/payload/other" }]));
+
+        // A divergent path ⇒ fail closed.
+        Assert.False(CosmosContainers.HasRequiredUniqueKey("worldEvents", [new[] { "/payload/other" }]));
+
+        // The standalone key present ALONGSIDE another unrelated unique key ⇒ compliant.
+        Assert.True(CosmosContainers.HasRequiredUniqueKey("worldEvents", [new[] { "/payload/other" }, new[] { "/payload/worldsequence" }]));
 
         // A container with no declared unique key is always compliant.
-        Assert.Empty(CosmosContainers.MissingUniqueKeyPaths("civilizations", []));
+        Assert.True(CosmosContainers.HasRequiredUniqueKey("civilizations", []));
     }
 }
 

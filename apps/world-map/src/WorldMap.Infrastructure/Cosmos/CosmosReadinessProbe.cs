@@ -84,16 +84,17 @@ public sealed class CosmosReadinessProbe(CosmosClient client, IOptions<WorldMapO
             }
 
             // Structural sequence-uniqueness backstop: containers that declare unique-key paths (worldEvents
-            // on '/payload/worldsequence') MUST carry that exact Cosmos unique-key policy, or a duplicate
-            // global sequence becomes possible under an ambiguous commit. Fail closed if it is missing.
-            if (CosmosContainers.UniqueKeyPaths.TryGetValue(name, out _))
+            // on '/payload/worldsequence') MUST carry that exact STANDALONE Cosmos unique-key policy, or a
+            // duplicate global sequence becomes possible. A missing, divergent, OR composite (extra-path)
+            // policy fails closed — a composite key only makes the combination unique, not the ordinal alone.
+            if (CosmosContainers.UniqueKeyPaths.TryGetValue(name, out var requiredPaths))
             {
-                var actual = properties.UniqueKeyPolicy?.UniqueKeys.SelectMany(k => k.Paths) ?? [];
-                var missingPaths = CosmosContainers.MissingUniqueKeyPaths(name, actual);
-                if (missingPaths.Count > 0)
+                var actualKeys = properties.UniqueKeyPolicy?.UniqueKeys.Select(k => (IEnumerable<string>)k.Paths)
+                    ?? [];
+                if (!CosmosContainers.HasRequiredUniqueKey(name, actualKeys))
                 {
                     return new ReadinessResult(false,
-                        $"Cosmos container '{name}' is missing required unique key path(s) [{string.Join(", ", missingPaths)}]; the world-sequence uniqueness backstop is not enforced.");
+                        $"Cosmos container '{name}' must have a standalone unique key on exactly [{string.Join(", ", requiredPaths)}]; a missing, divergent, or composite (extra-path) policy fails closed.");
                 }
             }
         }

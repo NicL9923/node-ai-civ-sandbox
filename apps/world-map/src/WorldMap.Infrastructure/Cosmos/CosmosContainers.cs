@@ -80,6 +80,24 @@ internal static class CosmosContainers
     }
 
     /// <summary>
+    /// True when the container's live unique-key policy satisfies the required <b>standalone</b> unique key
+    /// for <paramref name="name"/>: some unique key's path SET equals the required set EXACTLY. A composite
+    /// key with extra paths (e.g. <c>[/payload/worldsequence, /other]</c>) does NOT satisfy it — it only
+    /// makes the COMBINATION unique, so it would not uniquely constrain the ordinal on its own. Containers
+    /// with no declared requirement are always compliant. Pure ⇒ testable without a live Cosmos account.
+    /// </summary>
+    public static bool HasRequiredUniqueKey(string name, IEnumerable<IEnumerable<string>> actualUniqueKeys)
+    {
+        if (!UniqueKeyPaths.TryGetValue(name, out var required))
+        {
+            return true;
+        }
+
+        var requiredSet = new HashSet<string>(required, StringComparer.Ordinal);
+        return actualUniqueKeys.Any(key => new HashSet<string>(key, StringComparer.Ordinal).SetEquals(requiredSet));
+    }
+
+    /// <summary>
     /// The single logical partition backing the ordered public event feed. This intentionally
     /// concentrates all world events in one partition to preserve global ordering for the MVP;
     /// it is a known hot-partition tradeoff to revisit at scale (e.g. time-bucketed partitions).

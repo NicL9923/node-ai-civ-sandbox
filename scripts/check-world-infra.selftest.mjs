@@ -156,8 +156,16 @@ if (parseContainerCountMarker('no marker here') !== null) {
     failures.push('runbook-schema: findHardcodedContainerCounts false-matched the count marker');
   }
 }
-if (!hasImmutableUniqueKeyWarning('worldEvents unique key /payload/worldsequence is immutable and fail-closed')) {
-  failures.push('runbook-schema: hasImmutableUniqueKeyWarning missed a valid warning');
+const FULL_WARNING = 'worldEvents unique key /payload/worldsequence is immutable; readiness fails closed; never delete a deployed ledger; the World is greenfield';
+if (!hasImmutableUniqueKeyWarning(FULL_WARNING)) {
+  failures.push('runbook-schema: hasImmutableUniqueKeyWarning missed a complete warning');
+}
+// Each critical clause omitted individually must FAIL the guard (no partial acceptance).
+for (const drop of ['/payload/worldsequence', 'immutable', 'worldevents', 'fails closed', 'never delete', 'greenfield']) {
+  const weakened = FULL_WARNING.toLowerCase().replace(drop, 'xxx');
+  if (hasImmutableUniqueKeyWarning(weakened)) {
+    failures.push(`runbook-schema: hasImmutableUniqueKeyWarning accepted a warning missing "${drop}"`);
+  }
 }
 if (hasImmutableUniqueKeyWarning('worldEvents exists but no unique-key note')) {
   failures.push('runbook-schema: hasImmutableUniqueKeyWarning false-positived on incomplete text');

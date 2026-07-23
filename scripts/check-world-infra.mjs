@@ -37,6 +37,7 @@ const COSMOS_CONTAINERS_CS = resolve(
   'apps/world-map/src/WorldMap.Infrastructure/Cosmos/CosmosContainers.cs',
 );
 const RUNBOOK = resolve(repoRoot, 'docs/world-deployment-runbook.md');
+const WORLD_README = resolve(repoRoot, 'apps/world-map/README.md');
 
 // Scan EVERY hand-authored file in infra/world so a secret in a new bicep/param/json file is covered.
 const INFRA_FILES = readdirSync(WORLD_INFRA_DIR)
@@ -130,15 +131,18 @@ export function findHardcodedContainerCounts(runbookText) {
   return [...runbookText.matchAll(/(\d{1,4})\s+containers?\b/gi)].map((m) => Number(m[1]));
 }
 
-/** True when the runbook carries the immutable worldEvents unique-key fail-closed warning. */
+/** True when the runbook carries the FULL immutable worldEvents unique-key fail-closed warning. */
 export function hasImmutableUniqueKeyWarning(runbookText) {
   const lower = runbookText.toLowerCase();
-  return (
-    lower.includes('/payload/worldsequence') &&
-    lower.includes('immutable') &&
-    lower.includes('worldevents') &&
-    /fail[\s-]?closed/.test(lower)
-  );
+  const clauses = [
+    lower.includes('/payload/worldsequence'), // the exact unique-key path
+    lower.includes('worldevents'), // the container it protects
+    lower.includes('immutable'), // policies cannot change after creation
+    /fails?[\s-]?closed/.test(lower), // readiness fails closed
+    lower.includes('never delete'), // the protective clause (do not delete a live ledger)
+    /greenfield|undeployed|not been deployed/.test(lower), // greenfield / not-yet-deployed context
+  ];
+  return clauses.every(Boolean);
 }
 
 export function scanContent(content, denyList) {
@@ -569,6 +573,19 @@ function checkRunbookSchemaDrift() {
       errors.push(
         `runbook-schema: stale hardcoded "${claimed} container(s)" in the runbook (schema has ${count}); point to containers.json instead of a literal count`,
       );
+    }
+  }
+
+  // The World README must not carry a stale hardcoded current-schema container count either.
+  if (existsSync(WORLD_README)) {
+    const readme = readFileSync(WORLD_README, 'utf8');
+    for (const claimed of findHardcodedContainerCounts(readme)) {
+      if (claimed !== count) {
+        ok = false;
+        errors.push(
+          `runbook-schema: stale hardcoded "${claimed} container(s)" in apps/world-map/README.md (schema has ${count}); reference containers.json instead`,
+        );
+      }
     }
   }
 
