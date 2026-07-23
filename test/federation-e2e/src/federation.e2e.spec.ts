@@ -36,6 +36,7 @@ import {
   worldBaseUrl,
   type GeneratedCredentials,
 } from "./world-config.js";
+import { readSseUntil } from "./sse.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const workspaceDir = path.resolve(here, "..");
@@ -67,13 +68,24 @@ async function getJson<T = any>(url: string): Promise<T> {
   return JSON.parse(text) as T;
 }
 
-async function adminPost(pathname: string): Promise<{ status: number; body: any }> {
+async function adminPost(pathname: string, body?: unknown): Promise<{ status: number; body: any }> {
   const response = await fetch(civUrl(pathname), {
     method: "POST",
-    headers: { "x-admin-key": creds.adminKey },
+    headers: {
+      "x-admin-key": creds.adminKey,
+      ...(body === undefined ? {} : { "content-type": "application/json" }),
+    },
+    body: body === undefined ? undefined : JSON.stringify(body),
   });
   const text = await response.text();
   return { status: response.status, body: text ? JSON.parse(text) : {} };
+}
+
+async function enqueueSocialAction(action: Record<string, unknown>): Promise<any> {
+  const result = await adminPost("/api/admin/federation/social/actions", action);
+  expect(result.status).toBe(202);
+  expect(result.body).toEqual({ ok: true });
+  return result.body;
 }
 
 function makeFakeConfig(): FakeCivilizationConfig {
@@ -429,7 +441,219 @@ test("real-process federation: register, offline/resume, contact+message, exactl
     expect(sequences).toEqual(ascending ? sorted : [...sorted].reverse());
   });
 
-  // === 11. Observer: names, relationship detail, timeline once, SSE resumable + reconnect ===
+  // === 11. World Wire: real civ accounts/outbox, public reads, replies, desired state and cursors ===
+  let realAgentAccountId: string;
+  let realAgentLocalId: string;
+  let realOfficialAccountId: string;
+  let realPostId: string;
+  let fakeAgentAccountId: string;
+  let fakePostId: string;
+  await test.step("World Wire account sync binds real agent and official accounts idempotently", async () => {
+    // Let the real engine elect a President so the production sync plan contains its single official
+    // account. Pause immediately afterwards; all social network work stays explicitly driven below.
+    expect((await adminPost("/api/admin/start")).status).toBe(200);
+    const civil = await pollUntil(
+      async () => await getJson<any>(civUrl("/api/world")),
+      (snapshot) => !!snapshot.simulation?.governance?.president,
+      { timeoutMs: 30_000, intervalMs: 100, label: "real President elected" },
+    );
+    expect((await adminPost("/api/admin/pause")).status).toBe(200);
+
+    const first = await adminPost("/api/admin/federation/social/sync");
+    expect(first.status).toBe(200);
+    const second = await adminPost("/api/admin/federation/social/sync");
+    expect(second.status).toBe(200);
+    expect(second.body.agentAccounts).toEqual(first.body.agentAccounts);
+    expect(second.body.officialAccount).toEqual(first.body.officialAccount);
+    expect(second.body.officialTermNumber).toBe(civil.simulation.governance.president.termNumber);
+
+    realAgentLocalId = civil.simulation.governance.president.agentId as string;
+    realAgentAccountId = first.body.agentAccounts[realAgentLocalId].accountId;
+    realOfficialAccountId = first.body.officialAccount.accountId;
+    expect(realAgentAccountId).toBeTruthy();
+    expect(realOfficialAccountId).toBeTruthy();
+
+    const fakeSync = await fake.syncSocialAccounts(
+      {
+        civId: CIV_FAKE,
+        accounts: [
+          {
+            actor: { civId: CIV_FAKE, localAgentId: "fake_agent", displayName: "Fake Wire Agent", kind: "agent" },
+          },
+          {
+            actor: { civId: CIV_FAKE, displayName: FAKE_DISPLAY_NAME, kind: "official" },
+            officialAuthority: {
+              presidentLocalAgentId: "fake_president",
+              presidentDisplayName: "Fake President",
+              termNumber: 1,
+              authorityDecision: { mode: "president", ref: "fake-term-1" },
+            },
+          },
+        ],
+      },
+      "fake-social-sync-1",
+    );
+    fakeAgentAccountId = fakeSync.accounts[0]!.accountId;
+  });
+
+  await test.step("real civ durable outbox posts to the public feed, events, stream and observer", async () => {
+    const action = {
+      op: "post",
+      actingLocalAgentId: realAgentLocalId,
+      useOfficialAccount: false,
+      authorityMode: "citizen",
+      authorityRef: "e2e-agent",
+      idempotencyKey: "wire-real-post-1",
+      text: "REAL-WIRE-POST: plain text from the durable civ outbox",
+    };
+    await enqueueSocialAction(action);
+    // Replaying the local intent preserves one durable item rather than issuing a second mutation.
+    await enqueueSocialAction(action);
+    expect((await adminPost("/api/admin/federation/social/sync")).body.pendingOutbox).toBe(0);
+
+    const post = await pollUntil<any>(
+      async () => (await getJson<{ items: any[] }>(worldUrl("/world/v1/social/feed?limit=50"))).items
+        .find((item) => item.text === action.text),
+      (candidate) => candidate !== undefined,
+      { timeoutMs: 30_000, label: "real civ post in public World Wire feed" },
+    );
+    realPostId = post.postId;
+    expect(post.author.accountId).toBe(realAgentAccountId);
+
+    const accountPosts = await getJson<{ items: any[] }>(
+      worldUrl(`/world/v1/social/accounts/${encodeURIComponent(realAgentAccountId)}/posts?limit=50`),
+    );
+    expect(accountPosts.items.some((item) => item.postId === realPostId)).toBe(true);
+    const events = await getJson<{ items: any[] }>(worldUrl("/world/v1/events?limit=100"));
+    expect(events.items.some((event) => event.type === "world.social.post.created.v1" && event.data?.post?.postId === realPostId)).toBe(true);
+    const sse = await readSseUntil(worldUrl("/world/v1/stream"), {
+      windowMs: 2_500,
+      matchFrame: (frame) => frame.includes("world.social."),
+    });
+    expect(sse.contentType).toContain("text/event-stream");
+    expect(
+      sse.matched,
+      `social SSE frame was not observed; stop=${sse.stopReason}; error=${sse.error ?? "none"}; frames=${sse.raw}`,
+    ).toBe(true);
+  });
+
+  await test.step("fake reply reaches the real civ briefing and direct-reply awareness", async () => {
+    const reply = await fake.createSocialPost(
+      {
+        authorAccountId: fakeAgentAccountId,
+        text: "FAKE-WIRE-REPLY: citizen-safe reply for the real President",
+        parentPostId: realPostId,
+        authorization: { actingLocalAgentId: "fake_agent", authorityDecision: { mode: "citizen", ref: "fake-agent" } },
+      },
+      "fake-wire-reply-1",
+    );
+    expect(reply.parentPostId).toBe(realPostId);
+
+    const thread = await fake.getSocialThread(realPostId, { limit: 50 });
+    expect(thread.items.map((item: { postId: string }) => item.postId)).toEqual([realPostId, reply.postId]);
+    expect(thread.items[1]?.replyDepth).toBe(1);
+
+    const social = (await adminPost("/api/admin/federation/social/sync")).body;
+    expect(JSON.stringify(social.briefing)).toContain("FAKE-WIRE-REPLY");
+    expect(JSON.stringify(social)).not.toMatch(/memory|model|authorityDecision|onboarding|hmac/i);
+
+    expect((await adminPost("/api/admin/start")).status).toBe(200);
+    await pollUntil(
+      async () => await getJson<any>(civUrl("/api/world")),
+      (snapshot) => snapshot.agents.some((agent: any) =>
+        agent.memorySummaries?.some((memory: string) => memory.includes("FAKE-WIRE-REPLY"))),
+      { timeoutMs: 30_000, intervalMs: 100, label: "real civ surfaces direct reply once" },
+    );
+    expect((await adminPost("/api/admin/pause")).status).toBe(200);
+  });
+
+  await test.step("likes and follows converge to the newest desired state with safe no-ops", async () => {
+    const intent = (op: "like" | "follow", key: string, desired: boolean) => ({
+      op,
+      actingLocalAgentId: realAgentLocalId,
+      useOfficialAccount: false,
+      authorityMode: "citizen",
+      authorityRef: "e2e-agent",
+      idempotencyKey: key,
+      ...(op === "like"
+        ? { targetPostId: realPostId, liked: desired }
+        : { targetAccountId: fakeAgentAccountId, following: desired }),
+    });
+
+    await enqueueSocialAction(intent("like", "wire-like-true", true));
+    await enqueueSocialAction(intent("like", "wire-like-true-replay", true));
+    expect((await adminPost("/api/admin/federation/social/sync")).status).toBe(200);
+    expect((await getJson<any>(worldUrl(`/world/v1/social/posts/${realPostId}`))).likeCount).toBe(1); // self-like is allowed.
+    await enqueueSocialAction(intent("like", "wire-like-false", false));
+
+    await enqueueSocialAction(intent("follow", "wire-follow-true", true));
+    await enqueueSocialAction(intent("follow", "wire-follow-true-replay", true));
+    await enqueueSocialAction(intent("follow", "wire-follow-false", false));
+    expect((await adminPost("/api/admin/federation/social/sync")).status).toBe(200);
+
+    const post = await getJson<any>(worldUrl(`/world/v1/social/posts/${realPostId}`));
+    const account = await getJson<any>(worldUrl(`/world/v1/social/accounts/${realAgentAccountId}`));
+    expect(post.likeCount).toBe(0);
+    expect(account.followingCount).toBe(0);
+
+    const selfFollow = await adminPost("/api/admin/federation/social/actions", {
+      ...intent("follow", "wire-self-follow", true),
+      targetAccountId: realAgentAccountId,
+    });
+    expect(selfFollow.status).toBe(409);
+    expect(selfFollow.body).toEqual({ ok: false, reason: "invalid" });
+  });
+
+  await test.step("tombstones, snapshots and cursor mismatches preserve public ordering safely", async () => {
+    const originalText = "FAKE-WIRE-TOMBSTONE: text that must be withdrawn";
+    const created = await fake.createSocialPost(
+      {
+        authorAccountId: fakeAgentAccountId,
+        text: originalText,
+        authorization: { actingLocalAgentId: "fake_agent", authorityDecision: { mode: "citizen", ref: "fake-agent" } },
+      },
+      "fake-wire-tombstone-create",
+    );
+    fakePostId = created.postId;
+    const firstPage = await getJson<{ items: any[]; nextCursor: string | null }>(worldUrl("/world/v1/social/feed?limit=1"));
+    expect(firstPage.nextCursor).toBeTruthy();
+    const late = await fake.createSocialPost(
+      {
+        authorAccountId: fakeAgentAccountId,
+        text: "FAKE-WIRE-LATE-POST: excluded from the existing cursor snapshot",
+        authorization: { actingLocalAgentId: "fake_agent", authorityDecision: { mode: "citizen", ref: "fake-agent" } },
+      },
+      "fake-wire-late-post",
+    );
+    const continued = await getJson<{ items: any[] }>(
+      worldUrl(`/world/v1/social/feed?limit=50&cursor=${encodeURIComponent(firstPage.nextCursor!)}`),
+    );
+    expect(continued.items.some((item) => item.postId === late.postId)).toBe(false);
+    const mismatch = await fetch(
+      worldUrl(`/world/v1/social/accounts/${encodeURIComponent(realAgentAccountId)}/posts?cursor=${encodeURIComponent(firstPage.nextCursor!)}`),
+    );
+    expect(mismatch.status).toBe(400);
+
+    const tombstoned = await fake.tombstoneSocialPost(
+      fakePostId,
+      { authorization: { actingLocalAgentId: "fake_agent", authorityDecision: { mode: "citizen", ref: "fake-agent" } } },
+      "fake-wire-tombstone",
+    );
+    expect(tombstoned.status).toBe("tombstoned");
+    // The runtime omits nullable terminal text rather than serializing `null`; both forms satisfy the
+    // contract, but this E2E pins the live API shape so a future client cannot mistake omission for text.
+    expect(tombstoned.text).toBeUndefined();
+    expect(tombstoned.worldsequence).toBe(created.worldsequence);
+    expect((await fake.getSocialPost(fakePostId)).text).toBeUndefined();
+    const thread = await fake.getSocialThread(fakePostId, { limit: 50 });
+    expect(JSON.stringify(thread)).not.toContain(originalText);
+    const tombstoneEvent = (await getJson<{ items: any[] }>(worldUrl("/world/v1/events?limit=100"))).items
+      .find((event) => event.type === "world.social.post.tombstoned.v1" && event.data?.postId === fakePostId);
+    expect(tombstoneEvent).toBeDefined();
+    expect(JSON.stringify(tombstoneEvent)).not.toContain(originalText);
+  });
+
+  // === 12. Observer: names, relationship detail, timeline once, SSE resumable + reconnect ===
   await test.step("observer renders civs, relationship, timeline and a resumable SSE feed", async () => {
     // Reload so the SPA recovers the full durable state from /events (no duplicate timeline entries).
     await page.reload();
@@ -456,9 +680,15 @@ test("real-process federation: register, offline/resume, contact+message, exactl
     await expect(page.getByText(/Familiarity/i).first()).toBeVisible();
 
     // SSE probe: the stream connects, returns text/event-stream, and carries resumable id: frames.
-    const sse = await readSseSample(worldUrl("/world/v1/stream"), 2500);
+    const sse = await readSseUntil(worldUrl("/world/v1/stream"), {
+      windowMs: 2_500,
+      matchFrame: (frame) => /^id:/m.test(frame),
+    });
     expect(sse.contentType).toContain("text/event-stream");
-    expect(sse.frames.some((f) => /^id:/m.test(f))).toBe(true);
+    expect(
+      sse.matched,
+      `resumable SSE frame was not observed; stop=${sse.stopReason}; error=${sse.error ?? "none"}; frames=${sse.raw}`,
+    ).toBe(true);
     capturedBodies.push(sse.raw);
 
     // Reload again = reconnect from the durable feed; still exactly one of each narrative.
@@ -476,7 +706,22 @@ test("real-process federation: register, offline/resume, contact+message, exactl
     expect(consoleErrors, `console errors: ${consoleErrors.join("; ")}`).toHaveLength(0);
   });
 
-  // === 12. Privacy scan: no credential or private-payload sentinel on any public surface ===
+  // === 13. Observer World Wire: deep-linked public text only, with no mutation controls ===
+  await test.step("observer renders the deep-linked World Wire post as plain text", async () => {
+    await page.goto(worldUrl(`/#wire=post/${encodeURIComponent(realPostId)}`));
+    await expect(page.getByRole("article", { name: /Post by/ }).filter({ hasText: "REAL-WIRE-POST" })).toBeVisible({
+      timeout: 30_000,
+    });
+    await expect(page.getByText("REAL-WIRE-POST: plain text from the durable civ outbox")).toBeVisible();
+    await expect(page.getByRole("article", { name: /Post by/ }).filter({ hasText: "REAL-WIRE-POST" })).toHaveAttribute(
+      "aria-current",
+      "true",
+    );
+    const controls = await page.getByRole("button").allTextContents();
+    expect(controls.join(" ").toLowerCase()).not.toMatch(/\b(like|unlike|follow|unfollow|delete|publish)\b/);
+  });
+
+  // === 14. Privacy scan: no credential or private-payload sentinel on any public surface ===
   await test.step("no secrets or private payloads leak to any public surface", async () => {
     const publicBodies = await Promise.all([
       fetch(worldUrl("/world/v1/civilizations?limit=50")).then((r) => r.text()),
@@ -484,6 +729,10 @@ test("real-process federation: register, offline/resume, contact+message, exactl
       fetch(worldUrl("/world/v1/events?limit=100")).then((r) => r.text()),
       fetch(worldUrl(`/world/v1/civilizations/${CIV_REAL}`)).then((r) => r.text()),
       fetch(worldUrl(`/world/v1/civilizations/${CIV_FAKE}`)).then((r) => r.text()),
+      fetch(worldUrl("/world/v1/social/feed?limit=100")).then((r) => r.text()),
+      fetch(worldUrl(`/world/v1/social/posts/${encodeURIComponent(realPostId)}`)).then((r) => r.text()),
+      fetch(worldUrl(`/world/v1/social/posts/${encodeURIComponent(fakePostId)}/thread?limit=100`)).then((r) => r.text()),
+      fetch(worldUrl(`/world/v1/social/accounts/${encodeURIComponent(realAgentAccountId)}`)).then((r) => r.text()),
     ]);
     const domText = (await page.locator("body").innerText()) ?? "";
     const diagnostics = [world?.log.tail(80) ?? "", civ?.log.tail(80) ?? ""].join("\n");
@@ -499,6 +748,7 @@ test("real-process federation: register, offline/resume, contact+message, exactl
       for (const needle of forbidden) {
         expect(hay.includes(needle), `sentinel leaked into ${label}`).toBe(false);
       }
+      expect(hay).not.toMatch(/world_hmac|onboardingtoken|authoritydecision|presidentlocalagentid|memorysummaries|model/i);
     }
   });
 });
@@ -508,49 +758,4 @@ function countForeign(events: Array<{ type?: string }>): { contact: number; mess
     contact: events.filter((e) => e.type === "foreignContactReceived").length,
     message: events.filter((e) => e.type === "foreignMessageReceived").length,
   };
-}
-
-/** Read a short sample of an SSE feed: content-type plus the first frames, then abort. */
-async function readSseSample(
-  url: string,
-  windowMs: number,
-): Promise<{ contentType: string; frames: string[]; raw: string }> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), windowMs);
-  let contentType = "";
-  let raw = "";
-  try {
-    const response = await fetch(url, {
-      headers: { Accept: "text/event-stream" },
-      signal: controller.signal,
-    });
-    contentType = response.headers.get("content-type") ?? "";
-    const reader = response.body?.getReader();
-    const decoder = new TextDecoder();
-    if (reader) {
-      try {
-        while (true) {
-          const { value, done } = await reader.read();
-          if (done) break;
-          raw += decoder.decode(value, { stream: true });
-          // The endpoint replays the durable feed as id:-framed events on connect; one complete
-          // frame is enough to prove a resumable stream.
-          if (/(^|\n)id:/.test(raw) && raw.includes("\n\n")) break;
-          if (raw.length > 8192) break;
-        }
-      } catch {
-        // aborted or stream error mid-read — keep whatever was captured
-      }
-      try {
-        await reader.cancel();
-      } catch {
-        // ignore
-      }
-    }
-  } catch {
-    // fetch failed to establish — contentType stays empty and the assertion will surface it
-  } finally {
-    clearTimeout(timer);
-  }
-  return { contentType, frames: raw.split(/\n\n/).filter(Boolean), raw };
 }

@@ -201,10 +201,13 @@ publishes `WorldMap.Api` (bundling the observer SPA), then runs Playwright again
 - **Chromium** driving the observer SPA served by the World.
 
 It proves registration, a liveness offline/resume cycle, contact + message delivery, exactly-once
-producer/interaction/command/ACK semantics, cursor advancement, the observer DOM + resumable SSE +
-clean console/network, and a privacy scan that no credential or private payload reaches any public
-surface. All credentials are generated per run in memory; the World receives only lowercase SHA-256
-onboarding token hashes and secret values via environment — never a raw token in the repo.
+producer/interaction/command/ACK semantics, cursor advancement, and the World Wire path: a real civ
+syncs agent and President-bound official accounts, drains its durable social outbox through HMAC,
+receives a fake-civ reply, converges like/follow desired state, and tombstones safely. Chromium verifies
+the observer DOM, resumable SSE, and deep-linked read-only Wire rendering; the privacy scan excludes
+credentials and private payloads from public surfaces. All credentials are generated per run in memory;
+the World receives only lowercase SHA-256 onboarding token hashes and secret values via environment —
+never a raw token in the repo.
 
 ### Limitations (honest scope)
 

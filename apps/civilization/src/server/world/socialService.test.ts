@@ -166,6 +166,26 @@ describe("SocialService account sync", () => {
     expect(snapshot.officialTermNumber).toBe(1);
   });
 
+  it("rejects a malformed or reordered response before persisting any account ids", async () => {
+    const store = new MemorySimulationStore();
+    await seedStore(store, { agents: [agent("a1", "Ada")], presidentId: "a1", civId: "civ_a" });
+    const service = new SocialService(store, config(), SIM_ID);
+    const plan = (await service.buildSyncPlan())!;
+    const reversed = responseFor(plan).reverse();
+
+    await expect(service.applySyncResult(plan.slots, reversed, plan.fingerprint)).rejects.toThrow(
+      "does not match requested",
+    );
+    const emptyId = responseFor(plan);
+    emptyId[0]!.accountId = "";
+    await expect(service.applySyncResult(plan.slots, emptyId, plan.fingerprint)).rejects.toThrow(
+      "has no accountId",
+    );
+
+    expect((await service.getSnapshot()).agentAccounts).toEqual({});
+    expect((await service.getSnapshot()).officialAccount).toBeUndefined();
+  });
+
   it("keeps a stable official account id across President rotation while updating authority", async () => {
     const store = new MemorySimulationStore();
     await seedStore(store, { agents: [agent("a1", "Ada"), agent("a2", "Ben")], presidentId: "a1", termNumber: 1, civId: "civ_a" });

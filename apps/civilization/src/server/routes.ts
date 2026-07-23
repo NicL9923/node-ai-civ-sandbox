@@ -7,6 +7,7 @@ import type { SimulationEngine } from "./simulation.js";
 import type { FederationService } from "./world/federationService.js";
 import type { FederationConnector } from "./world/federationConnector.js";
 import type { SocialService } from "./world/socialService.js";
+import type { SocialActionInput } from "./world/socialTypes.js";
 
 const positionSchema = z.object({
   x: z.number().int().min(0),
@@ -30,6 +31,35 @@ const agentCreateSchema = z.object({
 });
 
 const agentUpdateSchema = agentCreateSchema.partial().omit({ id: true });
+const socialActionSchema = z
+  .object({
+    op: z.enum(["post", "reply", "like", "follow"]),
+    actingLocalAgentId: z.string().trim().min(1).max(200),
+    useOfficialAccount: z.boolean(),
+    authorityMode: z.string().trim().min(1).max(120),
+    authorityRef: z.string().trim().min(1).max(200),
+    idempotencyKey: z.string().trim().min(1).max(200),
+    text: z.string().min(1).max(280).optional(),
+    parentPostId: z.string().trim().min(1).max(200).optional(),
+    targetPostId: z.string().trim().min(1).max(200).optional(),
+    liked: z.boolean().optional(),
+    targetAccountId: z.string().trim().min(1).max(200).optional(),
+    following: z.boolean().optional()
+  })
+  .superRefine((action, context) => {
+    if ((action.op === "post" || action.op === "reply") && !action.text?.trim()) {
+      context.addIssue({ code: z.ZodIssueCode.custom, message: "text is required for a post or reply." });
+    }
+    if (action.op === "reply" && !action.parentPostId) {
+      context.addIssue({ code: z.ZodIssueCode.custom, message: "parentPostId is required for a reply." });
+    }
+    if (action.op === "like" && !action.targetPostId) {
+      context.addIssue({ code: z.ZodIssueCode.custom, message: "targetPostId is required for a like." });
+    }
+    if (action.op === "follow" && !action.targetAccountId) {
+      context.addIssue({ code: z.ZodIssueCode.custom, message: "targetAccountId is required for a follow." });
+    }
+  });
 
 export function createApp(
   config: AppConfig,
@@ -183,6 +213,20 @@ export function createApp(
     await federationConnector.flushOutbox();
     response.json(await socialService.getSnapshot());
   }));
+
+  // This durable-outbox trigger exists only in test processes. It gives the real-process harness a
+  // deterministic way to drive the same social port used by agent turns without exposing a production
+  // mutation surface.
+  if (process.env.NODE_ENV === "test") {
+    app.post("/api/admin/federation/social/actions", requireAdmin(config), asyncHandler(async (request, response) => {
+      if (!socialService) {
+        response.status(409).json({ error: "World Wire is not enabled." });
+        return;
+      }
+      const result = await socialService.enqueue(socialActionSchema.parse(request.body) as SocialActionInput);
+      response.status(result.ok ? 202 : 409).json(result);
+    }));
+  }
 
   const clientRoot = path.resolve(process.cwd(), "dist/client");
   app.use(express.static(clientRoot));

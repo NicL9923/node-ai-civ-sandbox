@@ -43,8 +43,8 @@ const KNOWN_ACCOUNTS_MAX = 20;
 
 /** A per-batch descriptor used to zip the ordered sync RESPONSE back onto local identities. */
 type SyncSlot =
-  | { kind: "agent"; localAgentId: string; displayName: string }
-  | { kind: "official"; termNumber: number };
+  | { kind: "agent"; civId: string; localAgentId: string; displayName: string }
+  | { kind: "official"; civId: string; displayName: string; termNumber: number };
 
 export interface SocialSyncPlan {
   request: SocialAccountSyncRequest;
@@ -265,7 +265,7 @@ export class SocialService implements SocialPort {
     const agentBudget = president && presidentAgent ? MAX_ACCOUNTS_PER_SYNC - 1 : MAX_ACCOUNTS_PER_SYNC;
     for (const agent of agents.slice(0, agentBudget)) {
       accounts.push({ actor: { civId, localAgentId: agent.id, displayName: agent.name, kind: "agent" } });
-      slots.push({ kind: "agent", localAgentId: agent.id, displayName: agent.name });
+      slots.push({ kind: "agent", civId, localAgentId: agent.id, displayName: agent.name });
     }
 
     if (president && presidentAgent) {
@@ -278,7 +278,7 @@ export class SocialService implements SocialPort {
           authorityDecision: { mode: "president", ref: `term-${president.termNumber}` }
         }
       });
-      slots.push({ kind: "official", termNumber: president.termNumber });
+      slots.push({ kind: "official", civId, displayName, termNumber: president.termNumber });
     }
 
     if (accounts.length === 0) {
@@ -314,13 +314,11 @@ export class SocialService implements SocialPort {
   async applySyncResult(slots: SyncSlot[], accounts: SocialAccount[], fingerprint: string): Promise<void> {
     await this.runExclusive(async () => {
       const state = structuredClone(await this.getState());
+      this.validateSyncResponse(slots, accounts);
       const nextAgents: SocialStateDoc["agentAccounts"] = {};
       for (let index = 0; index < slots.length; index += 1) {
-        const slot = slots[index];
-        const account = accounts[index];
-        if (!slot || !account) {
-          continue;
-        }
+        const slot = slots[index]!;
+        const account = accounts[index]!;
         if (slot.kind === "agent") {
           nextAgents[slot.localAgentId] = { accountId: account.accountId, displayName: slot.displayName };
         } else {
@@ -333,6 +331,38 @@ export class SocialService implements SocialPort {
       state.lastSyncedAt = nowIso();
       await this.saveState(state);
     });
+  }
+
+  /**
+   * Account sync is a positional contract. Verify the World response before persisting its ids so a
+   * malformed or reordered response can never bind one local identity to another account.
+   */
+  private validateSyncResponse(slots: SyncSlot[], accounts: SocialAccount[]): void {
+    if (accounts.length !== slots.length) {
+      throw new Error(`World social account sync returned ${accounts.length} accounts for ${slots.length} requested slots.`);
+    }
+
+    for (let index = 0; index < slots.length; index += 1) {
+      const slot = slots[index]!;
+      const account = accounts[index]!;
+      const actor = account.actor;
+      const matches =
+        slot.kind === "agent"
+          ? actor.civId === slot.civId &&
+            actor.kind === "agent" &&
+            actor.localAgentId === slot.localAgentId &&
+            actor.displayName === slot.displayName
+          : actor.civId === slot.civId &&
+            actor.kind === "official" &&
+            actor.localAgentId === undefined &&
+            actor.displayName === slot.displayName;
+      if (!account.accountId?.trim()) {
+        throw new Error(`World social account sync response has no accountId for slot ${index}.`);
+      }
+      if (!matches) {
+        throw new Error(`World social account sync response does not match requested ${slot.kind} slot ${index}.`);
+      }
+    }
   }
 
   // --- connector-facing: outbox + feed --------------------------------------
