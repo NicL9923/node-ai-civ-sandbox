@@ -41,6 +41,20 @@ public static class ApiResults
         ErrorCode.RateLimited => (429, "rate_limited", true),
         ErrorCode.OperationCancelled => (503, "operation_cancelled", true),
 
+        // World Wire social (stable ProblemDetails.code strings per the contract)
+        ErrorCode.SocialAccountNotFound => (404, "social_account_not_found", false),
+        ErrorCode.PostNotFound => (404, "post_not_found", false),
+        ErrorCode.ForbiddenAccount => (403, "forbidden_account", false),
+        ErrorCode.ForbiddenActor => (403, "forbidden_actor", false),
+        ErrorCode.SystemAccountReserved => (403, "system_account_reserved", false),
+        ErrorCode.ContentTooLong => (400, "content_too_long", false),
+        ErrorCode.InvalidSocialContent => (400, "invalid_social_content", false),
+        ErrorCode.ReplyDepthExceeded => (409, "reply_depth_exceeded", false),
+        ErrorCode.PostTombstoned => (409, "post_tombstoned", false),
+        ErrorCode.SelfFollowForbidden => (409, "self_follow_forbidden", false),
+        ErrorCode.OfficialAccountConflict => (409, "official_account_conflict", false),
+        ErrorCode.CursorFilterMismatch => (400, "cursor_filter_mismatch", false),
+
         ErrorCode.StorageError => (500, "storage_error", true),
         ErrorCode.StorageDocumentNotFound => (404, "not_found", false),
         _ => (500, "internal_error", true),
@@ -62,6 +76,12 @@ public static class ApiResults
         problem.Extensions["code"] = code;
         problem.Extensions["retryable"] = retryable;
         problem.Extensions["traceId"] = http.TraceIdentifier;
+
+        // Emit Retry-After for rate-limited responses so clients honor the required backoff.
+        if (error.RetryAfterSeconds is { } retryAfter && retryAfter >= 0)
+        {
+            http.Response.Headers.RetryAfter = retryAfter.ToString();
+        }
         if (error.Errors is { Count: > 0 })
         {
             problem.Extensions["errors"] = error.Errors

@@ -136,6 +136,15 @@ public interface IWorldEventRepository
     /// </summary>
     Task<WorldEventAppend> AppendAsync(WorldEvent worldEvent, CancellationToken ct);
 
+    /// <summary>
+    /// Reserves the next global <c>Worldsequence</c> and inserts an event whose public data is BUILT from
+    /// that reserved sequence — so a social post's <c>post.created</c> event can embed the exact envelope
+    /// worldsequence it is assigned (the one global order; no separate social sequence). Idempotent by
+    /// <c>DedupeKey</c>: a replay returns the committed event carrying its ORIGINAL worldsequence without
+    /// reserving a new one or rebuilding data, so a retry/crash never produces a gap or a second sequence.
+    /// </summary>
+    Task<WorldEventAppend> AppendAsync(WorldEvent template, Func<long, System.Text.Json.Nodes.JsonNode?> buildPublicData, CancellationToken ct);
+
     Task<WorldEvent?> GetByDedupeAsync(string dedupeKey, CancellationToken ct);
 
     /// <summary>Committed events with worldsequence &gt; <paramref name="afterSequence"/>, ascending.</summary>

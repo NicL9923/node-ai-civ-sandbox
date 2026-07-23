@@ -20,59 +20,24 @@ namespace WorldMap.Infrastructure.Cosmos;
 /// </summary>
 internal sealed class CosmosSequenceAllocator(Container counters, string stream)
 {
-    private readonly SemaphoreSlim _gate = new(1, 1);
+    private readonly SequenceAllocatorCore _core = new();
     private readonly string _id = CosmosId.Hash(stream);
     private readonly PartitionKey _pk = new(stream);
-    private bool _seeded;
-    private long _current;
 
     /// <summary>
-    /// Allocates the next value and runs <paramref name="insert"/> to persist the named record under
-    /// the stream lock. When the insert reports <see cref="SequenceInsert{T}.Consumed"/> the counter
-    /// advances and is persisted; otherwise (idempotent dedupe conflict) the value is released.
+    /// Allocates the next value and runs <paramref name="insert"/> to persist the named record. Delegates
+    /// the gate/seed/allocate-through-insert + ambiguous-failure reseed to <see cref="SequenceAllocatorCore"/>;
+    /// the seed reads the greater of the persisted counter and the caller's live MAX scan.
     /// </summary>
-    public async Task<T> AllocateAsync<T>(
+    public Task<T> AllocateAsync<T>(
         Func<CancellationToken, Task<long>> seedFromMax,
         Func<long, CancellationToken, Task<SequenceInsert<T>>> insert,
         CancellationToken ct)
-    {
-        await _gate.WaitAsync(ct).ConfigureAwait(false);
-        try
-        {
-            if (!_seeded)
-            {
-                var persisted = await ReadCounterAsync(ct).ConfigureAwait(false);
-                var scanned = await seedFromMax(ct).ConfigureAwait(false);
-                _current = Math.Max(persisted, scanned);
-                _seeded = true;
-            }
-
-            var next = _current + 1;
-            var outcome = await insert(next, ct).ConfigureAwait(false);
-            if (outcome.Consumed)
-            {
-                // Advance the in-process authority FIRST: the record is now durably inserted at `next`,
-                // so this number must never be reused even if persisting the counter doc fails. The
-                // counter doc is only a restart optimization — the MAX-scan seed recovers it — so its
-                // write is best-effort and a transient failure must not roll back `_current`.
-                _current = next;
-                try
-                {
-                    await WriteCounterAsync(next, ct).ConfigureAwait(false);
-                }
-                catch (CosmosException) when (!ct.IsCancellationRequested)
-                {
-                    // Counter persistence is recoverable on restart via the MAX-scan seed.
-                }
-            }
-
-            return outcome.Result;
-        }
-        finally
-        {
-            _gate.Release();
-        }
-    }
+        => _core.AllocateAsync(
+            async token => Math.Max(await ReadCounterAsync(token).ConfigureAwait(false), await seedFromMax(token).ConfigureAwait(false)),
+            insert,
+            WriteCounterAsync,
+            ct);
 
     private async Task<long> ReadCounterAsync(CancellationToken ct)
     {
@@ -141,10 +106,48 @@ internal sealed class CosmosSequenceAllocator(Container counters, string stream)
     }
 }
 
-/// <summary>Outcome of a sequence allocator insert callback.</summary>
-/// <param name="Consumed">True when the allocated value was durably used (advance the counter).</param>
-/// <param name="Result">The value returned to the allocator caller.</param>
-internal readonly record struct SequenceInsert<T>(bool Consumed, T Result);
+/// <summary>How an allocator insert callback resolved the proposed sequence value.</summary>
+internal enum SequenceOutcome
+{
+    /// <summary>The value was durably consumed by this record; advance the high-water mark.</summary>
+    Consumed,
+
+    /// <summary>A same-identity/dedupe record already owns an earlier value; release the proposal (no advance).</summary>
+    ReleasedDuplicate,
+
+    /// <summary>A DIFFERENT record already occupies the proposed value; advance past it and retry at the next.</summary>
+    Occupied,
+}
+
+/// <summary>
+/// Outcome of a sequence allocator insert callback. Construct with the <c>(consumed, result)</c> ctor for
+/// the common consumed/dedupe cases (back-compat), or the <see cref="Occupied"/> factory when a structural
+/// unique key proves a different record already holds the proposed number.
+/// </summary>
+internal readonly record struct SequenceInsert<T>
+{
+    public SequenceOutcome Kind { get; private init; }
+    public T Result { get; private init; }
+
+    /// <summary><c>true</c> ⇒ Consumed; <c>false</c> ⇒ ReleasedDuplicate (dedupe conflict).</summary>
+    public SequenceInsert(bool consumed, T result)
+    {
+        Kind = consumed ? SequenceOutcome.Consumed : SequenceOutcome.ReleasedDuplicate;
+        Result = result;
+    }
+
+    private SequenceInsert(SequenceOutcome kind, T result)
+    {
+        Kind = kind;
+        Result = result;
+    }
+
+    public static SequenceInsert<T> Consumed(T result) => new(SequenceOutcome.Consumed, result);
+    public static SequenceInsert<T> ReleasedDuplicate(T result) => new(SequenceOutcome.ReleasedDuplicate, result);
+
+    /// <summary>The proposed value is occupied by a different record; the allocator advances past it and retries.</summary>
+    public static SequenceInsert<T> Occupied() => new(SequenceOutcome.Occupied, default!);
+}
 
 /// <summary>Persisted high-water mark for a sequence stream (stored in the <c>sequences</c> container).</summary>
 internal sealed class CosmosSequenceCounter

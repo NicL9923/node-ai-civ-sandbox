@@ -40,4 +40,18 @@ public enum ErrorCode
     // Persistence
     StorageError,
     StorageDocumentNotFound,
+
+    // World Wire social
+    SocialAccountNotFound,
+    PostNotFound,
+    ForbiddenAccount,
+    ForbiddenActor,
+    SystemAccountReserved,
+    ContentTooLong,
+    InvalidSocialContent,
+    ReplyDepthExceeded,
+    PostTombstoned,
+    SelfFollowForbidden,
+    OfficialAccountConflict,
+    CursorFilterMismatch,
 }

@@ -23,6 +23,7 @@ namespace WorldMap.Infrastructure.Cosmos;
 public sealed class CosmosWorldEventRepository : IWorldEventRepository
 {
     private static readonly PartitionKey FeedPartition = new(CosmosContainers.WorldEventFeedPartition);
+    private const int ConflictMaxAttempts = 6;
 
     private readonly Container _container;
     private readonly CosmosSequenceAllocator _sequence;
@@ -63,9 +64,7 @@ public sealed class CosmosWorldEventRepository : IWorldEventRepository
                 }
                 catch (CosmosException ex) when (ex.StatusCode == HttpStatusCode.Conflict)
                 {
-                    // A concurrent writer committed the same dedupe key: release the number, return theirs.
-                    var duplicate = await ReadByIdAsync(id, token).ConfigureAwait(false) ?? worldEvent;
-                    return new SequenceInsert<WorldEventAppend>(false, new WorldEventAppend(duplicate, true));
+                    return await ResolveConflictAsync(id, next, token).ConfigureAwait(false);
                 }
             },
             ct).ConfigureAwait(false);
@@ -73,6 +72,74 @@ public sealed class CosmosWorldEventRepository : IWorldEventRepository
 
     public Task<WorldEvent?> GetByDedupeAsync(string dedupeKey, CancellationToken ct)
         => ReadByIdAsync(CosmosId.Hash(dedupeKey), ct);
+
+    public async Task<WorldEventAppend> AppendAsync(
+        WorldEvent template, Func<long, System.Text.Json.Nodes.JsonNode?> buildPublicData, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(template);
+        var id = CosmosId.Hash(template.DedupeKey);
+
+        // Fast-path dedupe: an already-committed event returns with its ORIGINAL worldsequence.
+        var existing = await ReadByIdAsync(id, ct).ConfigureAwait(false);
+        if (existing is not null)
+        {
+            return new WorldEventAppend(existing, true);
+        }
+
+        return await _sequence.AllocateAsync(
+            MaxWorldsequenceAsync,
+            async (next, token) =>
+            {
+                // Reserve the sequence, then build the public data FROM it (the embedded post worldsequence
+                // equals this event's envelope worldsequence).
+                template.Worldsequence = next;
+                template.PublicData = buildPublicData(next);
+                var doc = CosmosDoc.Create(id, CosmosContainers.WorldEventFeedPartition, template);
+                try
+                {
+                    var response = await _container.CreateItemAsync(doc, FeedPartition, cancellationToken: token)
+                        .ConfigureAwait(false);
+                    return new SequenceInsert<WorldEventAppend>(true, new WorldEventAppend(response.Resource.Payload, false));
+                }
+                catch (CosmosException ex) when (ex.StatusCode == HttpStatusCode.Conflict)
+                {
+                    return await ResolveConflictAsync(id, next, token).ConfigureAwait(false);
+                }
+            },
+            ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Resolves a create 409 by OBSERVING the conflicting document (bounded, jittered): our own dedupe
+    /// record ⇒ idempotent replay with its ORIGINAL sequence (proposal released); a different owner of
+    /// <paramref name="proposed"/> ⇒ <see cref="SequenceOutcome.Occupied"/> so the allocator advances past
+    /// it; neither visible in the window ⇒ a retryable exception (the allocator invalidates its seed).
+    /// </summary>
+    private async Task<SequenceInsert<WorldEventAppend>> ResolveConflictAsync(string id, long proposed, CancellationToken ct)
+    {
+        var resolution = await WorldEventConflictResolver.ResolveAsync(
+            token => ReadByIdAsync(id, token),
+            token => ReadBySequenceAsync(proposed, token),
+            ConflictMaxAttempts,
+            DelayWithJitterAsync,
+            ct).ConfigureAwait(false);
+
+        return resolution.Kind switch
+        {
+            WorldEventConflictKind.Duplicate =>
+                SequenceInsert<WorldEventAppend>.ReleasedDuplicate(new WorldEventAppend(resolution.Existing!, true)),
+            WorldEventConflictKind.Occupied => SequenceInsert<WorldEventAppend>.Occupied(),
+            _ => throw new WorldEventConflictUnresolvedException(proposed),
+        };
+    }
+
+    private static async Task DelayWithJitterAsync(int attempt, CancellationToken ct)
+    {
+        // Exponential backoff (capped) + jitter so replication of the conflicting doc can catch up.
+        var baseMs = Math.Min(25 * (1 << attempt), 400);
+        var delayMs = baseMs + Random.Shared.Next(0, 25);
+        await Task.Delay(delayMs, ct).ConfigureAwait(false);
+    }
 
     public async Task<Page<WorldEvent>> ListAsync(long afterSequence, int limit, CancellationToken ct)
     {
@@ -108,6 +175,23 @@ public sealed class CosmosWorldEventRepository : IWorldEventRepository
         {
             return null;
         }
+    }
+
+    private async Task<WorldEvent?> ReadBySequenceAsync(long worldsequence, CancellationToken ct)
+    {
+        var query = new QueryDefinition("SELECT * FROM c WHERE c.payload.worldsequence = @ws OFFSET 0 LIMIT 1")
+            .WithParameter("@ws", worldsequence);
+        var requestOptions = new QueryRequestOptions { PartitionKey = FeedPartition };
+        using var iterator = _container.GetItemQueryIterator<CosmosDoc<WorldEvent>>(query, requestOptions: requestOptions);
+        while (iterator.HasMoreResults)
+        {
+            foreach (var doc in await iterator.ReadNextAsync(ct).ConfigureAwait(false))
+            {
+                return doc.Payload;
+            }
+        }
+
+        return null;
     }
 
     private async Task<long> MaxWorldsequenceAsync(CancellationToken ct)

@@ -16,8 +16,11 @@ public static class WorldMapApplicationServiceCollectionExtensions
     public static IServiceCollection AddWorldMapApplication(this IServiceCollection services)
     {
         services.AddSingleton<PublicEventFactory>();
+        services.AddSingleton<SocialEventFactory>();
         services.TryAddSingleton<IWorldEventSink, NoOpWorldEventSink>();
         services.AddScoped<IdempotencyExecutor>();
+        services.AddScoped<SocialRateLimiter>();
+        services.AddScoped<SocialMutationPipeline>();
         services.AddScoped<IInteractionProcessor, InteractionProcessor>();
 
         services.AddScoped<IOnboardingService, OnboardingService>();
@@ -27,6 +30,12 @@ public static class WorldMapApplicationServiceCollectionExtensions
         services.AddScoped<IInteractionService, InteractionService>();
         services.AddScoped<IRelationshipService, RelationshipService>();
         services.AddScoped<IMaintenanceService, MaintenanceService>();
+
+        services.AddScoped<ISocialAccountService, Impl.SocialAccountService>();
+        services.AddScoped<ISocialPostService, Impl.SocialPostService>();
+        services.AddScoped<ISocialGraphService, Impl.SocialGraphService>();
+        services.AddScoped<ISocialFeedService, Impl.SocialFeedService>();
+        services.AddSingleton<ISocialProjectionReconciler, Impl.SocialProjectionReconciler>();
         return services;
     }
 }

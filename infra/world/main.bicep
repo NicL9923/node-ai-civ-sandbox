@@ -5,8 +5,8 @@
 //   * Dedicated Linux App Service plan (scale locked to 1) + .NET 10 Web App (system-assigned identity).
 //   * Dedicated Application Insights linked to a Log Analytics workspace (existing by resource id, else new).
 //   * New Key Vault (RBAC, soft delete, purge protection) for out-of-band HMAC secrets.
-//   * The `worldmap` Cosmos SQL database + its 11 containers, created inside an EXISTING (reused) Cosmos
-//     account — the runtime authenticates with managed identity (no account keys).
+//   * The `worldmap` Cosmos SQL database + all containers defined in ./containers.json, created inside an
+//     EXISTING (reused) Cosmos account — the runtime authenticates with managed identity (no account keys).
 //   * Least-privilege RBAC: World MI -> Cosmos Data Contributor (scoped to the worldmap DB) and
 //     Key Vault Secrets User (scoped to the vault).
 //
@@ -160,10 +160,12 @@ resource keyVault 'Microsoft.KeyVault/vaults@2023-07-01' = {
 }
 
 // --------------------------------------------------------------------------------------------------
-// Cosmos: worldmap database + 11 containers inside the reused account.
+// Cosmos: worldmap database + every container declared in ./containers.json, inside the reused account.
 //   * Database-level SHARED throughput (autoscale/manual), or omitted for serverless accounts.
 //   * Every container: partition key /pk (Hash v2). defaultTtl -1 only on the TTL containers
-//     (nonces, idempotency); durable containers carry no default TTL — matching CosmosReadinessProbe.
+//     (nonces, idempotency, socialSnapshots, socialRateLimit); durable containers carry no default
+//     TTL — matching CosmosReadinessProbe. worldEvents additionally carries a /payload/worldsequence
+//     unique-key policy (the structural duplicate-sequence backstop).
 //   * Default indexing (index-everything) to match the runtime bootstrapper exactly.
 // --------------------------------------------------------------------------------------------------
 resource worldDatabase 'Microsoft.DocumentDB/databaseAccounts/sqlDatabases@2024-05-15' = {
@@ -205,7 +207,21 @@ resource worldContainers 'Microsoft.DocumentDB/databaseAccounts/sqlDatabases/con
         },
         // TTL containers self-purge via per-item ttl; DefaultTimeToLive -1 enables TTL without a
         // blanket default. Durable containers omit defaultTtl entirely.
-        c.ttl ? { defaultTtl: -1 } : {}
+        c.ttl ? { defaultTtl: -1 } : {},
+        // Structural sequence-uniqueness backstop: emit a unique-key policy only where declared
+        // (worldEvents on /payload/worldsequence). Unique-key policies are IMMUTABLE after container
+        // creation; worldmap is not deployed yet, so this is set at first provisioning.
+        contains(c, 'uniqueKeyPaths')
+          ? {
+              uniqueKeyPolicy: {
+                uniqueKeys: [
+                  {
+                    paths: c.uniqueKeyPaths
+                  }
+                ]
+              }
+            }
+          : {}
       )
     }
   }

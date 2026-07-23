@@ -32,17 +32,31 @@ public sealed class WorldAppFactory : WebApplicationFactory<Program>
 
     private const int TokenPoolSize = 128;
     private readonly AdjustableTimeProvider? _clock;
+    private readonly int _postCooldownSeconds;
+    private readonly int _postsPerWindow;
+    private readonly int _reactionsPerWindow;
+    private readonly int _followsPerWindow;
 
     // Auto-registration draws from records 1..N; record 0 is reserved for the explicit
     // registration test so the two never collide.
     private readonly ConcurrentQueue<string> _autoTokens = new();
 
-    public WorldAppFactory(bool useControllableTime = false)
+    public WorldAppFactory(
+        bool useControllableTime = false,
+        int socialPostCooldownSeconds = 0,
+        int socialPostsPerWindow = 1000,
+        int socialReactionsPerWindow = 1000,
+        int socialFollowsPerWindow = 1000)
     {
         if (useControllableTime)
         {
             _clock = new AdjustableTimeProvider(DateTimeOffset.UtcNow);
         }
+
+        _postCooldownSeconds = socialPostCooldownSeconds;
+        _postsPerWindow = socialPostsPerWindow;
+        _reactionsPerWindow = socialReactionsPerWindow;
+        _followsPerWindow = socialFollowsPerWindow;
 
         for (var i = 1; i < TokenPoolSize; i++)
         {
@@ -102,6 +116,12 @@ public sealed class WorldAppFactory : WebApplicationFactory<Program>
                 // Quiet the maintenance sweeper so it never interferes with short tests.
                 ["WorldMap:Maintenance:Enabled"] = "false",
                 ["WorldMap:Maintenance:SweepIntervalSeconds"] = "3600",
+
+                // Social rate-limit policy (permissive by default; rate-limit tests pass restrictive values).
+                ["WorldMap:Social:RateLimit:PostCooldownSeconds"] = _postCooldownSeconds.ToString(),
+                ["WorldMap:Social:RateLimit:PostsPerWindow"] = _postsPerWindow.ToString(),
+                ["WorldMap:Social:RateLimit:ReactionsPerWindow"] = _reactionsPerWindow.ToString(),
+                ["WorldMap:Social:RateLimit:FollowsPerWindow"] = _followsPerWindow.ToString(),
             };
 
             // Preprovision onboarding records (token -> civId/keyId/secretRef) and their secrets.

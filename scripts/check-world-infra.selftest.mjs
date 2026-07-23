@@ -9,7 +9,7 @@
 // Exit 0 = all assertions hold; 1 = a detector regressed.
 // =====================================================================================================
 
-import { RAW_VALUE_DENYLIST, SECRET_HANDLING_DENYLIST, scanContent, categorizeOnboardingInvocations } from './check-world-infra.mjs';
+import { RAW_VALUE_DENYLIST, SECRET_HANDLING_DENYLIST, scanContent, categorizeOnboardingInvocations, parseCsUniqueKeys, parseJsonUniqueKeys, parseContainerCountMarker, findHardcodedContainerCounts, hasImmutableUniqueKeyWarning } from './check-world-infra.mjs';
 
 const failures = [];
 const hitNames = (content, denyList) => scanContent(content, denyList).map((h) => h.name);
@@ -101,9 +101,79 @@ expectCounts(
 // Prose mention (no -WorldVault) must not count.
 expectCounts('prose mention', 'See scripts/provision-world-onboarding.ps1 for details.', { managed: 0, external: 0, worldOnly: 0 });
 
+// --- Unique-key parity parsers (worldEvents /payload/worldsequence backstop) ---
+const CS_SAMPLE = `
+  public const string WorldEvents = "worldEvents";
+  public const string WorldEventSequencePath = "/payload/worldsequence";
+  public static readonly IReadOnlyDictionary<string, IReadOnlyList<string>> UniqueKeyPaths =
+      new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal)
+      {
+          [WorldEvents] = [WorldEventSequencePath],
+      };
+`;
+function expectUniqueKey(label, map, name, expected) {
+  const got = map.get(name);
+  const eq = Array.isArray(got) && got.length === expected.length && got.every((v, i) => v === expected[i]);
+  if (!eq) {
+    failures.push(`unique-key ${label}: expected ${name}=[${expected.join(', ')}], got [${(got ?? []).join(', ') || 'none'}]`);
+  }
+}
+expectUniqueKey('C# parse', parseCsUniqueKeys(CS_SAMPLE), 'worldEvents', ['/payload/worldsequence']);
+expectUniqueKey(
+  'JSON parse',
+  parseJsonUniqueKeys({ containers: [{ name: 'worldEvents', ttl: false, uniqueKeyPaths: ['/payload/worldsequence'] }, { name: 'lock', ttl: false }] }),
+  'worldEvents',
+  ['/payload/worldsequence'],
+);
+// A mismatch (JSON declares the wrong path) must be detectable by comparing the two maps.
+{
+  const csMap = parseCsUniqueKeys(CS_SAMPLE);
+  const jsonMap = parseJsonUniqueKeys({ containers: [{ name: 'worldEvents', uniqueKeyPaths: ['/payload/wrong'] }] });
+  const same = JSON.stringify(csMap.get('worldEvents')) === JSON.stringify(jsonMap.get('worldEvents'));
+  if (same) {
+    failures.push('unique-key mismatch: parser failed to distinguish /payload/worldsequence from /payload/wrong');
+  }
+}
+// A dropped C# dictionary must yield an empty map (guard then reports it missing).
+if (parseCsUniqueKeys('// no dictionary here').size !== 0) {
+  failures.push('unique-key: parseCsUniqueKeys should return empty when the dictionary is absent');
+}
+
+// --- Runbook schema-drift helpers (container-count marker + immutable unique-key warning) ---
+if (parseContainerCountMarker('intro <!-- world-container-count: 18 --> tail') !== 18) {
+  failures.push('runbook-schema: parseContainerCountMarker failed to read the 18 marker');
+}
+if (parseContainerCountMarker('no marker here') !== null) {
+  failures.push('runbook-schema: parseContainerCountMarker should be null when the marker is absent');
+}
+{
+  // A stale prose count is caught; the marker (no trailing "containers") is NOT a false positive.
+  const counts = findHardcodedContainerCounts('worldmap DB + 11 containers. <!-- world-container-count: 18 -->');
+  if (!counts.includes(11)) {
+    failures.push('runbook-schema: findHardcodedContainerCounts missed the stale "11 containers" prose');
+  }
+  if (counts.includes(18)) {
+    failures.push('runbook-schema: findHardcodedContainerCounts false-matched the count marker');
+  }
+}
+const FULL_WARNING = 'worldEvents unique key /payload/worldsequence is immutable; readiness fails closed; never delete a deployed ledger; the World is greenfield';
+if (!hasImmutableUniqueKeyWarning(FULL_WARNING)) {
+  failures.push('runbook-schema: hasImmutableUniqueKeyWarning missed a complete warning');
+}
+// Each critical clause omitted individually must FAIL the guard (no partial acceptance).
+for (const drop of ['/payload/worldsequence', 'immutable', 'worldevents', 'fails closed', 'never delete', 'greenfield']) {
+  const weakened = FULL_WARNING.toLowerCase().replace(drop, 'xxx');
+  if (hasImmutableUniqueKeyWarning(weakened)) {
+    failures.push(`runbook-schema: hasImmutableUniqueKeyWarning accepted a warning missing "${drop}"`);
+  }
+}
+if (hasImmutableUniqueKeyWarning('worldEvents exists but no unique-key note')) {
+  failures.push('runbook-schema: hasImmutableUniqueKeyWarning false-positived on incomplete text');
+}
+
 if (failures.length > 0) {
   console.error('World infra guard SELF-TEST FAILED:');
   for (const f of failures) console.error(`  - ${f}`);
   process.exit(1);
 }
-console.log(`World infra guard self-test passed (${'raw-value + secret-handling detectors verified'}).`);
+console.log(`World infra guard self-test passed (raw-value + secret-handling + unique-key parity + runbook schema-drift detectors verified).`);

@@ -18,6 +18,17 @@ internal sealed class ThrowOnceAfterWorldEventAppend(IWorldEventRepository inner
         return result;
     }
 
+    public async Task<WorldEventAppend> AppendAsync(WorldEvent template, Func<long, System.Text.Json.Nodes.JsonNode?> buildPublicData, CancellationToken ct)
+    {
+        var result = await inner.AppendAsync(template, buildPublicData, ct);
+        if (Interlocked.Exchange(ref _remaining, 0) == 1)
+        {
+            throw new InjectedFailureException();
+        }
+
+        return result;
+    }
+
     public Task<WorldEvent?> GetByDedupeAsync(string dedupeKey, CancellationToken ct) =>
         inner.GetByDedupeAsync(dedupeKey, ct);
 

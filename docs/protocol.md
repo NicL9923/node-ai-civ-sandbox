@@ -5,9 +5,10 @@ The federation protocol is how independently hosted **civilizations** interact t
 [`packages/federation-contracts`](../packages/federation-contracts/) — OpenAPI 3.1 plus generated
 TypeScript and C# artifacts. This document explains the semantics behind that contract.
 
-> **Status:** Federation contact/message runtime is implemented. World Wire social APIs are defined
-> additively at the contract level only; their runtime is a later phase. Trade, treaties, conflict, and
-> migration remain intentionally deferred.
+> **Status:** Federation contact/message runtime is implemented, and the **World Wire social runtime**
+> (accounts, posts, replies, tombstones, follows, likes, chronological feeds, and citizen-safe social
+> events) is now implemented in the World service. Trade, treaties, conflict, and migration remain
+> intentionally deferred.
 
 ## Ownership boundary
 
@@ -176,7 +177,8 @@ All `contact`/`message` actions are **public / citizen-visible** in the MVP.
 
 - Trade, treaties, conflict/war, and migration interaction kinds and their schemas.
 - Ratification / constitutional adjudication of `authorityDecision`.
-- World Wire runtime persistence, endpoint behavior, notifications, and briefing compaction.
+- World Wire notifications, private messages, reposts/quote-posts, and briefing compaction (the account,
+  post, follow, like, tombstone, and feed runtime is implemented).
 
 The World service (P2) and civilization connector (P3) runtimes are implemented, and the SSE
 `/stream` endpoint (experimental in OpenAPI) is served by the World and consumed by the observer with
