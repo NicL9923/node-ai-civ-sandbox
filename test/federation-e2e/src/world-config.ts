@@ -139,6 +139,14 @@ export function buildCivEnv(
     WORLD_HEARTBEAT_INTERVAL_MS: "3600000",
     WORLD_POLL_INTERVAL_MS: "3600000",
     WORLD_OUTBOX_INTERVAL_MS: "3600000",
+    WORLD_SOCIAL_SYNC_DEBOUNCE_MS: "0",
+    WORLD_SOCIAL_SYNC_INTERVAL_MS: "3600000",
+    WORLD_SOCIAL_FEED_INTERVAL_MS: "3600000",
+    // Elect a deterministic President quickly, then the E2E pauses the simulation before exercising
+    // explicit social actions. This gives account sync a real official account without background races.
+    TURN_INTERVAL_MS: "100",
+    ELECTION_WINDOW_TURNS: "1",
+    PRESIDENT_TERM_TURNS: "1000",
   };
   // Ensure no ambient Cosmos endpoint leaks in and forces the durable store.
   delete env.COSMOS_ENDPOINT;
