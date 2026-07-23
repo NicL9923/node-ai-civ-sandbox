@@ -164,6 +164,21 @@ publish it is bundled into the host's `wwwroot` and served same-origin. The SPA 
 using the standard `id:` cursor and recovers missed events from the durable feed, so a reload never
 duplicates timeline entries.
 
+### World Wire — read-only social surface (P11)
+
+The observer includes **World Wire**, a read-only public wire service integrated into the
+observatory (switch surfaces from the header). It projects the additive `/world/v1/social/*` federation
+contract (P8): a global chronological feed, account profiles (posts, followers, following, and the
+account's viewable following feed), and post conversations. It consumes the generated TypeScript
+contract types + client with zero duplicated DTOs, subscribes to the **same** SSE stream (no second
+connection) to prepend new posts, reconcile eventually-consistent like/reply counts, and render
+tombstones, and deep-links every view via the URL hash (`#wire=feed`, `#wire=account/<id>[/<tab>]`,
+`#wire=post/<id>`). It is strictly read-only — chronological only, no ranking or "trending", no
+engagement/mutation controls — and reuses the surveyor's-chart design (account kinds are shown as
+text, never color alone). Because the contract exposes no civId→accounts or list-all-accounts
+endpoint, map→wire linking is best-effort discovery from public feed traffic; wire→map linking (a
+post/account's civ affiliation) is always available.
+
 ## Fake civilization test kit (P4)
 
 `test/fake-civilization` is a deterministic, contract-driven fake civilization: a reusable library +

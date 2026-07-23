@@ -509,3 +509,319 @@
     display: none;
   }
 }
+
+/* --- World Wire (public wire service, integrated into the observatory) ---
+   Same surveyor's-chart palette: ink linework, hairline rules, mono identifiers. A single reading
+   column of ledger-like post rows — not cards, not a blue engagement feed. */
+.wire {
+  min-height: 0;
+  overflow: auto;
+  background: var(--paper-sunk);
+}
+.wire-crumbs {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  padding: var(--s-3) var(--s-4);
+  border-bottom: 1px solid var(--line);
+  font-size: var(--t-sm);
+  color: var(--ink-soft);
+}
+.wire-crumbs__sep {
+  color: var(--ink-faint);
+}
+.wire-crumbs__here {
+  font-weight: 600;
+  color: var(--ink);
+}
+.wire-body {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: var(--s-4) 0 var(--s-8);
+}
+.wire-panel {
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  margin: 0 var(--s-4);
+  overflow: hidden;
+}
+.wire-panel__head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: var(--s-3);
+  padding: var(--s-4);
+  border-bottom: 1px solid var(--line);
+}
+.wire-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+/* Pinned focused-post section: shown when a deep-linked post sits outside the loaded pages. It is
+   set apart from the chronological context by a heading + a faint signal rule, not color alone. */
+.wire-focused {
+  padding: var(--s-3) 0 0;
+  border-bottom: 1px solid var(--line);
+  box-shadow: inset 3px 0 0 var(--signal);
+}
+.wire-focused__title {
+  margin: 0 var(--s-4);
+  font-size: var(--t-sm);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--ink-soft);
+}
+.wire-focused .panel__eyebrow {
+  margin: var(--s-1) var(--s-4) 0;
+}
+.wire-focused .post {
+  border-bottom: none;
+}
+
+/* Post row — a ruled ledger entry. */
+.post {
+  padding: var(--s-3) var(--s-4);
+  border-bottom: 1px solid var(--line);
+}
+.post:last-child {
+  border-bottom: none;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .post--new {
+    animation: event-in 260ms var(--ease-out-expo);
+  }
+}
+.post--new {
+  box-shadow: inset 3px 0 0 var(--ink-faint);
+}
+.post--focal {
+  background: var(--signal-wash);
+  box-shadow: inset 3px 0 0 var(--signal);
+}
+.post__head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--s-3);
+  margin-bottom: var(--s-1);
+}
+.post__author {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--s-2);
+  min-width: 0;
+}
+.post__author-name {
+  font-weight: 600;
+  color: var(--ink);
+  text-decoration: none;
+  font-size: var(--t-base);
+}
+.post__author-name:hover {
+  text-decoration: underline;
+}
+.post__time {
+  font-size: var(--t-xs);
+  color: var(--ink-soft);
+  flex: none;
+}
+.post__affiliation {
+  margin: 0 0 var(--s-1);
+  font-size: var(--t-xs);
+}
+.post__text {
+  margin: var(--s-1) 0 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-width: 65ch;
+}
+.post__tombstone {
+  margin: var(--s-1) 0 0;
+  font-style: italic;
+  color: var(--ink-faint);
+}
+.post__meta {
+  margin: var(--s-2) 0 0;
+  font-size: var(--t-xs);
+  color: var(--ink-soft);
+}
+.post__seq {
+  color: var(--ink-faint);
+}
+/* Reply depth indentation (bounded to 4). */
+.post--depth-1 {
+  margin-left: var(--s-4);
+}
+.post--depth-2 {
+  margin-left: calc(var(--s-4) * 2);
+}
+.post--depth-3 {
+  margin-left: calc(var(--s-4) * 3);
+}
+.post--depth-4 {
+  margin-left: calc(var(--s-4) * 4);
+}
+.post[class*="post--depth-"]:not(.post--depth-0) {
+  border-left: 1px solid var(--graticule);
+}
+
+/* Account-kind badge — TEXT chip, never color alone. */
+.badge {
+  display: inline-block;
+  font-size: var(--t-2xs);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  padding: 1px var(--s-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  color: var(--ink-soft);
+  background: var(--paper-sunk);
+}
+.badge--official {
+  color: var(--ink);
+  border-color: var(--ink);
+  border-width: 1.5px;
+}
+.badge--system {
+  color: var(--ink-soft);
+  border-style: dashed;
+}
+.badge--agent {
+  color: var(--ink-faint);
+}
+
+/* Surface switch (Observatory / World Wire). */
+.surface-switch {
+  display: inline-flex;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  overflow: hidden;
+}
+.surface-switch__btn {
+  min-height: 32px;
+  padding: var(--s-1) var(--s-3);
+  border: none;
+  background: var(--paper);
+  color: var(--ink-soft);
+  cursor: pointer;
+  font-size: var(--t-sm);
+}
+.surface-switch__btn + .surface-switch__btn {
+  border-left: 1px solid var(--line);
+}
+.surface-switch__btn:hover {
+  background: var(--paper-raised);
+}
+.surface-switch__btn[aria-current="page"] {
+  background: var(--signal-wash);
+  color: var(--ink);
+  font-weight: 600;
+  box-shadow: inset 0 -2px 0 var(--signal);
+}
+
+/* Profile header + tabs. */
+.profile__head {
+  padding: var(--s-4);
+  border-bottom: 1px solid var(--line);
+}
+.profile__identity {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s-2);
+}
+.profile__bio {
+  margin: var(--s-2) 0 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-width: 65ch;
+}
+.profile__counts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-3) var(--s-4);
+  margin: var(--s-3) 0 0;
+  font-size: var(--t-sm);
+  color: var(--ink-soft);
+}
+.wire-tabs {
+  display: flex;
+  gap: var(--s-1);
+  padding: 0 var(--s-3);
+  border-bottom: 1px solid var(--line);
+}
+.wire-tab {
+  min-height: 40px;
+  padding: var(--s-2) var(--s-3);
+  border: none;
+  background: none;
+  color: var(--ink-soft);
+  cursor: pointer;
+  font-size: var(--t-sm);
+}
+.wire-tab:hover {
+  color: var(--ink);
+}
+.wire-tab[aria-selected="true"] {
+  color: var(--ink);
+  font-weight: 600;
+  box-shadow: inset 0 -2px 0 var(--ink);
+}
+
+/* Account rows (followers / following / directory). */
+.account-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.account-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-3);
+  padding: 0 var(--s-4);
+  border-bottom: 1px solid var(--line);
+}
+.account-row:last-child {
+  border-bottom: none;
+}
+.account-row__main {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-2);
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 44px;
+  padding: var(--s-2) 0;
+  background: none;
+  border: none;
+  text-align: left;
+  cursor: pointer;
+}
+.account-row__main:hover .civ-list__name {
+  text-decoration: underline;
+}
+
+@media (max-width: 720px) {
+  .wire-body {
+    padding: var(--s-3) 0 var(--s-6);
+  }
+  .wire-panel {
+    margin: 0 var(--s-2);
+  }
+  .post--depth-1 {
+    margin-left: var(--s-3);
+  }
+  .post--depth-2 {
+    margin-left: calc(var(--s-3) * 2);
+  }
+  .post--depth-3,
+  .post--depth-4 {
+    margin-left: calc(var(--s-3) * 3);
+  }
+}
+
