@@ -7,12 +7,14 @@ export {
 } from "./fake-civilization.js";
 export {
   createInitialState,
+  createInitialSocialState,
   loadState,
   saveState,
   serializeState,
   type AppliedContact,
   type AppliedMessage,
   type FakeCivilizationState,
+  type FakeSocialState,
   type ProcessedCommand,
   type RegistrationState,
 } from "./state.js";
@@ -54,7 +56,12 @@ export {
   type Sleeper,
   type WorldTransport,
 } from "./transport.js";
-export { WorldFederationDriver, type SigningMutationHooks, type WorldFederationDriverOptions } from "./world-client.js";
+export {
+  WorldFederationDriver,
+  type SigningMutationHooks,
+  type SocialPageQuery,
+  type WorldFederationDriverOptions,
+} from "./world-client.js";
 export { loadScenario, validateScenario } from "./scenario/loader.js";
 export { runScenario } from "./scenario/runner.js";
 export {
@@ -64,6 +71,9 @@ export {
   type Scenario,
   type ScenarioActor,
   type ScenarioCivilization,
+  type ScenarioInput,
+  type ScenarioValueReference,
+  type SocialPageInput,
   type ExpectedScenarioError,
   type ReplayableScenarioStep,
   type ScenarioHostControls,

@@ -1,0 +1,93 @@
+{
+  "schemaVersion": "1",
+  "name": "World Wire account sync and public reads",
+  "actors": {
+    "aurora": {
+      "displayName": "Aurora",
+      "credentialRef": "aurora",
+      "capabilities": {
+        "protocolVersion": "1.0.0",
+        "supportedInteractionKinds": ["contact"],
+        "features": ["world-wire-social-v1"]
+      }
+    }
+  },
+  "steps": [
+    { "id": "registration", "op": "register", "actor": "aurora", "idempotencyKey": "wire-account-register-1" },
+    {
+      "id": "accounts",
+      "op": "syncSocialAccounts",
+      "actor": "aurora",
+      "idempotencyKey": "wire-account-sync-1",
+      "body": {
+        "civId": { "valueFrom": "/registration/civId" },
+        "accounts": [
+          {
+            "actor": {
+              "civId": { "valueFrom": "/registration/civId" },
+              "kind": "agent",
+              "localAgentId": "agent_scout",
+              "displayName": "Aurora Scout"
+            },
+            "bio": "Citizen observer"
+          },
+          {
+            "actor": {
+              "civId": { "valueFrom": "/registration/civId" },
+              "kind": "official",
+              "displayName": "Aurora Presidency"
+            },
+            "bio": "Official civilization account",
+            "officialAuthority": {
+              "presidentLocalAgentId": "agent_president",
+              "presidentDisplayName": "President Sol",
+              "termNumber": 3,
+              "authorityDecision": {
+                "mode": "president",
+                "ref": "aurora-president-term-3"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "op": "getSocialAccount",
+      "actor": "aurora",
+      "accountId": { "valueFrom": "/accounts/accounts/0/accountId" },
+      "saveAs": "agentAccount"
+    },
+    {
+      "op": "getSocialAccount",
+      "actor": "aurora",
+      "accountId": { "valueFrom": "/accounts/accounts/1/accountId" },
+      "saveAs": "officialAccount"
+    },
+    {
+      "op": "listSocialAccountPosts",
+      "actor": "aurora",
+      "accountId": { "valueFrom": "/accounts/accounts/0/accountId" },
+      "limit": 10
+    },
+    {
+      "op": "listSocialFollowingFeed",
+      "actor": "aurora",
+      "accountId": { "valueFrom": "/accounts/accounts/0/accountId" },
+      "limit": 10
+    },
+    {
+      "op": "listSocialFollowers",
+      "actor": "aurora",
+      "accountId": { "valueFrom": "/accounts/accounts/0/accountId" },
+      "limit": 10
+    },
+    {
+      "op": "listSocialFollowing",
+      "actor": "aurora",
+      "accountId": { "valueFrom": "/accounts/accounts/0/accountId" },
+      "limit": 10
+    },
+    { "op": "assert", "actual": "/agentAccount/actor/kind", "equals": "agent" },
+    { "op": "assert", "actual": "/officialAccount/actor/kind", "equals": "official" }
+  ]
+}

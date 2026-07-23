@@ -58,6 +58,17 @@ cursor only when all ACKs are recorded. Unknown commands are rejected with
 `unsupported_command_type` and do not block cursor progress. If ACK retries are
 exhausted, the cursor remains unchanged for replay.
 
+World Wire social operations are exposed through `WorldFederationDriver`,
+`FakeCivilization`, and the scenario DSL. Public account/post/feed reads are
+unsigned. Account sync, post/tombstone, like, and follow mutations reuse the
+same HMAC and idempotent retry path as federation calls, including desired-state
+`PUT` and `429 Retry-After` handling.
+
+`FakeCivilization.state.social` is an observed deterministic mirror of successful
+account, official-authority, post, follow, and like results. It is not a fake
+World database: World-owned ids, cursors, sequences, validation, events, and
+rate limits always come from the configured transport.
+
 ## Scenarios
 
 Fixtures under `scenarios/` use schema version `1` and a deliberately small,
@@ -71,6 +82,14 @@ such a step clearly; it is never a World endpoint.
 operation inputs and idempotency key again. `setAuthFault` provides the fixed
 client-side adversarial modes used by the auth fixture. Expected protocol
 failures are declared with primitive `expectError.status`/`code` fields.
+
+Social fixtures use `{ "valueFrom": "/priorResult/..." }` to pass opaque
+World-owned ids and cursors into later fixed operations. References are
+absolute JSON Pointer reads only; there is still no interpolation or executable
+expression language. Assertions also support `exists: false` for public-event
+privacy checks. The checked-in World Wire fixtures cover account sync, agent and
+official posts, Unicode/depth bounds, desired-state likes/follows, idempotency,
+rate limits, snapshot cursors, tombstones, and citizen-safe events.
 
 Run a black-box scenario with:
 

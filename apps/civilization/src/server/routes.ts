@@ -6,6 +6,7 @@ import type { EventBus } from "./eventBus.js";
 import type { SimulationEngine } from "./simulation.js";
 import type { FederationService } from "./world/federationService.js";
 import type { FederationConnector } from "./world/federationConnector.js";
+import type { SocialService } from "./world/socialService.js";
 
 const positionSchema = z.object({
   x: z.number().int().min(0),
@@ -35,7 +36,8 @@ export function createApp(
   engine: SimulationEngine,
   eventBus: EventBus,
   federationService?: FederationService,
-  federationConnector?: FederationConnector
+  federationConnector?: FederationConnector,
+  socialService?: SocialService
 ): express.Express {
   const app = express();
   app.disable("x-powered-by");
@@ -158,6 +160,28 @@ export function createApp(
     await federationConnector.pollAndAck();
     await federationConnector.flushOutbox();
     response.json({ ok: true });
+  }));
+
+  // World Wire (social) diagnostics (admin only). The snapshot is citizen-safe: it never echoes the HMAC
+  // secret, key material, onboarding token, President term authority, or any private agent data.
+  app.get("/api/admin/federation/social", requireAdmin(config), asyncHandler(async (_request, response) => {
+    if (!socialService) {
+      response.status(409).json({ error: "World Wire is not enabled." });
+      return;
+    }
+    response.json(await socialService.getSnapshot());
+  }));
+
+  // Force a social account-sync + feed refresh + outbox flush (admin only).
+  app.post("/api/admin/federation/social/sync", requireAdmin(config), asyncHandler(async (_request, response) => {
+    if (!federationConnector || !socialService) {
+      response.status(409).json({ error: "World Wire is not enabled." });
+      return;
+    }
+    await federationConnector.syncSocialAccounts();
+    await federationConnector.pollSocialFeed();
+    await federationConnector.flushOutbox();
+    response.json(await socialService.getSnapshot());
   }));
 
   const clientRoot = path.resolve(process.cwd(), "dist/client");

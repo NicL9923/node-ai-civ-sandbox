@@ -7,6 +7,7 @@ import { createStore } from "./store.js";
 import { initTelemetry } from "./telemetry.js";
 import { FederationService } from "./world/federationService.js";
 import { FederationConnector } from "./world/federationConnector.js";
+import { SocialService } from "./world/socialService.js";
 
 const config = loadConfig();
 initTelemetry(config.telemetry.connectionString);
@@ -19,12 +20,18 @@ const aiProvider = createAiProvider(config.ai);
 const federationService = config.federation
   ? new FederationService(store, config.federation, eventBus, config.simulationId)
   : undefined;
+// World Wire (social) is a sub-feature of federation: constructed only when federation is configured and
+// the social sub-feature is enabled. Absent it, the engine holds no social port and turns are unchanged.
+const socialService =
+  config.federation && config.federation.social.enabled
+    ? new SocialService(store, config.federation, config.simulationId)
+    : undefined;
 const federationConnector = config.federation && federationService
-  ? new FederationConnector(federationService, config.federation)
+  ? new FederationConnector(federationService, config.federation, undefined, socialService)
   : undefined;
 
-const engine = new SimulationEngine(config, store, aiProvider, eventBus, federationService);
-const app = createApp(config, engine, eventBus, federationService, federationConnector);
+const engine = new SimulationEngine(config, store, aiProvider, eventBus, federationService, socialService);
+const app = createApp(config, engine, eventBus, federationService, federationConnector, socialService);
 
 await engine.ensureSeeded();
 if (config.autoStart) {

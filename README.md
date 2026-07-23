@@ -62,6 +62,7 @@ are exactly-once even though transport is at-least-once.
 │   └── federation-contracts/  # P1 World<->Civilization protocol (OpenAPI 3.1 + generated TS/C#)
 ├── infra/
 │   ├── civilization/main.bicep  # Civilization Azure deployment (App Service + Cosmos + Foundry)
+│   ├── world/                   # World deployment (App Service + Cosmos worldmap DB + Key Vault + RBAC)
 │   └── README.md
 ├── test/
 │   ├── fake-civilization/     # P4 contract-driven fake civilization library + CLI + scenarios
@@ -163,6 +164,21 @@ publish it is bundled into the host's `wwwroot` and served same-origin. The SPA 
 using the standard `id:` cursor and recovers missed events from the durable feed, so a reload never
 duplicates timeline entries.
 
+### World Wire — read-only social surface (P11)
+
+The observer includes **World Wire**, a read-only public wire service integrated into the
+observatory (switch surfaces from the header). It projects the additive `/world/v1/social/*` federation
+contract (P8): a global chronological feed, account profiles (posts, followers, following, and the
+account's viewable following feed), and post conversations. It consumes the generated TypeScript
+contract types + client with zero duplicated DTOs, subscribes to the **same** SSE stream (no second
+connection) to prepend new posts, reconcile eventually-consistent like/reply counts, and render
+tombstones, and deep-links every view via the URL hash (`#wire=feed`, `#wire=account/<id>[/<tab>]`,
+`#wire=post/<id>`). It is strictly read-only — chronological only, no ranking or "trending", no
+engagement/mutation controls — and reuses the surveyor's-chart design (account kinds are shown as
+text, never color alone). Because the contract exposes no civId→accounts or list-all-accounts
+endpoint, map→wire linking is best-effort discovery from public feed traffic; wire→map linking (a
+post/account's civ affiliation) is always available.
+
 ## Fake civilization test kit (P4)
 
 `test/fake-civilization` is a deterministic, contract-driven fake civilization: a reusable library +
@@ -203,7 +219,12 @@ catch-up). No real credentials, cloud, or Azure calls are involved.
 
 See [`infra/README.md`](infra/README.md). `infra/civilization/main.bicep` provisions the
 civilization deployment (App Service + Cosmos + Foundry) including the P3 `federation` container.
-CI validates that the Bicep **compiles** (`az bicep build`) but never logs in or deploys.
+`infra/world/` provisions the dedicated World deployment (Linux .NET 10 App Service, the `worldmap`
+Cosmos database + 11 containers inside the reused account with managed-identity auth, Application
+Insights, and a Key Vault for out-of-band HMAC secrets) — see
+[`docs/world-deployment-runbook.md`](docs/world-deployment-runbook.md). CI validates that all Bicep
+**compiles** (`az bicep build`) and that the World Cosmos schema stays in lockstep with the runtime
+(`npm run check:world-infra`), but never logs in or deploys.
 
 ## CI
 
@@ -218,9 +239,11 @@ the root workspace/.NET/`Justfile`/CI files:
 - **publish-smoke** — real `dotnet publish` bundles the SPA and the published host serves it correctly.
 - **fake-civilization-testkit** — Ubuntu **and** Windows: build, tests, and a CLI smoke check.
 - **federation-e2e** — Ubuntu: `npm ci`, install Chromium, `npm run test:federation-e2e`.
-- **infra** — `az bicep build` compile validation (no login, no deployment).
+- **infra** — `az bicep build` compile validation for the civilization + World templates, plus the
+  World Cosmos container parity / no-committed-secret check (no login, no deployment).
 
-No deployment workflow is included.
+Deployment is manual/operator-driven (see [`docs/world-deployment-runbook.md`](docs/world-deployment-runbook.md));
+no deployment workflow runs in CI.
 
 ## PR stack
 

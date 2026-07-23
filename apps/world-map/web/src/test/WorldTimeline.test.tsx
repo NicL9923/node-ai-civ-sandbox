@@ -22,6 +22,7 @@ function makeFeed(overrides: Partial<EventFeed> = {}): EventFeed {
     latestWorldSequence: null,
     totalRetained: 0,
     refresh: vi.fn(),
+    subscribe: vi.fn(() => () => {}),
     ...overrides,
   };
 }

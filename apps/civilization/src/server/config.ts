@@ -2,6 +2,27 @@ import "dotenv/config";
 import { randomBytes } from "node:crypto";
 import type { GovernanceParams, ModelKey, SimulationConfig } from "../shared/types.js";
 
+export interface SocialConfig {
+  /** World Wire social features are active (default true when federation is enabled). */
+  enabled: boolean;
+  /** How often the connector reconciles account sync (debounced by fingerprint). */
+  syncIntervalMs: number;
+  /** How often the connector polls the public global feed (first-page snapshot). */
+  feedIntervalMs: number;
+  /** Max posts requested per feed poll (server may return fewer). */
+  feedLimit: number;
+  /** Max posts retained in the bounded cached feed. */
+  feedCacheMax: number;
+  /** Max compact briefing lines kept. */
+  briefingMax: number;
+  /** Minimum spacing between account syncs even when the fingerprint changes. */
+  syncDebounceMs: number;
+  /** Upper bound (ms) we will honor from a 429 Retry-After before falling back to normal backoff. */
+  maxRetryAfterMs: number;
+  /** Max recent feed items surfaced into a single prompt. */
+  promptFeedItems: number;
+}
+
 export interface FederationConfig {
   /** Absolute base URL of the World API, INCLUDING the `/world/v1` prefix. */
   apiBaseUrl: string;
@@ -17,6 +38,8 @@ export interface FederationConfig {
   heartbeatIntervalMs: number;
   pollIntervalMs: number;
   outboxIntervalMs: number;
+  /** Optional World Wire (social) sub-feature configuration. */
+  social: SocialConfig;
 }
 
 export interface AppConfig {
@@ -70,6 +93,22 @@ function boolFromEnv(name: string, fallback: boolean): boolean {
     return fallback;
   }
   return value === "true" || value === "1" || value === "yes";
+}
+
+/** World Wire (social) sub-feature defaults. Exported so tests/fixtures share the exact shape. */
+export function defaultSocialConfig(overrides: Partial<SocialConfig> = {}): SocialConfig {
+  return {
+    enabled: boolFromEnv("WORLD_SOCIAL_ENABLED", true),
+    syncIntervalMs: numberFromEnv("WORLD_SOCIAL_SYNC_INTERVAL_MS", 60_000),
+    feedIntervalMs: numberFromEnv("WORLD_SOCIAL_FEED_INTERVAL_MS", 20_000),
+    feedLimit: numberFromEnv("WORLD_SOCIAL_FEED_LIMIT", 50),
+    feedCacheMax: numberFromEnv("WORLD_SOCIAL_FEED_CACHE_MAX", 100),
+    briefingMax: numberFromEnv("WORLD_SOCIAL_BRIEFING_MAX", 5),
+    syncDebounceMs: numberFromEnv("WORLD_SOCIAL_SYNC_DEBOUNCE_MS", 15_000),
+    maxRetryAfterMs: numberFromEnv("WORLD_SOCIAL_MAX_RETRY_AFTER_MS", 60_000),
+    promptFeedItems: numberFromEnv("WORLD_SOCIAL_PROMPT_FEED_ITEMS", 8),
+    ...overrides
+  };
 }
 
 /**
@@ -127,7 +166,8 @@ export function loadFederationConfig(simulationId: string): FederationConfig | u
     displayName: optionalEnv("WORLD_DISPLAY_NAME") ?? simulationId,
     heartbeatIntervalMs: numberFromEnv("WORLD_HEARTBEAT_INTERVAL_MS", 30_000),
     pollIntervalMs: numberFromEnv("WORLD_POLL_INTERVAL_MS", 10_000),
-    outboxIntervalMs: numberFromEnv("WORLD_OUTBOX_INTERVAL_MS", 5_000)
+    outboxIntervalMs: numberFromEnv("WORLD_OUTBOX_INTERVAL_MS", 5_000),
+    social: defaultSocialConfig()
   };
 }
 

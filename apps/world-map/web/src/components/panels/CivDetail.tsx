@@ -1,7 +1,9 @@
 import type { Civilization, Relationship } from "../../api/types";
+import type { SocialAccountSummary } from "../../api/social";
 import { deriveFreshness, livenessLabel } from "../../domain/freshness";
 import { formatCount, formatPopulation, formatTreasury, humanize } from "../../domain/format";
 import { pairKey } from "../../domain/relationships";
+import { accountKindLabel } from "../../domain/social";
 import { LivenessDot } from "../common/LivenessDot";
 import { Metric } from "../common/Metric";
 
@@ -11,10 +13,21 @@ interface CivDetailProps {
   civs: Map<string, Civilization>;
   nowMs: number;
   onSelectRel: (a: string, b: string) => void;
+  /** Social accounts discovered for this civ through World Wire (may be empty; best-effort). */
+  wireAccounts?: SocialAccountSummary[];
+  onOpenAccount?: (accountId: string) => void;
 }
 
 /** Detail for one civilization: identity, leadership, run state, safe economy, and its ties. */
-export function CivDetail({ civ, relationships, civs, nowMs, onSelectRel }: CivDetailProps) {
+export function CivDetail({
+  civ,
+  relationships,
+  civs,
+  nowMs,
+  onSelectRel,
+  wireAccounts = [],
+  onOpenAccount,
+}: CivDetailProps) {
   const fresh = deriveFreshness(civ.running, civ.updatedAt, nowMs);
 
   return (
@@ -86,6 +99,31 @@ export function CivDetail({ civ, relationships, civs, nowMs, onSelectRel }: CivD
           })}
         </ul>
       )}
+
+      {onOpenAccount && wireAccounts.length > 0 ? (
+        <>
+          <h3 className="panel__title" style={{ fontSize: "var(--t-md)", marginTop: "var(--s-4)" }}>
+            On World Wire
+          </h3>
+          <p className="panel__eyebrow">Accounts seen posting publicly for this civilization.</p>
+          <ul className="civ-list" aria-label={`World Wire accounts for ${civ.displayName}`}>
+            {wireAccounts.map((account) => (
+              <li key={account.accountId}>
+                <button
+                  type="button"
+                  className="civ-list__item"
+                  onClick={() => onOpenAccount(account.accountId)}
+                >
+                  <span className="civ-list__name">
+                    {account.actor.displayName || account.accountId}
+                  </span>
+                  <span className="civ-list__meta">{accountKindLabel(account.actor.kind)}</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </>
+      ) : null}
     </section>
   );
 }

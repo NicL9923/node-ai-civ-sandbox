@@ -15,6 +15,7 @@ import type {
   ProfileRevision,
   Simulation,
   SimulationEvent,
+  SocialPublicSummary,
   Tile,
   Violation,
   WorldSnapshot
@@ -23,16 +24,27 @@ import type { AiProvider } from "./aiProvider.js";
 import type { AppConfig } from "./config.js";
 import type { EventBus } from "./eventBus.js";
 import { newId, nowIso } from "./id.js";
+import { createHash } from "node:crypto";
 import { createInitialGovernance, createSeedSimulation, isProductiveTerrain } from "./seed.js";
 import type { SimulationStore } from "./store.js";
 import { trackActionMetric } from "./telemetry.js";
 import type { FederationPort } from "./world/federationTypes.js";
+import type { SocialPort, SocialSnapshot } from "./world/socialTypes.js";
 
 /** Synchronous foreign-affairs context threaded through a turn so validateAction stays pure. */
 export interface ForeignValidationContext {
   enabled: boolean;
   ownCivId?: string;
   knownCivIds: Set<string>;
+}
+
+/** Synchronous World Wire context threaded through a turn so validateAction stays pure. */
+export interface SocialValidationContext {
+  enabled: boolean;
+  /** localAgentIds (internal agent ids) whose agent account is synced and can act. */
+  syncedAgentLocalIds: Set<string>;
+  /** True once the official (President) account is synced and can be acted through. */
+  officialSynced: boolean;
 }
 
 export interface AgentCreateInput {
@@ -72,7 +84,9 @@ export class SimulationEngine {
     private readonly aiProvider: AiProvider,
     private readonly eventBus: EventBus,
     /** Optional World federation port. When absent the engine behaves as a standalone civilization. */
-    private readonly federation?: FederationPort
+    private readonly federation?: FederationPort,
+    /** Optional World Wire (social) port. When absent no social affordances exist and turns are unchanged. */
+    private readonly social?: SocialPort
   ) {}
 
   async ensureSeeded(): Promise<void> {
@@ -181,7 +195,8 @@ export class SimulationEngine {
       constitutionHistory: constitutions,
       proposals,
       recentEvents,
-      foreignAffairs: this.federation ? await this.federation.getSnapshot() : undefined
+      foreignAffairs: this.federation ? await this.federation.getSnapshot() : undefined,
+      social: this.social ? toPublicSocialSummary(await this.social.getSnapshot()) : undefined
     };
   }
 
@@ -322,8 +337,24 @@ export class SimulationEngine {
           }
         : undefined;
 
+      // Fetch the bounded World Wire snapshot once per turn (store read only): it feeds the social
+      // affordances/briefing and gates who may act on which account.
+      const socialSnapshot = this.social ? await this.social.getSnapshot() : undefined;
+      const socialCtx: SocialValidationContext | undefined =
+        socialSnapshot && socialSnapshot.enabled
+          ? {
+              enabled: true,
+              syncedAgentLocalIds: new Set(Object.keys(socialSnapshot.agentAccounts)),
+              officialSynced: socialSnapshot.officialAccount !== undefined
+            }
+          : undefined;
+
       for (const actor of actors) {
         await this.applyUpkeep(simulation, actor);
+
+        // Surface any direct World Wire replies to this citizen as a bounded, deduped personal memory
+        // BEFORE they decide, so they may organically notice and react. Never touches resources/votes.
+        await this.surfaceSocialReplies(simulation, actor);
 
         const action = await this.decideActionWithFallback(
           simulation,
@@ -333,10 +364,11 @@ export class SimulationEngine {
           currentConstitution,
           openProposals,
           recentEvents.map((event) => event.message),
-          foreignSnapshot
+          foreignSnapshot,
+          socialSnapshot
         );
 
-        await this.applyAction(simulation, actor, action, activeAgents, tiles, openProposals, currentConstitution, foreignCtx);
+        await this.applyAction(simulation, actor, action, activeAgents, tiles, openProposals, currentConstitution, foreignCtx, socialCtx);
       }
 
       await this.resolveExpiredProposals(simulation, activeAgents, currentConstitution);
@@ -358,7 +390,8 @@ export class SimulationEngine {
     currentConstitution: ConstitutionVersion,
     openProposals: AmendmentProposal[],
     recentEvents: string[],
-    foreignAffairs?: ForeignAffairsSnapshot
+    foreignAffairs?: ForeignAffairsSnapshot,
+    social?: SocialSnapshot
   ): Promise<AgentAction> {
     try {
       return await withTimeout(
@@ -372,7 +405,8 @@ export class SimulationEngine {
           recentEvents,
           turnsSinceConversation:
             simulation.lastConversationTurn === undefined ? simulation.turn : simulation.turn - simulation.lastConversationTurn,
-          foreignAffairs
+          foreignAffairs,
+          social
         }),
         25_000,
         `Timed out waiting for ${actor.name} (${actor.model}) to choose an action.`
@@ -405,9 +439,10 @@ export class SimulationEngine {
     tiles: Tile[],
     openProposals: AmendmentProposal[],
     currentConstitution: ConstitutionVersion,
-    foreign?: ForeignValidationContext
+    foreign?: ForeignValidationContext,
+    social?: SocialValidationContext
   ): Promise<void> {
-    const rejection = validateAction(simulation, actor, action, agents, tiles, openProposals, foreign);
+    const rejection = validateAction(simulation, actor, action, agents, tiles, openProposals, foreign, social);
     if (rejection) {
       trackActionMetric(`rejected:${action.type}`);
       await this.recordEvent(simulation.id, simulation.turn, "actionRejected", `${actor.name}: ${rejection}`, actor.id, undefined, undefined, {
@@ -664,6 +699,13 @@ export class SimulationEngine {
       case "contactCivilization":
       case "messageCivilization": {
         await this.submitForeignInteraction(simulation, actor, action, foreign);
+        break;
+      }
+      case "postSocial":
+      case "replySocial":
+      case "likeSocial":
+      case "followSocial": {
+        await this.submitSocialAction(simulation, actor, action);
         break;
       }
       case "noop": {
@@ -977,6 +1019,128 @@ export class SimulationEngine {
     }
   }
 
+  /**
+   * Durably enqueue a World Wire social mutation. Never network in a turn — the connector flushes it.
+   * The acting account (own agent account, or the official account for a President) is resolved by the
+   * social service from synced state; here we only build the intent + a deterministic idempotency key
+   * and record a local lifecycle event. A not-yet-actionable intent surfaces as an actionRejected event.
+   */
+  private async submitSocialAction(
+    simulation: Simulation,
+    actor: AgentProfile,
+    action: AgentAction
+  ): Promise<void> {
+    if (
+      action.type !== "postSocial" &&
+      action.type !== "replySocial" &&
+      action.type !== "likeSocial" &&
+      action.type !== "followSocial"
+    ) {
+      return;
+    }
+    if (!this.social) {
+      await this.recordEvent(simulation.id, simulation.turn, "socialActionFailed", `${actor.name} could not use the World Wire: it is unavailable.`, actor.id);
+      return;
+    }
+
+    const useOfficialAccount = action.official === true;
+    const op = action.type === "postSocial" ? "post" : action.type === "replySocial" ? "reply" : action.type === "likeSocial" ? "like" : "follow";
+    const authorityMode = useOfficialAccount ? "president" : "citizen";
+    const authorityRef = useOfficialAccount
+      ? `term-${simulation.governance.president?.termNumber ?? 0}`
+      : `agent-${actor.id}`;
+    const accountLabel = useOfficialAccount ? "official account" : "own account";
+
+    // Deterministic idempotency key: stable across connector retries for the same intent on the same turn.
+    const scope = useOfficialAccount ? "official" : "self";
+    let discriminator: string;
+    if (action.type === "postSocial") {
+      discriminator = `post:${textDigest(action.text)}`;
+    } else if (action.type === "replySocial") {
+      discriminator = `reply:${action.parentPostId}:${textDigest(action.text)}`;
+    } else if (action.type === "likeSocial") {
+      discriminator = `like:${action.postId}:${action.liked ?? true}`;
+    } else {
+      discriminator = `follow:${action.targetAccountId}:${action.following ?? true}`;
+    }
+    const idempotencyKey = `social:${simulation.id}:${actor.id}:${scope}:${discriminator}:${simulation.turn}`;
+
+    const result = await this.social.enqueue({
+      op,
+      actingLocalAgentId: actor.id,
+      useOfficialAccount,
+      authorityMode,
+      authorityRef,
+      idempotencyKey,
+      text: action.type === "postSocial" || action.type === "replySocial" ? action.text : undefined,
+      parentPostId: action.type === "replySocial" ? action.parentPostId : undefined,
+      targetPostId: action.type === "likeSocial" ? action.postId : undefined,
+      liked: action.type === "likeSocial" ? action.liked ?? true : undefined,
+      targetAccountId: action.type === "followSocial" ? action.targetAccountId : undefined,
+      following: action.type === "followSocial" ? action.following ?? true : undefined
+    });
+
+    if (!result.ok) {
+      await this.recordEvent(
+        simulation.id,
+        simulation.turn,
+        "socialActionFailed",
+        `${actor.name} could not act on the World Wire (${result.reason}).`,
+        actor.id,
+        undefined,
+        undefined,
+        { reason: result.reason }
+      );
+      return;
+    }
+
+    const eventType =
+      action.type === "postSocial"
+        ? "socialPosted"
+        : action.type === "replySocial"
+          ? "socialReplied"
+          : action.type === "likeSocial"
+            ? "socialLiked"
+            : "socialFollowed";
+    const narrative = this.socialNarrative(actor.name, action, accountLabel);
+    await this.recordEvent(simulation.id, simulation.turn, eventType, narrative, actor.id, undefined, undefined, { idempotencyKey });
+  }
+
+  private socialNarrative(actorName: string, action: AgentAction, accountLabel: string): string {
+    switch (action.type) {
+      case "postSocial":
+        return `${actorName} posted on the World Wire from their ${accountLabel}.`;
+      case "replySocial":
+        return `${actorName} replied on the World Wire from their ${accountLabel}.`;
+      case "likeSocial":
+        return `${actorName} ${action.liked === false ? "unliked" : "liked"} a World Wire post from their ${accountLabel}.`;
+      case "followSocial":
+        return `${actorName} ${action.following === false ? "unfollowed" : "followed"} a World Wire account from their ${accountLabel}.`;
+      default:
+        return `${actorName} acted on the World Wire.`;
+    }
+  }
+
+  /**
+   * Add a single bounded, deduped personal memory for any direct World Wire reply addressed to this
+   * citizen (or, if they are President, to the official account). This is the ONLY way World Wire may
+   * organically influence memory — it never changes resources, votes, or governance.
+   */
+  private async surfaceSocialReplies(simulation: Simulation, actor: AgentProfile): Promise<void> {
+    if (!this.social) {
+      return;
+    }
+    const isPresident = simulation.governance.president?.agentId === actor.id;
+    const replies = await this.social.takeDirectRepliesForAgent(actor.id, isPresident);
+    if (replies.length === 0) {
+      return;
+    }
+    const memories = replies.map((reply) => `On the World Wire, ${reply.fromName} replied to you: "${reply.text}"`);
+    actor.memorySummaries = capList([...actor.memorySummaries, ...memories], 12);
+    actor.updatedAt = nowIso();
+    await this.store.upsertAgent(actor);
+  }
+
   private async touchAgent(simulation: Simulation, agent: AgentProfile, message: string): Promise<void> {
     agent.lastActedTurn = simulation.turn;
     agent.updatedAt = nowIso();
@@ -1032,6 +1196,34 @@ function formatAmendmentEntry(priorVersion: number, proposal: AmendmentProposal)
   return `Amendment ${priorVersion}: ${proposal.proposedText}`;
 }
 
+/** Short deterministic digest of post text, for stable social idempotency keys. */
+function textDigest(text: string): string {
+  return createHash("sha256").update(text, "utf8").digest("hex").slice(0, 16);
+}
+
+/** Project the internal social snapshot into the citizen-safe observer summary (no authority/credentials). */
+function toPublicSocialSummary(snapshot: SocialSnapshot): SocialPublicSummary {
+  const accountCount = Object.keys(snapshot.agentAccounts).length + (snapshot.officialAccount ? 1 : 0);
+  return {
+    enabled: snapshot.enabled,
+    connected: snapshot.connected,
+    accountCount,
+    hasOfficialAccount: snapshot.officialAccount !== undefined,
+    feed: snapshot.feed.map((post) => ({
+      postId: post.postId,
+      authorAccountId: post.authorAccountId,
+      authorName: post.authorName,
+      text: post.text,
+      parentPostId: post.parentPostId,
+      replyCount: post.replyCount,
+      likeCount: post.likeCount
+    })),
+    briefing: snapshot.briefing,
+    pendingOutbox: snapshot.pendingOutbox,
+    failedOutbox: snapshot.failedOutbox
+  };
+}
+
 function selectActors(agents: AgentProfile[], turn: number, count: number): AgentProfile[] {
   if (agents.length === 0) {
     return [];
@@ -1066,7 +1258,8 @@ export function validateAction(
   agents: AgentProfile[],
   tiles: Tile[],
   openProposals: AmendmentProposal[],
-  foreign?: ForeignValidationContext
+  foreign?: ForeignValidationContext,
+  social?: SocialValidationContext
 ): string | undefined {
   switch (action.type) {
     case "move": {
@@ -1238,6 +1431,33 @@ export function validateAction(
       }
       if (!foreign.knownCivIds.has(action.targetCivId)) {
         return "target civilization is not known";
+      }
+      return undefined;
+    }
+    case "postSocial":
+    case "replySocial":
+    case "likeSocial":
+    case "followSocial": {
+      if (!social?.enabled) {
+        return "the World Wire is not enabled";
+      }
+      const wantsOfficial = action.official === true;
+      const isPresident = simulation.governance.president?.agentId === actor.id;
+      if (wantsOfficial) {
+        if (!isPresident) {
+          return "only the President may act from the official account";
+        }
+        if (!social.officialSynced) {
+          return "the official account is not synced yet";
+        }
+      } else if (!social.syncedAgentLocalIds.has(actor.id)) {
+        return "your World Wire account is not synced yet";
+      }
+      if ((action.type === "postSocial" || action.type === "replySocial") && [...action.text].length > 280) {
+        return "a World Wire post must be at most 280 characters";
+      }
+      if (action.type === "replySocial" && action.parentPostId.trim().length === 0) {
+        return "a reply must reference a parent post";
       }
       return undefined;
     }

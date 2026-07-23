@@ -5,11 +5,19 @@ import { ScenarioDefinitionError } from "./types.js";
 const operations = new Set([
   "register", "heartbeat", "pushEvents", "pull", "sync", "ack", "submitInteraction",
   "getInteraction", "getCivilization", "listCivilizations", "listRelationships", "listEvents",
+  "syncSocialAccounts", "getSocialAccount", "listSocialAccountPosts", "listSocialFollowingFeed",
+  "listSocialFollowers", "listSocialFollowing", "setSocialFollow", "listSocialGlobalFeed",
+  "createSocialPost", "getSocialPost", "getSocialThread", "tombstoneSocialPost",
+  "setSocialPostLike",
   "setOnline", "setAuthFault", "replay", "assert", "arrange",
 ]);
 const networkOperations = new Set([
   "register", "heartbeat", "pushEvents", "pull", "sync", "ack", "submitInteraction",
   "getInteraction", "getCivilization", "listCivilizations", "listRelationships", "listEvents",
+  "syncSocialAccounts", "getSocialAccount", "listSocialAccountPosts", "listSocialFollowingFeed",
+  "listSocialFollowers", "listSocialFollowing", "setSocialFollow", "listSocialGlobalFeed",
+  "createSocialPost", "getSocialPost", "getSocialThread", "tombstoneSocialPost",
+  "setSocialPostLike",
 ]);
 const signingFaults = new Set([
   "none", "invalid-signature", "stale-timestamp", "reused-nonce", "body-tamper", "wrong-civ-id",
@@ -55,6 +63,39 @@ function exactKeys(value: Record<string, unknown>, allowed: string[], context: s
 
 function optionalNonEmptyString(value: unknown, field: string): void {
   if (value !== undefined) nonEmptyString(value, field);
+}
+
+function valueReference(value: unknown, field: string): boolean {
+  if (!isRecord(value) || !Object.hasOwn(value, "valueFrom")) return false;
+  exactKeys(value, ["valueFrom"], field);
+  nonEmptyString(value.valueFrom, `${field}.valueFrom`);
+  if (!value.valueFrom.startsWith("/")) invalid(`${field}.valueFrom must be an absolute JSON Pointer`);
+  return true;
+}
+
+function inputString(value: unknown, field: string): void {
+  if (!valueReference(value, field)) nonEmptyString(value, field);
+}
+
+function optionalInputString(value: unknown, field: string): void {
+  if (value !== undefined) inputString(value, field);
+}
+
+function inputBoolean(value: unknown, field: string): void {
+  if (!valueReference(value, field) && typeof value !== "boolean") invalid(`${field} must be a boolean or value reference`);
+}
+
+function inputPositiveInteger(value: unknown, field: string): void {
+  if (!valueReference(value, field)) positiveInteger(value, field);
+}
+
+function inputNonNegativeInteger(value: unknown, field: string): void {
+  if (
+    !valueReference(value, field)
+    && (!Number.isInteger(value) || (value as number) < 0)
+  ) {
+    invalid(`${field} must be a non-negative integer or value reference`);
+  }
 }
 
 function validateExpectedError(value: unknown): void {
@@ -127,6 +168,81 @@ function validatePagination(step: Record<string, unknown>, allowed: string[], co
   validateNetworkMetadata(step);
   optionalNonEmptyString(step.after, `${context}.after`);
   if (step.limit !== undefined) boundedInteger(step.limit, `${context}.limit`, 1, 200);
+}
+
+function validateAuthorityDecision(value: unknown, field: string): void {
+  if (!isRecord(value)) invalid(`${field} must be an object`);
+  exactKeys(value, ["mode", "ref", "authorizedAt"], field);
+  inputString(value.mode, `${field}.mode`);
+  inputString(value.ref, `${field}.ref`);
+  optionalInputString(value.authorizedAt, `${field}.authorizedAt`);
+}
+
+function validateSocialAuthorization(value: unknown, field: string): void {
+  if (!isRecord(value)) invalid(`${field} must be an object`);
+  exactKeys(value, ["actingLocalAgentId", "authorityDecision", "officialTermNumber"], field);
+  inputString(value.actingLocalAgentId, `${field}.actingLocalAgentId`);
+  validateAuthorityDecision(value.authorityDecision, `${field}.authorityDecision`);
+  if (value.officialTermNumber !== undefined) {
+    inputNonNegativeInteger(value.officialTermNumber, `${field}.officialTermNumber`);
+  }
+}
+
+function validateSocialAccountSyncBody(value: unknown): void {
+  if (!isRecord(value)) invalid("syncSocialAccounts.body must be an object");
+  exactKeys(value, ["civId", "accounts"], "syncSocialAccounts.body");
+  inputString(value.civId, "syncSocialAccounts.body.civId");
+  if (!Array.isArray(value.accounts) || value.accounts.length < 1 || value.accounts.length > 100) {
+    invalid("syncSocialAccounts.body.accounts must contain between 1 and 100 accounts");
+  }
+  value.accounts.forEach((account, index) => {
+    const field = `syncSocialAccounts.body.accounts[${index}]`;
+    if (!isRecord(account)) invalid(`${field} must be an object`);
+    exactKeys(account, ["actor", "bio", "officialAuthority"], field);
+    if (!isRecord(account.actor)) invalid(`${field}.actor must be an object`);
+    exactKeys(account.actor, ["civId", "localAgentId", "displayName", "kind"], `${field}.actor`);
+    inputString(account.actor.civId, `${field}.actor.civId`);
+    optionalInputString(account.actor.localAgentId, `${field}.actor.localAgentId`);
+    inputString(account.actor.displayName, `${field}.actor.displayName`);
+    inputString(account.actor.kind, `${field}.actor.kind`);
+    optionalInputString(account.bio, `${field}.bio`);
+    if (account.officialAuthority !== undefined) {
+      if (!isRecord(account.officialAuthority)) invalid(`${field}.officialAuthority must be an object`);
+      exactKeys(
+        account.officialAuthority,
+        ["presidentLocalAgentId", "presidentDisplayName", "termNumber", "authorityDecision"],
+        `${field}.officialAuthority`,
+      );
+      inputString(account.officialAuthority.presidentLocalAgentId, `${field}.officialAuthority.presidentLocalAgentId`);
+      inputString(account.officialAuthority.presidentDisplayName, `${field}.officialAuthority.presidentDisplayName`);
+      inputNonNegativeInteger(account.officialAuthority.termNumber, `${field}.officialAuthority.termNumber`);
+      validateAuthorityDecision(
+        account.officialAuthority.authorityDecision,
+        `${field}.officialAuthority.authorityDecision`,
+      );
+    }
+  });
+}
+
+function validateSocialPage(
+  step: Record<string, unknown>,
+  context: string,
+  idField?: "accountId" | "postId",
+): void {
+  exactKeys(step, [...commonNetworkFields, ...(idField ? [idField] : []), "cursor", "limit"], context);
+  validateNetworkMetadata(step);
+  if (idField) inputString(step[idField], `${context}.${idField}`);
+  optionalInputString(step.cursor, `${context}.cursor`);
+  if (step.limit !== undefined) boundedInteger(step.limit, `${context}.limit`, 1, 100);
+}
+
+function validateSocialPostBody(value: unknown): void {
+  if (!isRecord(value)) invalid("createSocialPost.body must be an object");
+  exactKeys(value, ["authorAccountId", "text", "parentPostId", "authorization"], "createSocialPost.body");
+  inputString(value.authorAccountId, "createSocialPost.body.authorAccountId");
+  inputString(value.text, "createSocialPost.body.text");
+  optionalInputString(value.parentPostId, "createSocialPost.body.parentPostId");
+  validateSocialAuthorization(value.authorization, "createSocialPost.body.authorization");
 }
 
 function validateNetworkStep(step: Record<string, unknown>): void {
@@ -202,6 +318,72 @@ function validateNetworkStep(step: Record<string, unknown>): void {
         }
       }
       return;
+    case "syncSocialAccounts":
+      exactKeys(step, [...commonNetworkFields, "body", "idempotencyKey"], "syncSocialAccounts");
+      validateSocialAccountSyncBody(step.body);
+      optionalNonEmptyString(step.idempotencyKey, "syncSocialAccounts.idempotencyKey");
+      return;
+    case "getSocialAccount":
+      exactKeys(step, [...commonNetworkFields, "accountId"], "getSocialAccount");
+      inputString(step.accountId, "getSocialAccount.accountId");
+      return;
+    case "listSocialAccountPosts":
+    case "listSocialFollowingFeed":
+    case "listSocialFollowers":
+    case "listSocialFollowing":
+      validateSocialPage(step, String(step.op), "accountId");
+      return;
+    case "setSocialFollow":
+      exactKeys(
+        step,
+        [...commonNetworkFields, "accountId", "targetAccountId", "body", "idempotencyKey"],
+        "setSocialFollow",
+      );
+      inputString(step.accountId, "setSocialFollow.accountId");
+      inputString(step.targetAccountId, "setSocialFollow.targetAccountId");
+      if (!isRecord(step.body)) invalid("setSocialFollow.body must be an object");
+      exactKeys(step.body, ["following", "authorization"], "setSocialFollow.body");
+      inputBoolean(step.body.following, "setSocialFollow.body.following");
+      validateSocialAuthorization(step.body.authorization, "setSocialFollow.body.authorization");
+      optionalNonEmptyString(step.idempotencyKey, "setSocialFollow.idempotencyKey");
+      return;
+    case "listSocialGlobalFeed":
+      validateSocialPage(step, "listSocialGlobalFeed");
+      return;
+    case "createSocialPost":
+      exactKeys(step, [...commonNetworkFields, "body", "idempotencyKey"], "createSocialPost");
+      validateSocialPostBody(step.body);
+      optionalNonEmptyString(step.idempotencyKey, "createSocialPost.idempotencyKey");
+      return;
+    case "getSocialPost":
+      exactKeys(step, [...commonNetworkFields, "postId"], "getSocialPost");
+      inputString(step.postId, "getSocialPost.postId");
+      return;
+    case "getSocialThread":
+      validateSocialPage(step, "getSocialThread", "postId");
+      return;
+    case "tombstoneSocialPost":
+      exactKeys(step, [...commonNetworkFields, "postId", "body", "idempotencyKey"], "tombstoneSocialPost");
+      inputString(step.postId, "tombstoneSocialPost.postId");
+      if (!isRecord(step.body)) invalid("tombstoneSocialPost.body must be an object");
+      exactKeys(step.body, ["authorization"], "tombstoneSocialPost.body");
+      validateSocialAuthorization(step.body.authorization, "tombstoneSocialPost.body.authorization");
+      optionalNonEmptyString(step.idempotencyKey, "tombstoneSocialPost.idempotencyKey");
+      return;
+    case "setSocialPostLike":
+      exactKeys(
+        step,
+        [...commonNetworkFields, "postId", "accountId", "body", "idempotencyKey"],
+        "setSocialPostLike",
+      );
+      inputString(step.postId, "setSocialPostLike.postId");
+      inputString(step.accountId, "setSocialPostLike.accountId");
+      if (!isRecord(step.body)) invalid("setSocialPostLike.body must be an object");
+      exactKeys(step.body, ["liked", "authorization"], "setSocialPostLike.body");
+      inputBoolean(step.body.liked, "setSocialPostLike.body.liked");
+      validateSocialAuthorization(step.body.authorization, "setSocialPostLike.body.authorization");
+      optionalNonEmptyString(step.idempotencyKey, "setSocialPostLike.idempotencyKey");
+      return;
   }
 }
 
@@ -228,13 +410,23 @@ function validateStateOrControlStep(step: Record<string, unknown>, replayableIds
       if (step.expectError !== undefined) validateExpectedError(step.expectError);
       return;
     case "assert":
-      exactKeys(step, ["id", "op", "actual", "equals", "contains"], "assert");
+      exactKeys(step, ["id", "op", "actual", "exists", "equals", "contains"], "assert");
       optionalNonEmptyString(step.id, "Scenario step id");
       nonEmptyString(step.actual, "assert.actual");
       if (!step.actual.startsWith("/")) invalid("Scenario assertions must use an absolute JSON Pointer");
-      if (step.equals === undefined && step.contains === undefined) invalid("assert requires equals or contains");
-      if (step.equals !== undefined && !primitive(step.equals)) invalid("assert.equals must be a primitive");
-      if (step.contains !== undefined && !primitive(step.contains)) invalid("assert.contains must be a primitive");
+      if (step.exists === undefined && step.equals === undefined && step.contains === undefined) {
+        invalid("assert requires exists, equals, or contains");
+      }
+      if (step.exists !== undefined && typeof step.exists !== "boolean") invalid("assert.exists must be a boolean");
+      if (step.exists === false && (step.equals !== undefined || step.contains !== undefined)) {
+        invalid("assert.exists false cannot be combined with equals or contains");
+      }
+      if (step.equals !== undefined && !primitive(step.equals) && !valueReference(step.equals, "assert.equals")) {
+        invalid("assert.equals must be a primitive or value reference");
+      }
+      if (step.contains !== undefined && !primitive(step.contains) && !valueReference(step.contains, "assert.contains")) {
+        invalid("assert.contains must be a primitive or value reference");
+      }
       return;
     case "arrange":
       exactKeys(step, ["id", "op", "action", "value"], "arrange");

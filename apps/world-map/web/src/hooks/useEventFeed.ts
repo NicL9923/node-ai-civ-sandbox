@@ -25,6 +25,13 @@ export interface EventFeed {
   latestWorldSequence: string | null;
   totalRetained: number;
   refresh: () => void;
+  /**
+   * Subscribe to genuinely-new events as they are ingested (crawl / poll / live SSE frame),
+   * deduped by id. Returns an unsubscribe fn. This is the single shared event source: the World
+   * Wire surface observes social CloudEvents through here rather than opening a second stream, so
+   * all cursor / sequence-floor / reconnect logic above is reused untouched.
+   */
+  subscribe: (listener: (event: WorldEvent) => void) => () => void;
 }
 
 function toSeq(value: string | null | undefined): bigint {
@@ -114,9 +121,34 @@ export function useEventFeed(baseUrl?: string): EventFeed {
   const abortRef = useRef<AbortController | null>(null);
   const pollingRef = useRef(false);
 
+  // Live event bus: subscribers observe genuinely-new events (deduped by id) as they ingest.
+  // Kept independent of render state so it stays StrictMode-safe (never mutated inside a setState
+  // updater). A soft cap bounds the dedup set over long sessions; an occasional re-fire is
+  // harmless because downstream consumers dedupe idempotently.
+  const listenersRef = useRef(new Set<(event: WorldEvent) => void>());
+  const notifiedRef = useRef(new Set<string>());
+
+  const subscribe = useCallback((listener: (event: WorldEvent) => void) => {
+    listenersRef.current.add(listener);
+    return () => {
+      listenersRef.current.delete(listener);
+    };
+  }, []);
+
   const ingest = useCallback((incoming: WorldEvent[]) => {
     if (incoming.length === 0) return;
     seqFloorRef.current = maxSeq(incoming, seqFloorRef.current);
+    // Fan out genuinely-new events to live subscribers (e.g. the World Wire surface).
+    const listeners = listenersRef.current;
+    if (listeners.size > 0) {
+      const notified = notifiedRef.current;
+      for (const evt of incoming) {
+        if (!evt.id || notified.has(evt.id)) continue;
+        notified.add(evt.id);
+        for (const listener of listeners) listener(evt);
+      }
+      if (notified.size > 2000) notified.clear();
+    }
     setEvents((cur) => mergeEvents(cur, incoming));
   }, []);
 
@@ -211,5 +243,6 @@ export function useEventFeed(baseUrl?: string): EventFeed {
     latestWorldSequence,
     totalRetained: events.length,
     refresh,
+    subscribe,
   };
 }

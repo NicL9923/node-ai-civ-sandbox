@@ -11,10 +11,13 @@ import type {
 import type { AppConfig } from "./config.js";
 import {
   FEDERATION_STATE_ID,
+  SOCIAL_STATE_ID,
+  compareOutboxFifo,
   type FederationStateDoc,
   type InboxItemDoc,
   type OutboxItemDoc,
-  type OutboxStatus
+  type OutboxStatus,
+  type SocialStateDoc
 } from "./world/federationTypes.js";
 
 export interface SimulationStore {
@@ -38,6 +41,9 @@ export interface SimulationStore {
   putOutboxItem(item: OutboxItemDoc): Promise<void>;
   getInboxItem(simulationId: string, id: string): Promise<InboxItemDoc | undefined>;
   putInboxItem(item: InboxItemDoc): Promise<void>;
+  /** World Wire social singleton state (federation container, `/simulationId` partition). */
+  getSocialState(simulationId: string): Promise<SocialStateDoc | undefined>;
+  putSocialState(state: SocialStateDoc): Promise<void>;
   /**
    * Atomically persist the updated federation state doc and the terminal inbox record together. Both
    * live in the federation container under the same `/simulationId` partition, so this is a single
@@ -57,6 +63,7 @@ export class MemorySimulationStore implements SimulationStore {
   private federationState = new Map<string, FederationStateDoc>();
   private outbox = new Map<string, OutboxItemDoc>();
   private inbox = new Map<string, InboxItemDoc>();
+  private socialState = new Map<string, SocialStateDoc>();
 
   async getSimulation(id: string): Promise<Simulation | undefined> {
     return this.simulations.get(id);
@@ -76,6 +83,7 @@ export class MemorySimulationStore implements SimulationStore {
     this.federationState.delete(simulationId);
     deleteWhere(this.outbox, (item) => item.simulationId === simulationId);
     deleteWhere(this.inbox, (item) => item.simulationId === simulationId);
+    this.socialState.delete(simulationId);
   }
 
   async listTiles(simulationId: string): Promise<Tile[]> {
@@ -138,7 +146,7 @@ export class MemorySimulationStore implements SimulationStore {
   async listOutbox(simulationId: string, statuses?: OutboxStatus[]): Promise<OutboxItemDoc[]> {
     const items = [...this.outbox.values()].filter((item) => item.simulationId === simulationId);
     const filtered = statuses ? items.filter((item) => statuses.includes(item.status)) : items;
-    return filtered.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+    return filtered.sort(compareOutboxFifo);
   }
 
   async putOutboxItem(item: OutboxItemDoc): Promise<void> {
@@ -151,6 +159,14 @@ export class MemorySimulationStore implements SimulationStore {
 
   async putInboxItem(item: InboxItemDoc): Promise<void> {
     this.inbox.set(`${item.simulationId}:${item.id}`, item);
+  }
+
+  async getSocialState(simulationId: string): Promise<SocialStateDoc | undefined> {
+    return this.socialState.get(simulationId);
+  }
+
+  async putSocialState(state: SocialStateDoc): Promise<void> {
+    this.socialState.set(state.simulationId, state);
   }
 
   async commitInboundCommand(state: FederationStateDoc, inbox: InboxItemDoc): Promise<void> {
@@ -222,7 +238,7 @@ export class CosmosSimulationStore implements SimulationStore {
   private readonly constitutions: CosmosContainerStore<ConstitutionVersion>;
   private readonly proposals: CosmosContainerStore<AmendmentProposal>;
   private readonly events: CosmosContainerStore<SimulationEvent>;
-  private readonly federation: CosmosContainerStore<FederationStateDoc | OutboxItemDoc | InboxItemDoc>;
+  private readonly federation: CosmosContainerStore<FederationStateDoc | OutboxItemDoc | InboxItemDoc | SocialStateDoc>;
 
   constructor(client: CosmosClient, databaseId: string) {
     const database = client.database(databaseId);
@@ -232,7 +248,7 @@ export class CosmosSimulationStore implements SimulationStore {
     this.constitutions = new CosmosContainerStore<ConstitutionVersion>(database.container("constitutions"));
     this.proposals = new CosmosContainerStore<AmendmentProposal>(database.container("proposals"));
     this.events = new CosmosContainerStore<SimulationEvent>(database.container("events"));
-    this.federation = new CosmosContainerStore<FederationStateDoc | OutboxItemDoc | InboxItemDoc>(
+    this.federation = new CosmosContainerStore<FederationStateDoc | OutboxItemDoc | InboxItemDoc | SocialStateDoc>(
       database.container("federation")
     );
   }
@@ -333,7 +349,10 @@ export class CosmosSimulationStore implements SimulationStore {
       parameters: [{ name: "@simulationId", value: simulationId }]
     });
     const items = docs.filter((doc): doc is OutboxItemDoc => doc.kind === "outbox");
-    return statuses ? items.filter((item) => statuses.includes(item.status)) : items;
+    const scoped = statuses ? items.filter((item) => statuses.includes(item.status)) : items;
+    // Re-sort in-process with the durable FIFO comparator: the SQL ORDER BY only covers createdAt, so
+    // this applies the seq/id tie-break without requiring a Cosmos composite index.
+    return scoped.sort(compareOutboxFifo);
   }
 
   async putOutboxItem(item: OutboxItemDoc): Promise<void> {
@@ -347,6 +366,15 @@ export class CosmosSimulationStore implements SimulationStore {
 
   async putInboxItem(item: InboxItemDoc): Promise<void> {
     await this.federation.upsert(item);
+  }
+
+  async getSocialState(simulationId: string): Promise<SocialStateDoc | undefined> {
+    const doc = await this.federation.read(SOCIAL_STATE_ID, simulationId);
+    return doc?.kind === "social" ? (doc as SocialStateDoc) : undefined;
+  }
+
+  async putSocialState(state: SocialStateDoc): Promise<void> {
+    await this.federation.upsert(state);
   }
 
   async commitInboundCommand(state: FederationStateDoc, inbox: InboxItemDoc): Promise<void> {
