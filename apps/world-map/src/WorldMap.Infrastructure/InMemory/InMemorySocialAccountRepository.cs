@@ -46,4 +46,21 @@ public sealed class InMemorySocialAccountRepository : ISocialAccountRepository
             return Task.FromResult(true);
         }
     }
+
+    public Task<SocialListPage<SocialAccount>> ListPageAsync(string? continuation, int limit, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        lock (_gate)
+        {
+            var items = _byId.Values
+                .Where(a => continuation is null || string.CompareOrdinal(a.AccountId, continuation) > 0)
+                .OrderBy(a => a.AccountId, StringComparer.Ordinal)
+                .Take(limit)
+                .Select(InMemoryClone.Copy)
+                .ToList();
+
+            var next = items.Count == limit && items.Count > 0 ? items[^1].AccountId : null;
+            return Task.FromResult(new SocialListPage<SocialAccount>(items, next));
+        }
+    }
 }

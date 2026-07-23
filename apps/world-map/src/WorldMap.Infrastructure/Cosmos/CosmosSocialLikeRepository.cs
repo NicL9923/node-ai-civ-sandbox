@@ -86,6 +86,23 @@ public sealed class CosmosSocialLikeRepository : ISocialLikeRepository
         return items;
     }
 
+    public async Task<long> CountActiveLikesAsync(string postId, CancellationToken ct)
+    {
+        var query = new QueryDefinition("SELECT VALUE COUNT(1) FROM c WHERE c.payload.liked = true");
+        var requestOptions = new QueryRequestOptions { PartitionKey = new PartitionKey(postId) };
+        using var iterator = _container.GetItemQueryIterator<long>(query, requestOptions: requestOptions);
+        long total = 0;
+        while (iterator.HasMoreResults)
+        {
+            foreach (var value in await iterator.ReadNextAsync(ct).ConfigureAwait(false))
+            {
+                total += value;
+            }
+        }
+
+        return total;
+    }
+
     private static SocialLike Hydrate(CosmosDoc<SocialLike> doc)
     {
         var like = doc.Payload;

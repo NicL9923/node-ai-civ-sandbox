@@ -104,4 +104,39 @@ public sealed class InMemorySocialPostRepository : ISocialPostRepository
             return Task.FromResult(max);
         }
     }
+
+    public Task<long> CountByAuthorAsync(string authorAccountId, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        lock (_gate)
+        {
+            return Task.FromResult((long)_byId.Values.Count(p => p.AuthorAccountId == authorAccountId));
+        }
+    }
+
+    public Task<long> CountRepliesAsync(string parentPostId, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        lock (_gate)
+        {
+            return Task.FromResult((long)_byId.Values.Count(p => p.ParentPostId == parentPostId));
+        }
+    }
+
+    public Task<SocialListPage<SocialPost>> ListPageAsync(string? continuation, int limit, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        lock (_gate)
+        {
+            var items = _byId.Values
+                .Where(p => continuation is null || string.CompareOrdinal(p.PostId, continuation) > 0)
+                .OrderBy(p => p.PostId, StringComparer.Ordinal)
+                .Take(limit)
+                .Select(InMemoryClone.Copy)
+                .ToList();
+
+            var next = items.Count == limit && items.Count > 0 ? items[^1].PostId : null;
+            return Task.FromResult(new SocialListPage<SocialPost>(items, next));
+        }
+    }
 }

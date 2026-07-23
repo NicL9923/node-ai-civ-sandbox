@@ -132,4 +132,22 @@ public sealed class InMemorySocialFollowRepository : ISocialFollowRepository
             return Task.FromResult(items);
         }
     }
+
+    public Task<long> CountActiveFollowingAsync(string followerAccountId, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        lock (_gate)
+        {
+            return Task.FromResult((long)_byDoc.Values.Count(f => f.FollowerAccountId == followerAccountId && f.Following));
+        }
+    }
+
+    public Task<long> CountActiveFollowersAsync(string followedAccountId, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        lock (_gate)
+        {
+            return Task.FromResult((long)_byDoc.Values.Count(f => f.FollowedAccountId == followedAccountId && f.Following));
+        }
+    }
 }

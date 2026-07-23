@@ -17,6 +17,7 @@ public sealed class MaintenanceService(
     IInteractionProcessor processor,
     ISocialPostService socialPosts,
     ISocialGraphService socialGraph,
+    ISocialProjectionReconciler socialReconciler,
     TimeProvider clock,
     ILogger<MaintenanceService> logger) : IMaintenanceService
 {
@@ -32,9 +33,11 @@ public sealed class MaintenanceService(
         var expiredInteractions = await ExpireInteractionsAsync(now, ct);
 
         // Repair social crash windows: posts stuck before completing their create state machine, and
-        // follow/like transitions committed but not yet evented.
+        // follow/like transitions committed but not yet evented. Then reconcile count projections to their
+        // absolute canonical values so any inline-update drift converges.
         await socialPosts.RepairIncompleteAsync(ct);
         await socialGraph.RepairPendingAsync(ct);
+        await socialReconciler.ReconcileAsync(ct);
 
         if (expiredCommands > 0 || expiredInteractions > 0)
         {

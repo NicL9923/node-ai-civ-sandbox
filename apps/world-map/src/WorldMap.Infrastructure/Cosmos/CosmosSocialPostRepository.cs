@@ -140,6 +140,59 @@ public sealed class CosmosSocialPostRepository : ISocialPostRepository
         return max;
     }
 
+    public async Task<long> CountByAuthorAsync(string authorAccountId, CancellationToken ct)
+    {
+        var query = new QueryDefinition("SELECT VALUE COUNT(1) FROM c WHERE c.payload.authorAccountId = @author")
+            .WithParameter("@author", authorAccountId);
+        return await CountAsync(query, ct).ConfigureAwait(false);
+    }
+
+    public async Task<long> CountRepliesAsync(string parentPostId, CancellationToken ct)
+    {
+        var query = new QueryDefinition("SELECT VALUE COUNT(1) FROM c WHERE c.payload.parentPostId = @parent")
+            .WithParameter("@parent", parentPostId);
+        return await CountAsync(query, ct).ConfigureAwait(false);
+    }
+
+    public async Task<SocialListPage<SocialPost>> ListPageAsync(string? continuation, int limit, CancellationToken ct)
+    {
+        var query = new QueryDefinition("SELECT * FROM c");
+        using var iterator = _container.GetItemQueryIterator<CosmosDoc<SocialPost>>(
+            query,
+            continuationToken: string.IsNullOrEmpty(continuation) ? null : continuation,
+            requestOptions: new QueryRequestOptions { MaxItemCount = limit });
+
+        var items = new List<SocialPost>();
+        string? next = null;
+        if (iterator.HasMoreResults)
+        {
+            var response = await iterator.ReadNextAsync(ct).ConfigureAwait(false);
+            foreach (var doc in response)
+            {
+                items.Add(Hydrate(doc));
+            }
+
+            next = response.ContinuationToken;
+        }
+
+        return new SocialListPage<SocialPost>(items, next);
+    }
+
+    private async Task<long> CountAsync(QueryDefinition query, CancellationToken ct)
+    {
+        using var iterator = _container.GetItemQueryIterator<long>(query);
+        long total = 0;
+        while (iterator.HasMoreResults)
+        {
+            foreach (var value in await iterator.ReadNextAsync(ct).ConfigureAwait(false))
+            {
+                total += value;
+            }
+        }
+
+        return total;
+    }
+
     private async Task<List<SocialPost>> RunAsync(
         QueryDefinition query, QueryRequestOptions? requestOptions, CancellationToken ct)
     {

@@ -82,6 +82,30 @@ public sealed class CosmosSocialAccountRepository : ISocialAccountRepository
         }
     }
 
+    public async Task<SocialListPage<SocialAccount>> ListPageAsync(string? continuation, int limit, CancellationToken ct)
+    {
+        var query = new QueryDefinition("SELECT * FROM c");
+        using var iterator = _container.GetItemQueryIterator<CosmosDoc<SocialAccount>>(
+            query,
+            continuationToken: string.IsNullOrEmpty(continuation) ? null : continuation,
+            requestOptions: new QueryRequestOptions { MaxItemCount = limit });
+
+        var items = new List<SocialAccount>();
+        string? next = null;
+        if (iterator.HasMoreResults)
+        {
+            var response = await iterator.ReadNextAsync(ct).ConfigureAwait(false);
+            foreach (var doc in response)
+            {
+                items.Add(Hydrate(doc));
+            }
+
+            next = response.ContinuationToken;
+        }
+
+        return new SocialListPage<SocialAccount>(items, next);
+    }
+
     private static SocialAccount Hydrate(CosmosDoc<SocialAccount> doc)
     {
         var account = doc.Payload;

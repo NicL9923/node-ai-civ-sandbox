@@ -20,59 +20,24 @@ namespace WorldMap.Infrastructure.Cosmos;
 /// </summary>
 internal sealed class CosmosSequenceAllocator(Container counters, string stream)
 {
-    private readonly SemaphoreSlim _gate = new(1, 1);
+    private readonly SequenceAllocatorCore _core = new();
     private readonly string _id = CosmosId.Hash(stream);
     private readonly PartitionKey _pk = new(stream);
-    private bool _seeded;
-    private long _current;
 
     /// <summary>
-    /// Allocates the next value and runs <paramref name="insert"/> to persist the named record under
-    /// the stream lock. When the insert reports <see cref="SequenceInsert{T}.Consumed"/> the counter
-    /// advances and is persisted; otherwise (idempotent dedupe conflict) the value is released.
+    /// Allocates the next value and runs <paramref name="insert"/> to persist the named record. Delegates
+    /// the gate/seed/allocate-through-insert + ambiguous-failure reseed to <see cref="SequenceAllocatorCore"/>;
+    /// the seed reads the greater of the persisted counter and the caller's live MAX scan.
     /// </summary>
-    public async Task<T> AllocateAsync<T>(
+    public Task<T> AllocateAsync<T>(
         Func<CancellationToken, Task<long>> seedFromMax,
         Func<long, CancellationToken, Task<SequenceInsert<T>>> insert,
         CancellationToken ct)
-    {
-        await _gate.WaitAsync(ct).ConfigureAwait(false);
-        try
-        {
-            if (!_seeded)
-            {
-                var persisted = await ReadCounterAsync(ct).ConfigureAwait(false);
-                var scanned = await seedFromMax(ct).ConfigureAwait(false);
-                _current = Math.Max(persisted, scanned);
-                _seeded = true;
-            }
-
-            var next = _current + 1;
-            var outcome = await insert(next, ct).ConfigureAwait(false);
-            if (outcome.Consumed)
-            {
-                // Advance the in-process authority FIRST: the record is now durably inserted at `next`,
-                // so this number must never be reused even if persisting the counter doc fails. The
-                // counter doc is only a restart optimization — the MAX-scan seed recovers it — so its
-                // write is best-effort and a transient failure must not roll back `_current`.
-                _current = next;
-                try
-                {
-                    await WriteCounterAsync(next, ct).ConfigureAwait(false);
-                }
-                catch (CosmosException) when (!ct.IsCancellationRequested)
-                {
-                    // Counter persistence is recoverable on restart via the MAX-scan seed.
-                }
-            }
-
-            return outcome.Result;
-        }
-        finally
-        {
-            _gate.Release();
-        }
-    }
+        => _core.AllocateAsync(
+            async token => Math.Max(await ReadCounterAsync(token).ConfigureAwait(false), await seedFromMax(token).ConfigureAwait(false)),
+            insert,
+            WriteCounterAsync,
+            ct);
 
     private async Task<long> ReadCounterAsync(CancellationToken ct)
     {

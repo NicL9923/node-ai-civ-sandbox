@@ -105,9 +105,11 @@ internal sealed class TestWorld
             SocialAccountRepo, SocialPostRepo, SocialFollowRepo, SocialLikeRepo, WorldEvents, SocialPipeline, socialEvents, Sink, Clock);
         SocialFeedService = new SocialFeedService(
             SocialAccountRepo, SocialPostRepo, SocialFollowRepo, SocialFeedRepo, SocialSnapshotStore, Clock, Options);
+        SocialReconciler = new SocialProjectionReconciler(
+            SocialAccountRepo, SocialPostRepo, SocialFollowRepo, SocialLikeRepo, NullLogger<SocialProjectionReconciler>.Instance);
 
         Maintenance = new MaintenanceService(
-            Commands, InteractionRepository, Processor, SocialPostService, SocialGraphService, Clock, NullLogger<MaintenanceService>.Instance);
+            Commands, InteractionRepository, Processor, SocialPostService, SocialGraphService, SocialReconciler, Clock, NullLogger<MaintenanceService>.Instance);
     }
 
     public IOptions<WorldMapOptions> Options { get; }
@@ -145,6 +147,7 @@ internal sealed class TestWorld
     public SocialPostService SocialPostService { get; }
     public SocialGraphService SocialGraphService { get; }
     public SocialFeedService SocialFeedService { get; }
+    public SocialProjectionReconciler SocialReconciler { get; }
 
     public InteractionProcessor CreateProcessor(
         IWorldEventRepository worldEvents,

@@ -35,6 +35,7 @@ public static class WorldMapApplicationServiceCollectionExtensions
         services.AddScoped<ISocialPostService, Impl.SocialPostService>();
         services.AddScoped<ISocialGraphService, Impl.SocialGraphService>();
         services.AddScoped<ISocialFeedService, Impl.SocialFeedService>();
+        services.AddSingleton<ISocialProjectionReconciler, Impl.SocialProjectionReconciler>();
         return services;
     }
 }

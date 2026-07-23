@@ -187,13 +187,17 @@ public sealed class SocialPostService(
             }
         }
 
-        // Step 3 — eventually-consistent count projections (author postCount, parent replyCount).
+        // Step 3 — count projections set to their ABSOLUTE canonical values (idempotent). Because these are
+        // absolute (not increments), a repair re-run of this step never over- or under-counts; the
+        // maintenance reconciler converges any residual drift.
         if (stored.Step == SocialPostStep.Indexed)
         {
-            await IncrementAsync(stored.AuthorAccountId, a => a.PostCount++, ct);
+            var postCount = await posts.CountByAuthorAsync(stored.AuthorAccountId, ct);
+            await SetAccountCountAsync(stored.AuthorAccountId, a => a.PostCount = postCount, ct);
             if (isReply && stored.ParentPostId is not null)
             {
-                await IncrementPostAsync(stored.ParentPostId, p => p.ReplyCount++, ct);
+                var replyCount = await posts.CountRepliesAsync(stored.ParentPostId, ct);
+                await SetPostCountAsync(stored.ParentPostId, p => p.ReplyCount = replyCount, ct);
             }
 
             stored.Step = SocialPostStep.CountsUpdated;
@@ -413,7 +417,8 @@ public sealed class SocialPostService(
         return dtos;
     }
 
-    private async Task IncrementAsync(string accountId, Action<SocialAccount> mutate, CancellationToken ct)
+    // Writes an ABSOLUTE account count projection (idempotent) with optimistic-concurrency retry.
+    private async Task SetAccountCountAsync(string accountId, Action<SocialAccount> mutate, CancellationToken ct)
     {
         for (var attempt = 0; attempt < MaxConcurrencyRetries; attempt++)
         {
@@ -432,7 +437,8 @@ public sealed class SocialPostService(
         }
     }
 
-    private async Task IncrementPostAsync(string postId, Action<SocialPost> mutate, CancellationToken ct)
+    // Writes an ABSOLUTE post count projection (idempotent) with optimistic-concurrency retry.
+    private async Task SetPostCountAsync(string postId, Action<SocialPost> mutate, CancellationToken ct)
     {
         for (var attempt = 0; attempt < MaxConcurrencyRetries; attempt++)
         {

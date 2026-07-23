@@ -101,6 +101,16 @@ public interface IMaintenanceService
     Task SweepAsync(CancellationToken ct);
 }
 
+/// <summary>
+/// Reconciles the eventually-consistent social count projections (follower/following/post/reply/like) to
+/// their ABSOLUTE values computed from canonical account/edge/post state, so any crash-window drift from
+/// the inline fast-path updates converges. Bounded/paged per sweep and idempotent on re-run.
+/// </summary>
+public interface ISocialProjectionReconciler
+{
+    Task ReconcileAsync(CancellationToken ct);
+}
+
 /// <summary>World Wire account sync (HMAC + idempotency) and public account/follower/following reads.</summary>
 public interface ISocialAccountService
 {

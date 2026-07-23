@@ -196,3 +196,15 @@ The global `worldsequence` total order is monotonic and correct on a **single** 
 the lease holder is ready and runs mutations. True horizontal scale-out would require a lease/block
 allocator or a dedicated sequence service — intentionally **not** implemented here, and the code makes
 no false distributed-atomicity claims.
+
+**Consistency prerequisite (P7 infra).** The allocator's recovery from an *ambiguous* insert failure
+(Cosmos commits the event doc but the client sees a timeout/5xx/cancellation) works by invalidating its
+in-memory seed and re-reading the persisted counter **plus a live `MAX(worldsequence)` scan** on the next
+allocation, then advancing past whatever committed. This is only safe if that read observes the writer's
+own just-committed (possibly un-acked) write — i.e. it requires **read-your-writes** for the single writer.
+The Cosmos account backing the `sequences` and `worldEvents` containers must therefore run at **Strong**
+consistency (or, for a strictly single-region + single-writer deployment, **Session** where the writer
+reads its own region). Under **Eventual/Bounded-Staleness** an immediate `MAX` scan may read a lagging
+replica and return `N-1`, letting a later distinct append re-propose `N` and duplicate the global sequence.
+Configure this at the account level (Cosmos does not allow strengthening consistency per request above the
+account default); the durable alternative is a server-side atomic counter / stored-proc allocator.

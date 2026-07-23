@@ -153,11 +153,13 @@ public sealed class SocialGraphService(
             return null; // Another actor completed this transition — the caller reloads.
         }
 
-        // This caller won the mark-evented CAS ⇒ it owns the transition: apply the projected counts
-        // exactly once. Because counts live in the completion path, a crash after the flip CAS is repaired
-        // (event AND counts) by RepairPendingAsync — not just the event.
-        await AdjustAccountAsync(edge.FollowerAccountId, a => a.FollowingCount = Bump(a.FollowingCount, edge.Following), ct);
-        await AdjustAccountAsync(edge.FollowedAccountId, a => a.FollowerCount = Bump(a.FollowerCount, edge.Following), ct);
+        // This caller won the mark-evented CAS ⇒ it owns the transition. Set ABSOLUTE count projections
+        // from canonical edge state (idempotent): a re-run (a concurrent resumer, a retry, or the
+        // reconciliation sweep) converges to the same value rather than double-applying an increment.
+        var following = await follows.CountActiveFollowingAsync(edge.FollowerAccountId, ct);
+        var followers = await follows.CountActiveFollowersAsync(edge.FollowedAccountId, ct);
+        await AdjustAccountAsync(edge.FollowerAccountId, a => a.FollowingCount = following, ct);
+        await AdjustAccountAsync(edge.FollowedAccountId, a => a.FollowerCount = followers, ct);
 
         // Durable ledger is authoritative; a live push is best-effort and /stream de-dupes by worldsequence.
         sink.Publish(append.Event.ToPublicDto());
@@ -273,9 +275,10 @@ public sealed class SocialGraphService(
             return null;
         }
 
-        // Owner of the transition (mark-evented CAS winner) applies the projected like count exactly once;
-        // repair reconciles it after a crash via the same path.
-        await AdjustPostLikeAsync(edge.PostId, edge.Liked, ct);
+        // Owner of the transition (mark-evented CAS winner) sets the ABSOLUTE like count from canonical
+        // state (idempotent); repair/reconciliation converge to the same value after a crash.
+        var likeCount = await likes.CountActiveLikesAsync(edge.PostId, ct);
+        await UpdatePostAsync(edge.PostId, p => p.LikeCount = likeCount, ct);
 
         sink.Publish(append.Event.ToPublicDto());
         return edge;
@@ -327,8 +330,6 @@ public sealed class SocialGraphService(
         Worldsequence = ws.ToString(),
     };
 
-    private static long Bump(long value, bool increment) => increment ? value + 1 : Math.Max(0, value - 1);
-
     private async Task AdjustAccountAsync(string accountId, Action<SocialAccount> mutate, CancellationToken ct)
     {
         for (var attempt = 0; attempt < MaxConcurrencyRetries; attempt++)
@@ -348,24 +349,22 @@ public sealed class SocialGraphService(
         }
     }
 
-    private async Task<long> AdjustPostLikeAsync(string postId, bool increment, CancellationToken ct)
+    private async Task UpdatePostAsync(string postId, Action<SocialPost> mutate, CancellationToken ct)
     {
         for (var attempt = 0; attempt < MaxConcurrencyRetries; attempt++)
         {
             var post = await posts.GetAsync(postId, ct);
             if (post is null)
             {
-                return 0;
+                return;
             }
 
-            post.LikeCount = Bump(post.LikeCount, increment);
+            mutate(post);
             post.Version++;
             if (await posts.TryUpdateAsync(post, ct))
             {
-                return post.LikeCount;
+                return;
             }
         }
-
-        return 0;
     }
 }

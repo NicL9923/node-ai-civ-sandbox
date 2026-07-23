@@ -2,6 +2,9 @@ using WorldMap.Core.Domain;
 
 namespace WorldMap.Core.Abstractions;
 
+/// <summary>A forward-only page for reconciliation enumeration (opaque continuation token).</summary>
+public sealed record SocialListPage<T>(IReadOnlyList<T> Items, string? Continuation);
+
 /// <summary>
 /// Canonical World Wire account store. The World is the sole writer. Account identity is the deterministic
 /// <see cref="SocialAccount.AccountId"/>, so an upsert is idempotent by id and natural-key/official
@@ -17,6 +20,9 @@ public interface ISocialAccountRepository
 
     /// <summary>Optimistic-concurrency update (count projections). Returns false if the version moved on.</summary>
     Task<bool> TryUpdateAsync(SocialAccount account, CancellationToken ct);
+
+    /// <summary>Bounded forward-only enumeration for the count-reconciliation sweep.</summary>
+    Task<SocialListPage<SocialAccount>> ListPageAsync(string? continuation, int limit, CancellationToken ct);
 }
 
 /// <summary>
@@ -34,6 +40,15 @@ public interface ISocialPostRepository
 
     /// <summary>Optimistic-concurrency update. Returns false if the stored version moved on.</summary>
     Task<bool> TryUpdateAsync(SocialPost post, CancellationToken ct);
+
+    /// <summary>Canonical count of posts authored by an account (for absolute reconciliation).</summary>
+    Task<long> CountByAuthorAsync(string authorAccountId, CancellationToken ct);
+
+    /// <summary>Canonical count of direct replies to a post (for absolute reconciliation).</summary>
+    Task<long> CountRepliesAsync(string parentPostId, CancellationToken ct);
+
+    /// <summary>Bounded forward-only enumeration for the count-reconciliation sweep.</summary>
+    Task<SocialListPage<SocialPost>> ListPageAsync(string? continuation, int limit, CancellationToken ct);
 
     /// <summary>
     /// Thread snapshot page ordered <c>(worldsequence ASC, postId ASC)</c>, bounded by
@@ -75,6 +90,12 @@ public interface ISocialFollowRepository
 
     /// <summary>Edges whose committed transition has not yet had its event appended (crash repair).</summary>
     Task<IReadOnlyList<SocialFollow>> ListPendingAsync(CancellationToken ct);
+
+    /// <summary>Canonical count of active (following=true) edges FROM a follower (for reconciliation).</summary>
+    Task<long> CountActiveFollowingAsync(string followerAccountId, CancellationToken ct);
+
+    /// <summary>Canonical count of active (following=true) edges TO a followed account (for reconciliation).</summary>
+    Task<long> CountActiveFollowersAsync(string followedAccountId, CancellationToken ct);
 }
 
 /// <summary>Canonical desired-state like edges. Single writer; CAS on <c>Version</c>.</summary>
@@ -87,6 +108,9 @@ public interface ISocialLikeRepository
 
     /// <summary>Edges whose committed transition has not yet had its event appended (crash repair).</summary>
     Task<IReadOnlyList<SocialLike>> ListPendingAsync(CancellationToken ct);
+
+    /// <summary>Canonical count of active (liked=true) edges on a post (for reconciliation).</summary>
+    Task<long> CountActiveLikesAsync(string postId, CancellationToken ct);
 }
 
 /// <summary>

@@ -44,4 +44,13 @@ public sealed class InMemorySocialLikeRepository : ISocialLikeRepository
             return Task.FromResult(items);
         }
     }
+
+    public Task<long> CountActiveLikesAsync(string postId, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        lock (_gate)
+        {
+            return Task.FromResult((long)_byDoc.Values.Count(l => l.PostId == postId && l.Liked));
+        }
+    }
 }

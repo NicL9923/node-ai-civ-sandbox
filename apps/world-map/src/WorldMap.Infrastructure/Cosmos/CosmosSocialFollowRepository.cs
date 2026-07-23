@@ -132,6 +132,36 @@ public sealed class CosmosSocialFollowRepository : ISocialFollowRepository
         return await RunAsync(query, requestOptions: null, ct).ConfigureAwait(false);
     }
 
+    public async Task<long> CountActiveFollowingAsync(string followerAccountId, CancellationToken ct)
+    {
+        var query = new QueryDefinition("SELECT VALUE COUNT(1) FROM c WHERE c.payload.following = true");
+        var requestOptions = new QueryRequestOptions { PartitionKey = new PartitionKey(followerAccountId) };
+        return await CountAsync(query, requestOptions, ct).ConfigureAwait(false);
+    }
+
+    public async Task<long> CountActiveFollowersAsync(string followedAccountId, CancellationToken ct)
+    {
+        // Edges partition by follower, so counting an account's followers is cross-partition.
+        var query = new QueryDefinition("SELECT VALUE COUNT(1) FROM c WHERE c.payload.followedAccountId = @followed AND c.payload.following = true")
+            .WithParameter("@followed", followedAccountId);
+        return await CountAsync(query, requestOptions: null, ct).ConfigureAwait(false);
+    }
+
+    private async Task<long> CountAsync(QueryDefinition query, QueryRequestOptions? requestOptions, CancellationToken ct)
+    {
+        using var iterator = _container.GetItemQueryIterator<long>(query, requestOptions: requestOptions);
+        long total = 0;
+        while (iterator.HasMoreResults)
+        {
+            foreach (var value in await iterator.ReadNextAsync(ct).ConfigureAwait(false))
+            {
+                total += value;
+            }
+        }
+
+        return total;
+    }
+
     private async Task<List<SocialFollow>> RunAsync(
         QueryDefinition query, QueryRequestOptions? requestOptions, CancellationToken ct)
     {
