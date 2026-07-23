@@ -122,4 +122,14 @@ public sealed class InMemorySocialFollowRepository : ISocialFollowRepository
             return Task.FromResult(max);
         }
     }
+
+    public Task<IReadOnlyList<SocialFollow>> ListPendingAsync(CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        lock (_gate)
+        {
+            IReadOnlyList<SocialFollow> items = _byDoc.Values.Where(f => f.Pending).Select(InMemoryClone.Copy).ToList();
+            return Task.FromResult(items);
+        }
+    }
 }

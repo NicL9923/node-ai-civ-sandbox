@@ -139,6 +139,9 @@ public interface ISocialGraphService
 
     Task<Result<SocialMutationEnvelope<SocialReactionDto>>> SetLikeAsync(
         string authenticatedCivId, string postId, string accountId, SocialReactionSetRequestDto request, string idempotencyKey, CancellationToken ct);
+
+    /// <summary>Completes follow/like transitions whose event was not appended before a crash (worker resume).</summary>
+    Task RepairPendingAsync(CancellationToken ct);
 }
 
 /// <summary>World Wire public feeds: global, account posts, and following feed (snapshot-bound).</summary>

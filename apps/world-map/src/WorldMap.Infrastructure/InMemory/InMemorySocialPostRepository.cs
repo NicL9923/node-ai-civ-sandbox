@@ -13,7 +13,6 @@ public sealed class InMemorySocialPostRepository : ISocialPostRepository
 {
     private readonly Dictionary<string, SocialPost> _byId = new(StringComparer.Ordinal);
     private readonly Lock _gate = new();
-    private long _sequence;
 
     public Task<SocialPost?> GetAsync(string postId, CancellationToken ct)
     {
@@ -34,13 +33,9 @@ public sealed class InMemorySocialPostRepository : ISocialPostRepository
                 return Task.FromResult(InMemoryClone.Copy(existing));
             }
 
+            // The post's creation worldsequence is assigned later from its post.created event's envelope
+            // sequence (the single global order); the canonical record is created here without one.
             var stored = InMemoryClone.Copy(post);
-            if (stored.Worldsequence <= 0)
-            {
-                // Allocate-through-insert: the post's creation worldsequence is committed with the record.
-                stored.Worldsequence = ++_sequence;
-            }
-
             _byId[post.PostId] = stored;
             return Task.FromResult(InMemoryClone.Copy(stored));
         }

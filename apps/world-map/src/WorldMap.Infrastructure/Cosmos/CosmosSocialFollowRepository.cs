@@ -125,6 +125,13 @@ public sealed class CosmosSocialFollowRepository : ISocialFollowRepository
         return await MaxAsync(query, requestOptions: null, ct).ConfigureAwait(false);
     }
 
+    public async Task<IReadOnlyList<SocialFollow>> ListPendingAsync(CancellationToken ct)
+    {
+        // Cross-partition: an un-evented committed transition on any follower's edge.
+        var query = new QueryDefinition("SELECT * FROM c WHERE c.payload.pending = true");
+        return await RunAsync(query, requestOptions: null, ct).ConfigureAwait(false);
+    }
+
     private async Task<List<SocialFollow>> RunAsync(
         QueryDefinition query, QueryRequestOptions? requestOptions, CancellationToken ct)
     {

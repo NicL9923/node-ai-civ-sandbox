@@ -19,16 +19,12 @@ public sealed class CosmosSocialPostRepository : ISocialPostRepository
     private const int IncompleteScanLimit = 1000;
 
     private readonly Container _container;
-    private readonly CosmosSequenceAllocator _sequence;
 
     public CosmosSocialPostRepository(CosmosClient client, IOptions<WorldMapOptions> options)
     {
         ArgumentNullException.ThrowIfNull(client);
         ArgumentNullException.ThrowIfNull(options);
-        var database = options.Value.Storage.DatabaseName;
-        _container = client.GetContainer(database, CosmosContainers.SocialPosts);
-        var counters = client.GetContainer(database, CosmosContainers.Sequences);
-        _sequence = new CosmosSequenceAllocator(counters, "social:post:worldsequence");
+        _container = client.GetContainer(options.Value.Storage.DatabaseName, CosmosContainers.SocialPosts);
     }
 
     public async Task<SocialPost?> GetAsync(string postId, CancellationToken ct)
@@ -51,36 +47,22 @@ public sealed class CosmosSocialPostRepository : ISocialPostRepository
     {
         ArgumentNullException.ThrowIfNull(post);
 
-        // Fast-path idempotent create: an already-stored post returns without consuming a sequence.
-        var existing = await GetAsync(post.PostId, ct).ConfigureAwait(false);
-        if (existing is not null)
+        // The post's creation worldsequence is assigned later from its post.created event envelope
+        // sequence (the single global order); the canonical record is created here without one.
+        var doc = CosmosDoc.Create(post.PostId, post.ConversationRootPostId, post);
+        try
         {
-            return existing;
+            var created = await _container.CreateItemAsync(
+                doc, new PartitionKey(post.ConversationRootPostId), cancellationToken: ct).ConfigureAwait(false);
+            post.Etag = created.ETag;
+            return post;
         }
-
-        // Allocate-through-insert: the post's creation worldsequence is committed with the record so a
-        // reader's forward-only feed cursor never advances past a not-yet-committed post.
-        return await _sequence.AllocateAsync(
-            MaxWorldsequenceAsync,
-            async (next, token) =>
-            {
-                post.Worldsequence = next;
-                var doc = CosmosDoc.Create(post.PostId, post.ConversationRootPostId, post);
-                try
-                {
-                    var created = await _container.CreateItemAsync(
-                        doc, new PartitionKey(post.ConversationRootPostId), cancellationToken: token).ConfigureAwait(false);
-                    post.Etag = created.ETag;
-                    return new SequenceInsert<SocialPost>(true, post);
-                }
-                catch (CosmosException ex) when (ex.StatusCode == HttpStatusCode.Conflict)
-                {
-                    // A concurrent writer stored it first: release the number, return the stored post.
-                    var stored = await GetAsync(post.PostId, token).ConfigureAwait(false) ?? post;
-                    return new SequenceInsert<SocialPost>(false, stored);
-                }
-            },
-            ct).ConfigureAwait(false);
+        catch (CosmosException ex) when (ex.StatusCode == HttpStatusCode.Conflict)
+        {
+            // Idempotent create: a retry (or concurrent writer) already stored it — return the stored post.
+            var existing = await GetAsync(post.PostId, ct).ConfigureAwait(false);
+            return existing ?? post;
+        }
     }
 
     public async Task<bool> TryUpdateAsync(SocialPost post, CancellationToken ct)
@@ -172,39 +154,6 @@ public sealed class CosmosSocialPostRepository : ISocialPostRepository
         }
 
         return items;
-    }
-
-    private async Task<CosmosDoc<SocialPost>?> ReadDocAsync(string postId, string conversationRootPostId, CancellationToken ct)
-    {
-        try
-        {
-            var response = await _container.ReadItemAsync<CosmosDoc<SocialPost>>(
-                postId, new PartitionKey(conversationRootPostId), cancellationToken: ct).ConfigureAwait(false);
-            return response.Resource;
-        }
-        catch (CosmosException ex) when (ex.StatusCode == HttpStatusCode.NotFound)
-        {
-            return null;
-        }
-    }
-
-    private async Task<long> MaxWorldsequenceAsync(CancellationToken ct)
-    {
-        var query = new QueryDefinition("SELECT VALUE MAX(c.payload.worldsequence) FROM c");
-        using var iterator = _container.GetItemQueryIterator<long?>(query);
-        long max = 0;
-        while (iterator.HasMoreResults)
-        {
-            foreach (var value in await iterator.ReadNextAsync(ct).ConfigureAwait(false))
-            {
-                if (value is { } v && v > max)
-                {
-                    max = v;
-                }
-            }
-        }
-
-        return max;
     }
 
     private static SocialPost Hydrate(CosmosDoc<SocialPost> doc)

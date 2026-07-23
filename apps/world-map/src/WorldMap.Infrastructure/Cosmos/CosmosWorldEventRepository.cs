@@ -74,6 +74,43 @@ public sealed class CosmosWorldEventRepository : IWorldEventRepository
     public Task<WorldEvent?> GetByDedupeAsync(string dedupeKey, CancellationToken ct)
         => ReadByIdAsync(CosmosId.Hash(dedupeKey), ct);
 
+    public async Task<WorldEventAppend> AppendAsync(
+        WorldEvent template, Func<long, System.Text.Json.Nodes.JsonNode?> buildPublicData, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(template);
+        var id = CosmosId.Hash(template.DedupeKey);
+
+        // Fast-path dedupe: an already-committed event returns with its ORIGINAL worldsequence.
+        var existing = await ReadByIdAsync(id, ct).ConfigureAwait(false);
+        if (existing is not null)
+        {
+            return new WorldEventAppend(existing, true);
+        }
+
+        return await _sequence.AllocateAsync(
+            MaxWorldsequenceAsync,
+            async (next, token) =>
+            {
+                // Reserve the sequence, then build the public data FROM it (the embedded post worldsequence
+                // equals this event's envelope worldsequence).
+                template.Worldsequence = next;
+                template.PublicData = buildPublicData(next);
+                var doc = CosmosDoc.Create(id, CosmosContainers.WorldEventFeedPartition, template);
+                try
+                {
+                    var response = await _container.CreateItemAsync(doc, FeedPartition, cancellationToken: token)
+                        .ConfigureAwait(false);
+                    return new SequenceInsert<WorldEventAppend>(true, new WorldEventAppend(response.Resource.Payload, false));
+                }
+                catch (CosmosException ex) when (ex.StatusCode == HttpStatusCode.Conflict)
+                {
+                    var duplicate = await ReadByIdAsync(id, token).ConfigureAwait(false) ?? template;
+                    return new SequenceInsert<WorldEventAppend>(false, new WorldEventAppend(duplicate, true));
+                }
+            },
+            ct).ConfigureAwait(false);
+    }
+
     public async Task<Page<WorldEvent>> ListAsync(long afterSequence, int limit, CancellationToken ct)
     {
         var query = new QueryDefinition(

@@ -34,4 +34,14 @@ public sealed class InMemorySocialLikeRepository : ISocialLikeRepository
             return Task.FromResult(true);
         }
     }
+
+    public Task<IReadOnlyList<SocialLike>> ListPendingAsync(CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        lock (_gate)
+        {
+            IReadOnlyList<SocialLike> items = _byDoc.Values.Where(l => l.Pending).Select(InMemoryClone.Copy).ToList();
+            return Task.FromResult(items);
+        }
+    }
 }

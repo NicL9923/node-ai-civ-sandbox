@@ -72,6 +72,9 @@ public interface ISocialFollowRepository
     Task<long> MaxFollowedWorldsequenceAsync(string followerAccountId, CancellationToken ct);
 
     Task<long> MaxFollowersWorldsequenceAsync(string followedAccountId, CancellationToken ct);
+
+    /// <summary>Edges whose committed transition has not yet had its event appended (crash repair).</summary>
+    Task<IReadOnlyList<SocialFollow>> ListPendingAsync(CancellationToken ct);
 }
 
 /// <summary>Canonical desired-state like edges. Single writer; CAS on <c>Version</c>.</summary>
@@ -81,6 +84,9 @@ public interface ISocialLikeRepository
 
     /// <summary>Optimistic-concurrency upsert. Returns false if the stored version moved on.</summary>
     Task<bool> TryUpsertAsync(SocialLike like, CancellationToken ct);
+
+    /// <summary>Edges whose committed transition has not yet had its event appended (crash repair).</summary>
+    Task<IReadOnlyList<SocialLike>> ListPendingAsync(CancellationToken ct);
 }
 
 /// <summary>

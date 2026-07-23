@@ -34,6 +34,28 @@ public sealed class InMemoryWorldEventRepository : IWorldEventRepository
         }
     }
 
+    public Task<WorldEventAppend> AppendAsync(WorldEvent template, Func<long, System.Text.Json.Nodes.JsonNode?> buildPublicData, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        lock (_gate)
+        {
+            if (_byDedupe.TryGetValue(template.DedupeKey, out var existing))
+            {
+                return Task.FromResult(new WorldEventAppend(InMemoryClone.Copy(existing), true));
+            }
+
+            // Reserve the sequence, then build the public data FROM it so the embedded post worldsequence
+            // equals this event's envelope worldsequence.
+            var ws = ++_worldsequence;
+            var copy = InMemoryClone.Copy(template);
+            copy.Worldsequence = ws;
+            copy.PublicData = buildPublicData(ws);
+            _ordered.Add(copy);
+            _byDedupe[copy.DedupeKey] = copy;
+            return Task.FromResult(new WorldEventAppend(InMemoryClone.Copy(copy), false));
+        }
+    }
+
     public Task<WorldEvent?> GetByDedupeAsync(string dedupeKey, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();

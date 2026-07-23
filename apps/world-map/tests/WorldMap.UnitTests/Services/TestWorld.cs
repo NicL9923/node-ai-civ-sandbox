@@ -11,6 +11,7 @@ using WorldMap.Core.Domain;
 using WorldMap.Infrastructure;
 using WorldMap.Infrastructure.InMemory;
 using WorldMap.Infrastructure.Secrets;
+using WorldMap.UnitTests.Fakes;
 
 namespace WorldMap.UnitTests.Services;
 
@@ -63,7 +64,7 @@ internal sealed class TestWorld
         InteractionRepository = new InMemoryInteractionRepository();
         WorldEvents = new InMemoryWorldEventRepository();
         Relationships = new InMemoryRelationshipRepository();
-        Sink = new NoOpWorldEventSink();
+        Sink = new CapturingWorldEventSink();
 
         var registry = new OnboardingRegistry(Options, NullLogger<OnboardingRegistry>.Instance);
         Idempotency = new IdempotencyExecutor(IdempotencyStore, Clock, NullLogger<IdempotencyExecutor>.Instance);
@@ -106,7 +107,7 @@ internal sealed class TestWorld
             SocialAccountRepo, SocialPostRepo, SocialFollowRepo, SocialFeedRepo, SocialSnapshotStore, Clock, Options);
 
         Maintenance = new MaintenanceService(
-            Commands, InteractionRepository, Processor, SocialPostService, Clock, NullLogger<MaintenanceService>.Instance);
+            Commands, InteractionRepository, Processor, SocialPostService, SocialGraphService, Clock, NullLogger<MaintenanceService>.Instance);
     }
 
     public IOptions<WorldMapOptions> Options { get; }
@@ -121,7 +122,7 @@ internal sealed class TestWorld
     public InMemoryInteractionRepository InteractionRepository { get; }
     public InMemoryWorldEventRepository WorldEvents { get; }
     public InMemoryRelationshipRepository Relationships { get; }
-    public IWorldEventSink Sink { get; }
+    public CapturingWorldEventSink Sink { get; }
     public InteractionProcessor Processor { get; }
     public OnboardingService Onboarding { get; }
     public CivilizationService Civilization { get; }

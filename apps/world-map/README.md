@@ -136,15 +136,17 @@ final infra integration (P7) must add these to `containers.json`:**
 | Container | Partition key (`/pk`) | TTL | Role |
 |---|---|---|---|
 | `socialAccounts` | `accountId` | — | canonical accounts (deterministic id ⇒ natural-key/official uniqueness) |
-| `socialPosts` | `conversationRootPostId` | — | canonical posts + tombstones; thread-local; allocate-through-insert post `worldsequence` |
+| `socialPosts` | `conversationRootPostId` | — | canonical posts + tombstones; thread-local; `worldsequence` == the post's `post.created` event envelope sequence |
 | `socialFollows` | `followerAccountId` | — | canonical desired-state follow edges |
 | `socialLikes` | `postId` | — | canonical desired-state like edges |
 | `socialFeed` | `feedScope` (`global` + per-author) | — | immutable world-sequence feed index |
 | `socialSnapshots` | `ownerAccountId` | **yes** | durable following-feed followed-set snapshots |
 | `socialRateLimit` | `accountId` | **yes** | per-account rate-limit windows |
 
-Idempotency, nonces, and the world-event ledger/sequence are reused as-is. The post `worldsequence`
-stream (`social:post:worldsequence`) shares the existing `sequences` container.
+Idempotency, nonces, and the world-event ledger/sequence are reused as-is. A social post's `worldsequence`,
+its feed order, and its `post.created`/`reply.created` event data all use the **one global** public
+world-event envelope sequence — there is no separate social-post sequence. A tombstone preserves that
+creation sequence; the tombstone event receives its own later envelope sequence.
 
 ## Configuration (`WorldMap` section)
 

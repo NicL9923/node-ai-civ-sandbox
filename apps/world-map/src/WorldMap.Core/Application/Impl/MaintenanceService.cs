@@ -16,6 +16,7 @@ public sealed class MaintenanceService(
     IInteractionRepository interactions,
     IInteractionProcessor processor,
     ISocialPostService socialPosts,
+    ISocialGraphService socialGraph,
     TimeProvider clock,
     ILogger<MaintenanceService> logger) : IMaintenanceService
 {
@@ -30,8 +31,10 @@ public sealed class MaintenanceService(
         var expiredCommands = await ExpireCommandsAsync(now, ct);
         var expiredInteractions = await ExpireInteractionsAsync(now, ct);
 
-        // Repair any social posts whose create process crashed before completing its projections.
+        // Repair social crash windows: posts stuck before completing their create state machine, and
+        // follow/like transitions committed but not yet evented.
         await socialPosts.RepairIncompleteAsync(ct);
+        await socialGraph.RepairPendingAsync(ct);
 
         if (expiredCommands > 0 || expiredInteractions > 0)
         {

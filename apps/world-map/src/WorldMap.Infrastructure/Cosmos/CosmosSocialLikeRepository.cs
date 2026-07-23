@@ -69,6 +69,23 @@ public sealed class CosmosSocialLikeRepository : ISocialLikeRepository
         }
     }
 
+    public async Task<IReadOnlyList<SocialLike>> ListPendingAsync(CancellationToken ct)
+    {
+        // Cross-partition: an un-evented committed transition on any post's like edge.
+        var query = new QueryDefinition("SELECT * FROM c WHERE c.payload.pending = true");
+        var items = new List<SocialLike>();
+        using var iterator = _container.GetItemQueryIterator<CosmosDoc<SocialLike>>(query);
+        while (iterator.HasMoreResults)
+        {
+            foreach (var doc in await iterator.ReadNextAsync(ct).ConfigureAwait(false))
+            {
+                items.Add(Hydrate(doc));
+            }
+        }
+
+        return items;
+    }
+
     private static SocialLike Hydrate(CosmosDoc<SocialLike> doc)
     {
         var like = doc.Payload;

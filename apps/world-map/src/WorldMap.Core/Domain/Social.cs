@@ -169,6 +169,14 @@ public sealed class SocialFollow
     public required string FollowerAccountId { get; set; }
     public required string FollowedAccountId { get; set; }
     public bool Following { get; set; }
+
+    /// <summary>
+    /// True once the current transition's state has been committed but its public event has not yet been
+    /// durably appended. Set on the flip CAS, cleared once the event is committed — so a crash after the
+    /// flip but before the append is detected and completed exactly once (by a retry or the repair sweep).
+    /// </summary>
+    public bool Pending { get; set; }
+
     public DateTimeOffset UpdatedAt { get; set; }
     public long Worldsequence { get; set; }
     public string? Etag { get; set; }
@@ -181,6 +189,10 @@ public sealed class SocialLike
     public required string PostId { get; set; }
     public required string AccountId { get; set; }
     public bool Liked { get; set; }
+
+    /// <summary>See <see cref="SocialFollow.Pending"/>: an un-evented committed transition awaiting its event.</summary>
+    public bool Pending { get; set; }
+
     public DateTimeOffset UpdatedAt { get; set; }
     public long Worldsequence { get; set; }
     public string? Etag { get; set; }

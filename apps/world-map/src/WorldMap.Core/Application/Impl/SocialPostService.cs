@@ -27,6 +27,11 @@ public sealed class SocialPostService(
     ILogger<SocialPostService> logger) : ISocialPostService
 {
     private const int MaxConcurrencyRetries = 8;
+
+    /// <summary>Minimum post age before the repair sweep touches an incomplete post (past the idempotency
+    /// pending lease), so repair never races an in-flight create effect.</summary>
+    private const int RepairMinAgeSeconds = 60;
+
     private readonly WorldMapOptions _options = options.Value;
 
     public async Task<Result<SocialMutationEnvelope<SocialPostDto>>> CreateAsync(
@@ -95,8 +100,9 @@ public sealed class SocialPostService(
     {
         var now = clock.GetUtcNow();
 
-        // 1. Persist the canonical post (idempotent). The repository assigns the creation worldsequence
-        //    (allocate-through-insert) so it is known before we build the ordered event/feed rows.
+        // Persist the canonical post (idempotent by post id). Its creation worldsequence is NOT assigned
+        // here — it is the envelope worldsequence of the post.created event appended below (one global
+        // order). The rest of the create is a resumable, idempotent state machine (also run by repair).
         var stored = await posts.AddAsync(new SocialPost
         {
             PostId = postId,
@@ -111,49 +117,102 @@ public sealed class SocialPostService(
             Version = 1,
         }, ct);
 
-        var authorSummary = author.ToSummary();
-        var postDto = stored.ToDto(authorSummary);
+        var dto = await AdvancePostAsync(stored, author, ct);
+        var location = $"{_options.WorldBaseUrl}/social/posts/{postId}";
+        return new OperationOutcome<SocialPostDto>(dto, 201, location);
+    }
 
-        // 2. Append the ordered public created/reply event (idempotent by dedupe) and feed the SSE stream.
-        var dedupe = SocialIds.EventDedupe("post-created", postId);
-        var append = await worldEvents.AppendAsync(new WorldEvent
-        {
-            EventId = SocialIds.EventId(dedupe),
-            Type = isReply ? SocialEventTypes.ReplyCreated : SocialEventTypes.PostCreated,
-            Source = SocialEventTypes.Source,
-            Subject = postId,
-            Time = stored.CreatedAt,
-            PublicData = isReply ? eventFactory.ReplyCreated(postDto) : eventFactory.PostCreated(postDto),
-            DedupeKey = dedupe,
-            CreatedAt = now,
-        }, ct);
-        if (!append.WasDuplicate)
-        {
-            sink.Publish(append.Event.ToPublicDto());
-        }
+    /// <summary>
+    /// Runs the idempotent post-create state machine from the post's current step and returns its current
+    /// projection: <c>Persisted → EventAppended (assigns worldsequence) → Indexed → CountsUpdated → Done</c>.
+    /// The <c>post.created</c>/<c>reply.created</c> event is appended with a deterministic dedupe key so a
+    /// retry or a crash-repair reuses the SAME event and the SAME envelope worldsequence — never a gap, a
+    /// duplicate, nor a Done post without its event. Used by both the create effect and the repair sweep.
+    /// </summary>
+    private async Task<SocialPostDto> AdvancePostAsync(SocialPost stored, SocialAccount author, CancellationToken ct)
+    {
+        var summary = author.ToSummary();
+        var isReply = stored.ParentPostId is not null;
+        var now = clock.GetUtcNow();
 
-        // 3. Feed index rows (global + author scope) — idempotent by (scope, postId).
-        await feed.AddEntryAsync(NewEntry(SocialFeedEntry.GlobalScope, stored), ct);
-        await feed.AddEntryAsync(NewEntry(author.AccountId, stored), ct);
-
-        // 4. Eventually-consistent count projections, guarded by the post's process step so a replay of a
-        //    completed create never double-counts. (A crash strictly between the count writes and the step
-        //    advance is a bounded projection-drift window repaired by reconciliation.)
+        // Step 1 — order the post: append the created/reply event, whose reserved envelope worldsequence
+        // BECOMES the post's creation worldsequence and is embedded in the event's public data.
         if (stored.Step == SocialPostStep.Persisted)
         {
-            await IncrementAsync(author.AccountId, a => a.PostCount++, ct);
-            if (isReply && parentPostId is not null)
+            var dedupe = SocialIds.EventDedupe("post-created", stored.PostId);
+            var append = await worldEvents.AppendAsync(
+                new WorldEvent
+                {
+                    EventId = SocialIds.EventId(dedupe),
+                    Type = isReply ? SocialEventTypes.ReplyCreated : SocialEventTypes.PostCreated,
+                    Source = SocialEventTypes.Source,
+                    Subject = stored.PostId,
+                    Time = stored.CreatedAt,
+                    DedupeKey = dedupe,
+                    CreatedAt = now,
+                },
+                ws =>
+                {
+                    var postDto = stored.ToDto(summary) with { Worldsequence = ws.ToString() };
+                    return isReply ? eventFactory.ReplyCreated(postDto) : eventFactory.PostCreated(postDto);
+                },
+                ct);
+
+            stored.Worldsequence = append.Event.Worldsequence;
+            stored.Step = SocialPostStep.EventAppended;
+            stored.Version++;
+            if (await posts.TryUpdateAsync(stored, ct))
             {
-                await IncrementPostAsync(parentPostId, p => p.ReplyCount++, ct);
+                // The durable ledger is authoritative; a live push is best-effort and the /stream endpoint
+                // de-duplicates by worldsequence, so publishing on a resume/replay converges rather than
+                // double-delivering.
+                sink.Publish(append.Event.ToPublicDto());
+            }
+            else
+            {
+                return (await posts.GetAsync(stored.PostId, ct))?.ToDto(summary) ?? stored.ToDto(summary);
+            }
+        }
+
+        // Step 2 — feed index rows (global + author scope), idempotent by (scope, postId).
+        if (stored.Step == SocialPostStep.EventAppended)
+        {
+            await feed.AddEntryAsync(NewEntry(SocialFeedEntry.GlobalScope, stored), ct);
+            await feed.AddEntryAsync(NewEntry(stored.AuthorAccountId, stored), ct);
+            stored.Step = SocialPostStep.Indexed;
+            stored.Version++;
+            if (!await posts.TryUpdateAsync(stored, ct))
+            {
+                return (await posts.GetAsync(stored.PostId, ct))?.ToDto(summary) ?? stored.ToDto(summary);
+            }
+        }
+
+        // Step 3 — eventually-consistent count projections (author postCount, parent replyCount).
+        if (stored.Step == SocialPostStep.Indexed)
+        {
+            await IncrementAsync(stored.AuthorAccountId, a => a.PostCount++, ct);
+            if (isReply && stored.ParentPostId is not null)
+            {
+                await IncrementPostAsync(stored.ParentPostId, p => p.ReplyCount++, ct);
             }
 
+            stored.Step = SocialPostStep.CountsUpdated;
+            stored.Version++;
+            if (!await posts.TryUpdateAsync(stored, ct))
+            {
+                return (await posts.GetAsync(stored.PostId, ct))?.ToDto(summary) ?? stored.ToDto(summary);
+            }
+        }
+
+        // Step 4 — finalize.
+        if (stored.Step == SocialPostStep.CountsUpdated)
+        {
             stored.Step = SocialPostStep.Done;
             stored.Version++;
             await posts.TryUpdateAsync(stored, ct);
         }
 
-        var location = $"{_options.WorldBaseUrl}/social/posts/{postId}";
-        return new OperationOutcome<SocialPostDto>(postDto, 201, location);
+        return stored.ToDto(summary);
     }
 
     public async Task<Result<SocialPostDto>> GetAsync(string postId, CancellationToken ct)
@@ -289,24 +348,34 @@ public sealed class SocialPostService(
     public async Task RepairIncompleteAsync(CancellationToken ct)
     {
         var incomplete = await posts.ListIncompleteAsync(ct);
+
+        // Only repair posts old enough that no create effect could still be in flight (the idempotency
+        // pending lease has elapsed), so repair never races an active create.
+        var cutoff = clock.GetUtcNow().AddSeconds(-RepairMinAgeSeconds);
+        var repaired = 0;
         foreach (var post in incomplete)
         {
-            // Re-run the idempotent feed indexing and advance the step. Count projections are NOT re-applied
-            // here (they may have already been applied before the crash), keeping repair convergent.
-            await feed.AddEntryAsync(NewEntry(SocialFeedEntry.GlobalScope, post), ct);
-            await feed.AddEntryAsync(NewEntry(post.AuthorAccountId, post), ct);
-
-            if (post.Step != SocialPostStep.Done)
+            if (post.CreatedAt > cutoff)
             {
-                post.Step = SocialPostStep.Done;
-                post.Version++;
-                await posts.TryUpdateAsync(post, ct);
+                continue;
             }
+
+            var author = await accounts.GetAsync(post.AuthorAccountId, ct);
+            if (author is null)
+            {
+                continue;
+            }
+
+            // Run the same idempotent state machine as create: append the post.created event (reusing the
+            // deterministic dedupe ⇒ same envelope worldsequence, exactly one event), then feed + counts +
+            // done. A post is never marked Done without its event.
+            await AdvancePostAsync(post, author, ct);
+            repaired++;
         }
 
-        if (incomplete.Count > 0)
+        if (repaired > 0)
         {
-            logger.LogDebug("Repaired {Count} incomplete social posts.", incomplete.Count);
+            logger.LogDebug("Repaired {Count} incomplete social posts.", repaired);
         }
     }
 
