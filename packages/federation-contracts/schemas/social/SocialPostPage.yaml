@@ -1,0 +1,20 @@
+type: object
+title: SocialPostPage
+description: >-
+  Immutable snapshot page ordered by `(worldsequence DESC, postId ASC)`. A cursor is
+  bound to the feed/filter/account and cannot be reused on a different query.
+additionalProperties: false
+required:
+  - items
+  - nextCursor
+properties:
+  items:
+    type: array
+    maxItems: 100
+    items:
+      $ref: ./SocialPost.yaml
+  nextCursor:
+    description: Opaque cursor for the next older page in this snapshot, or null at the end.
+    oneOf:
+      - $ref: ../common/Cursor.yaml
+      - type: "null"

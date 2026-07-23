@@ -1,0 +1,30 @@
+type: object
+title: SocialPostCreateRequest
+description: >-
+  Create an immutable root post or bounded reply. parentPostId is omitted for a root;
+  replies may target only existing non-tombstoned posts below depth 4.
+additionalProperties: false
+required:
+  - authorAccountId
+  - text
+  - authorization
+properties:
+  authorAccountId:
+    type: string
+    minLength: 1
+    maxLength: 200
+  text:
+    type: string
+    minLength: 1
+    maxLength: 280
+    pattern: '\S'
+    description: >-
+      Plain UTF-8 text measured in Unicode code points. After scalar-count and
+      non-whitespace validation, the World stores the exact submitted string without
+      trimming or Unicode normalization.
+  parentPostId:
+    type: string
+    minLength: 1
+    maxLength: 200
+  authorization:
+    $ref: ./SocialMutationAuthorization.yaml

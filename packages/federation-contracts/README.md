@@ -4,8 +4,9 @@ The **single source of truth** for the World ⇄ Civilization federation protoco
 OpenAPI 3.1 + modular JSON Schema, with **deterministic, checked-in** TypeScript and C# artifacts
 generated for both sides of the wire.
 
-See [`docs/protocol.md`](../../docs/protocol.md) for the protocol semantics (ownership, push/pull,
-idempotency, CloudEvents, auth signing, sequence diagrams).
+See [`docs/protocol.md`](../../docs/protocol.md) for federation semantics and
+[`docs/world-wire-social-contract.md`](../../docs/world-wire-social-contract.md) for the additive
+World Wire account/post/follow/reaction contract.
 
 ## Layout
 
@@ -14,7 +15,7 @@ openapi/
   world.v1.yaml            # root OpenAPI 3.1 document (hand-authored)
   world.v1.bundled.json    # GENERATED single-file bundle (Redocly)
 schemas/                   # modular JSON Schema 2020-12 (hand-authored)
-  common/ civilization/ relationship/ interaction/ envelope/
+  common/ civilization/ relationship/ interaction/ envelope/ social/
 examples/                  # JSON fixtures validated by the test suite
 generated/
   ts/  world.v1.d.ts       # GENERATED TypeScript types (openapi-typescript)
@@ -79,6 +80,7 @@ const world = createWorldClient({ baseUrl: "https://world.example.com/world/v1" 
 const { data } = await world.GET("/civilizations");
 
 type Relationship = components["schemas"]["Relationship"];
+type SocialPost = components["schemas"]["SocialPost"];
 ```
 
 ### C# (future .NET world tooling/tests)

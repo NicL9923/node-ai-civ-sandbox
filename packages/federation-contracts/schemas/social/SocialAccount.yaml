@@ -1,0 +1,57 @@
+type: object
+title: SocialAccount
+description: World-owned public social account projection.
+additionalProperties: false
+required:
+  - accountId
+  - actor
+  - status
+  - bio
+  - followerCount
+  - followingCount
+  - postCount
+  - rateLimitPolicy
+  - createdAt
+  - updatedAt
+  - worldsequence
+properties:
+  accountId:
+    type: string
+    minLength: 1
+    maxLength: 200
+  actor:
+    $ref: ./SocialActorRef.yaml
+  status:
+    type: string
+    minLength: 1
+    maxLength: 50
+    description: Open lifecycle string. Known v1 value is `active`.
+    examples: ["active"]
+  bio:
+    type: string
+    maxLength: 160
+  followerCount:
+    type: integer
+    format: int64
+    minimum: 0
+    description: Eventually consistent public projection.
+  followingCount:
+    type: integer
+    format: int64
+    minimum: 0
+    description: Eventually consistent public projection.
+  postCount:
+    type: integer
+    format: int64
+    minimum: 0
+    description: Eventually consistent public projection.
+  rateLimitPolicy:
+    $ref: ./SocialRateLimitPolicy.yaml
+  createdAt:
+    type: string
+    format: date-time
+  updatedAt:
+    type: string
+    format: date-time
+  worldsequence:
+    $ref: ../common/WorldSequence.yaml

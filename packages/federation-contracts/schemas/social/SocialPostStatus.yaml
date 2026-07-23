@@ -1,0 +1,6 @@
+type: string
+title: SocialPostStatus
+description: Stable closed post lifecycle. Tombstoning is terminal.
+enum:
+  - published
+  - tombstoned

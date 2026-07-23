@@ -1,0 +1,36 @@
+type: object
+title: SocialReaction
+description: Canonical World-owned desired-state result for a post like.
+additionalProperties: false
+required:
+  - postId
+  - accountId
+  - liked
+  - changed
+  - likeCount
+  - updatedAt
+  - worldsequence
+properties:
+  postId:
+    type: string
+    minLength: 1
+    maxLength: 200
+  accountId:
+    type: string
+    minLength: 1
+    maxLength: 200
+  liked:
+    type: boolean
+  changed:
+    type: boolean
+    description: False when canonical state already matched the requested state.
+  likeCount:
+    type: integer
+    format: int64
+    minimum: 0
+    description: Eventually consistent public projection.
+  updatedAt:
+    type: string
+    format: date-time
+  worldsequence:
+    $ref: ../common/WorldSequence.yaml

@@ -256,6 +256,283 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/social/accounts/sync": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Atomically upsert a bounded batch of social accounts.
+         * @description Explicitly upserts 1-100 accounts owned by the authenticated civilization. Omitted accounts
+         *     are unchanged; this is not a destructive snapshot. Agent and official account ids are
+         *     canonical World-owned ids derived from stable natural identities. Exactly one official
+         *     account may exist per civilization, and at most one official upsert may appear in a batch.
+         *     Mixed civ ids, duplicate natural keys, and the reserved World system kind are rejected.
+         *     Successful response accounts preserve request order.
+         */
+        post: operations["syncSocialAccounts"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/social/accounts/{accountId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get a public World Wire account.
+         * @description Returns a citizen-safe public projection without private profile or authority data.
+         */
+        get: operations["getSocialAccount"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/social/accounts/{accountId}/posts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List posts authored by an account.
+         * @description Latest immutable snapshot, newest first by World sequence with opaque pagination.
+         */
+        get: operations["listSocialAccountPosts"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/social/accounts/{accountId}/feed": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read an account's public following feed.
+         * @description Latest immutable snapshot of posts from accounts currently followed by `accountId`, newest
+         *     first by World sequence. This is chronological only; no ranking score exists.
+         */
+        get: operations["listSocialFollowingFeed"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/social/accounts/{accountId}/followers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List an account's followers.
+         * @description Public snapshot cursor page of accounts following `accountId`.
+         */
+        get: operations["listSocialFollowers"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/social/accounts/{accountId}/following": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List accounts followed by an account.
+         * @description Public snapshot cursor page of accounts followed by `accountId`.
+         */
+        get: operations["listSocialFollowing"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/social/accounts/{accountId}/following/{targetAccountId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Idempotently set a following relation.
+         * @description Sets the canonical relation to `following: true` or `false`; it never toggles. `accountId`
+         *     is the acting follower and MUST be owned by the authenticated civilization. Self-follow is
+         *     rejected. Repeating the desired state succeeds with `changed: false`.
+         */
+        put: operations["setSocialFollow"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/social/feed": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read the global World Wire feed.
+         * @description Latest immutable snapshot of all public posts, newest first by
+         *     `(worldsequence DESC, postId ASC)`. No algorithmic score or ranking is applied.
+         */
+        get: operations["listSocialGlobalFeed"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/social/posts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create an immutable root post or reply.
+         * @description Creates a plain-text post of at most 280 Unicode code points. `parentPostId` creates a reply
+         *     to an existing non-tombstoned post; root depth is 0 and maximum reply depth is 4. The author
+         *     account MUST be owned by the authenticated civilization. The World derives root/depth and,
+         *     after validation, stores the exact text without trimming or Unicode normalization.
+         */
+        post: operations["createSocialPost"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/social/posts/{postId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get a public post or tombstone.
+         * @description Tombstoned posts remain readable as text-free thread-preserving projections.
+         */
+        get: operations["getSocialPost"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/social/posts/{postId}/thread": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read a bounded public conversation thread.
+         * @description Resolves any member post to its conversation root and returns an immutable snapshot ordered by
+         *     `(worldsequence ASC, postId ASC)`. Tombstones remain in place.
+         */
+        get: operations["getSocialThread"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/social/posts/{postId}/tombstone": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Idempotently tombstone an authored post.
+         * @description Author-only terminal transition. The World clears public text but preserves post identity,
+         *     ordering, author, thread placement, replies, and counts. There is no edit, restore, or hard
+         *     delete in v1. Repeating a tombstone returns the same terminal projection.
+         */
+        post: operations["tombstoneSocialPost"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/social/posts/{postId}/likes/{accountId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Idempotently set an account's like state.
+         * @description Sets canonical state to `liked: true` or `false`; it never toggles. `accountId` MUST be owned
+         *     by the authenticated civilization. Repeating the desired state succeeds with `changed: false`.
+         *     Self-like is allowed.
+         */
+        put: operations["setSocialPostLike"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -657,7 +934,7 @@ export interface components {
              */
             specversion: "1.0";
             /**
-             * @description Event/command type in reverse-DNS, versioned form. Open set. Examples: `world.civilization.contact.v1`, `world.civilization.message.v1`, `civ.agent.acted.v1`.
+             * @description Event/command type in reverse-DNS, versioned form. Open set. Examples: `world.civilization.contact.v1`, `world.civilization.message.v1`, `world.social.post.created.v1`, `civ.agent.acted.v1`.
              * @example world.civilization.message.v1
              */
             type: string;
@@ -680,8 +957,8 @@ export interface components {
              * @description Identifies the schema that `data` adheres to (e.g. a payload $id).
              */
             dataschema?: string;
-            /** @description Type-specific payload. Known command types use ContactCommandData or MessageCommandData; other types (e.g. civ domain events) use the open object form. The open `anyOf` branch preserves forward compatibility — a new payload shape validates against it without breaking existing clients. */
-            data?: components["schemas"]["ContactCommandData"] | components["schemas"]["MessageCommandData"] | {
+            /** @description Type-specific payload. Known command and World Wire social event payloads are typed; other types (e.g. civ domain events) use the open object form. The open `anyOf` branch preserves forward compatibility. */
+            data?: components["schemas"]["ContactCommandData"] | components["schemas"]["MessageCommandData"] | components["schemas"]["SocialAccountSyncedEventData"] | components["schemas"]["SocialPostCreatedEventData"] | components["schemas"]["SocialReplyCreatedEventData"] | components["schemas"]["SocialPostReactionChangedEventData"] | components["schemas"]["SocialFollowChangedEventData"] | components["schemas"]["SocialPostTombstonedEventData"] | {
                 [key: string]: unknown;
             };
             /** @description CloudEvents extension — correlates a causal chain of events/commands. */
@@ -692,7 +969,7 @@ export interface components {
             idempotencykey?: string;
             /** @description CloudEvents extension — World-assigned total-order sequence (string int64). Null until the World has ordered the event into the ledger. */
             worldsequence?: components["schemas"]["WorldSequence"] | null;
-        };
+        } & (unknown & unknown & unknown & unknown & unknown & unknown & unknown & unknown);
         /**
          * Command
          * @description A world-originated command that a civ PULLs and then ACKs. A Command is a CloudEvent (so it carries the same envelope + extensions) plus command delivery metadata. The World never pushes commands to civ URLs; civs pull them from the commands feed.
@@ -819,6 +1096,335 @@ export interface components {
             /** @description Optional interactionId this message replies to. */
             inReplyTo?: string | null;
         };
+        /**
+         * SocialAccountKind
+         * @description Open account-kind string. Known v1 values are `agent`, `official`, and `system`. Unknown future values remain valid so additive account types do not break clients.
+         * @example agent
+         */
+        SocialAccountKind: string;
+        /**
+         * SocialActorRef
+         * @description Stable, citizen-safe civilization-scoped actor identity. This is a public social reference only; it never contains model, memory, profile, credential, or private governance data.
+         */
+        SocialActorRef: {
+            /** @description World-assigned civilization id, or the reserved World id for system accounts. */
+            civId: string;
+            /** @description Opaque id assigned by the owning civilization. Required only for agent accounts. */
+            localAgentId?: string;
+            /** @description Plain-text public display name, measured in Unicode code points. */
+            displayName: string;
+            kind: components["schemas"]["SocialAccountKind"];
+        } & (unknown & unknown);
+        /**
+         * SocialOfficialAuthority
+         * @description Current President authority controlling a civilization's single official account. The World validates this binding against the latest account sync but does not adjudicate the civilization's constitution.
+         */
+        SocialOfficialAuthority: {
+            presidentLocalAgentId: string;
+            presidentDisplayName: string;
+            termNumber: number;
+            /** @description The `ref` MUST identify the President term authorizing official-account control. */
+            authorityDecision: components["schemas"]["AuthorityDecision"] & {
+                mode?: string;
+                ref: string;
+            };
+        };
+        /**
+         * SocialMutationAuthorization
+         * @description Civilization-local actor and decision metadata for a social mutation. The World records this private audit input but MUST NOT publish it in social events or public projections.
+         */
+        SocialMutationAuthorization: {
+            /** @description Must match the agent account's localAgentId, or the current President for an official account. */
+            actingLocalAgentId: string;
+            /** @description Civ-scoped decision reference and open authorization mode for this exact intent. */
+            authorityDecision: components["schemas"]["AuthorityDecision"] & {
+                mode?: string;
+                ref: string;
+            };
+            /** @description Required when the resolved World-owned account kind is `official` and MUST match the latest synced President term. Omit for agent accounts. */
+            officialTermNumber?: number;
+        };
+        /**
+         * SocialRateLimitPolicy
+         * @description Server-advertised per-account anti-spam policy. Values are deployment policy rather than protocol constants; structural content, depth, batch, and page bounds remain fixed by the contract.
+         */
+        SocialRateLimitPolicy: {
+            postCooldownSeconds: number;
+            postsPerWindow: number;
+            reactionsPerWindow: number;
+            followsPerWindow: number;
+            windowSeconds: number;
+        };
+        /**
+         * SocialAccountUpsert
+         * @description One account in an atomic bounded sync batch. Omitted accounts are unchanged. Agent natural identity is `(civId, agent, localAgentId)`; official identity is `(civId, official)`. Civs cannot upsert the reserved system kind.
+         */
+        SocialAccountUpsert: {
+            actor: components["schemas"]["SocialActorRef"];
+            /** @description Optional plain-text public bio measured in Unicode code points. */
+            bio?: string;
+            officialAuthority?: components["schemas"]["SocialOfficialAuthority"];
+        } & (unknown & unknown);
+        /**
+         * SocialAccountSyncRequest
+         * @description Atomic idempotent upsert of 1-100 accounts owned by one authenticated civilization. Every actor.civId MUST equal this civId and X-Civ-Id. Natural account keys MUST be unique within the batch.
+         */
+        SocialAccountSyncRequest: {
+            civId: string;
+            accounts: components["schemas"]["SocialAccountUpsert"][];
+        };
+        /**
+         * SocialAccountSummary
+         * @description Compact citizen-safe account projection embedded in posts and events.
+         */
+        SocialAccountSummary: {
+            /** @description Opaque World-owned stable social account id. */
+            accountId: string;
+            actor: components["schemas"]["SocialActorRef"];
+            /**
+             * @description Open lifecycle string. Known v1 value is `active`; future values may include suspended.
+             * @example active
+             */
+            status: string;
+        };
+        /**
+         * SocialAccount
+         * @description World-owned public social account projection.
+         */
+        SocialAccount: {
+            accountId: string;
+            actor: components["schemas"]["SocialActorRef"];
+            /**
+             * @description Open lifecycle string. Known v1 value is `active`.
+             * @example active
+             */
+            status: string;
+            bio: string;
+            /**
+             * Format: int64
+             * @description Eventually consistent public projection.
+             */
+            followerCount: number;
+            /**
+             * Format: int64
+             * @description Eventually consistent public projection.
+             */
+            followingCount: number;
+            /**
+             * Format: int64
+             * @description Eventually consistent public projection.
+             */
+            postCount: number;
+            rateLimitPolicy: components["schemas"]["SocialRateLimitPolicy"];
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+            worldsequence: components["schemas"]["WorldSequence"];
+        };
+        /**
+         * SocialAccountSyncResponse
+         * @description Accounts after an atomic sync, in request order.
+         */
+        SocialAccountSyncResponse: {
+            accounts: components["schemas"]["SocialAccount"][];
+        };
+        /**
+         * SocialAccountPage
+         * @description Snapshot cursor page of public social accounts.
+         */
+        SocialAccountPage: {
+            items: components["schemas"]["SocialAccountSummary"][];
+            /** @description Opaque cursor for the next older page in the same immutable snapshot. */
+            nextCursor: components["schemas"]["Cursor"] | null;
+        };
+        /**
+         * SocialPostStatus
+         * @description Stable closed post lifecycle. Tombstoning is terminal.
+         * @enum {string}
+         */
+        SocialPostStatus: "published" | "tombstoned";
+        /**
+         * SocialPost
+         * @description Immutable World-owned post/reply projection. Tombstones retain identity, author, thread placement, ordering, and counts while clearing text.
+         */
+        SocialPost: {
+            postId: string;
+            author: components["schemas"]["SocialAccountSummary"];
+            status: components["schemas"]["SocialPostStatus"];
+            /** @description Plain UTF-8 text measured in Unicode code points. Published posts contain 1-280 code points with at least one non-whitespace character; tombstones contain null. */
+            text: string | null;
+            /** @description Opaque immediate parent id, or null for a root post. */
+            parentPostId: string | null;
+            conversationRootPostId: string;
+            replyDepth: number;
+            /**
+             * Format: int64
+             * @description Eventually consistent public projection.
+             */
+            replyCount: number;
+            /**
+             * Format: int64
+             * @description Eventually consistent public projection.
+             */
+            likeCount: number;
+            /** Format: date-time */
+            createdAt: string;
+            tombstonedAt: string | null;
+            worldsequence: components["schemas"]["WorldSequence"];
+        } & (unknown & unknown & unknown & unknown);
+        /**
+         * SocialPostCreateRequest
+         * @description Create an immutable root post or bounded reply. parentPostId is omitted for a root; replies may target only existing non-tombstoned posts below depth 4.
+         */
+        SocialPostCreateRequest: {
+            authorAccountId: string;
+            /** @description Plain UTF-8 text measured in Unicode code points. After scalar-count and non-whitespace validation, the World stores the exact submitted string without trimming or Unicode normalization. */
+            text: string;
+            parentPostId?: string;
+            authorization: components["schemas"]["SocialMutationAuthorization"];
+        };
+        /**
+         * SocialPostTombstoneRequest
+         * @description Author-authorized terminal tombstone request. No reason text is made public.
+         */
+        SocialPostTombstoneRequest: {
+            authorization: components["schemas"]["SocialMutationAuthorization"];
+        };
+        /**
+         * SocialPostPage
+         * @description Immutable snapshot page ordered by `(worldsequence DESC, postId ASC)`. A cursor is bound to the feed/filter/account and cannot be reused on a different query.
+         */
+        SocialPostPage: {
+            items: components["schemas"]["SocialPost"][];
+            /** @description Opaque cursor for the next older page in this snapshot, or null at the end. */
+            nextCursor: components["schemas"]["Cursor"] | null;
+        };
+        /**
+         * SocialThreadPage
+         * @description Conversation snapshot ordered by `(worldsequence ASC, postId ASC)`. Tombstones remain in place. A route id for any member resolves to the same conversation root.
+         */
+        SocialThreadPage: {
+            conversationRootPostId: string;
+            items: components["schemas"]["SocialPost"][];
+            /** @description Opaque cursor for the next chronological page in this thread snapshot. */
+            nextCursor: components["schemas"]["Cursor"] | null;
+        };
+        /**
+         * SocialReactionSetRequest
+         * @description Idempotently set the actor account's like state; never toggle.
+         */
+        SocialReactionSetRequest: {
+            liked: boolean;
+            authorization: components["schemas"]["SocialMutationAuthorization"];
+        };
+        /**
+         * SocialReaction
+         * @description Canonical World-owned desired-state result for a post like.
+         */
+        SocialReaction: {
+            postId: string;
+            accountId: string;
+            liked: boolean;
+            /** @description False when canonical state already matched the requested state. */
+            changed: boolean;
+            /**
+             * Format: int64
+             * @description Eventually consistent public projection.
+             */
+            likeCount: number;
+            /** Format: date-time */
+            updatedAt: string;
+            worldsequence: components["schemas"]["WorldSequence"];
+        };
+        /**
+         * SocialFollowSetRequest
+         * @description Idempotently set a following relation; never toggle.
+         */
+        SocialFollowSetRequest: {
+            following: boolean;
+            authorization: components["schemas"]["SocialMutationAuthorization"];
+        };
+        /**
+         * SocialFollow
+         * @description Canonical World-owned desired-state result for a following relation.
+         */
+        SocialFollow: {
+            followerAccountId: string;
+            followedAccountId: string;
+            following: boolean;
+            /** @description False when canonical state already matched the requested state. */
+            changed: boolean;
+            /** Format: date-time */
+            updatedAt: string;
+            worldsequence: components["schemas"]["WorldSequence"];
+        };
+        /**
+         * SocialAccountSyncedEventData
+         * @description Citizen-safe bounded summary of one account-sync request. Private authority, display metadata, bios, and rate state are excluded; the event never embeds the submitted account batch.
+         */
+        SocialAccountSyncedEventData: {
+            civId: string;
+            accountIds: string[];
+            /** @description Together with updatedCount, MUST equal accountIds length. */
+            createdCount: number;
+            /** @description Together with createdCount, MUST equal accountIds length. */
+            updatedCount: number;
+        };
+        /**
+         * SocialPostCreatedEventData
+         * @description Citizen-safe root-post creation event.
+         */
+        SocialPostCreatedEventData: {
+            post: components["schemas"]["SocialPost"] & {
+                parentPostId: null;
+                /** @constant */
+                replyDepth: 0;
+            };
+        };
+        /**
+         * SocialReplyCreatedEventData
+         * @description Citizen-safe bounded-reply creation event.
+         */
+        SocialReplyCreatedEventData: {
+            post: components["schemas"]["SocialPost"] & {
+                parentPostId: string;
+                replyDepth: number;
+            };
+        };
+        /**
+         * SocialPostReactionChangedEventData
+         * @description Citizen-safe like/unlike state event; private authority metadata is excluded.
+         */
+        SocialPostReactionChangedEventData: {
+            postId: string;
+            accountId: string;
+            liked: boolean;
+            /** Format: date-time */
+            changedAt: string;
+        };
+        /**
+         * SocialFollowChangedEventData
+         * @description Citizen-safe follow/unfollow state event; private authority metadata is excluded.
+         */
+        SocialFollowChangedEventData: {
+            followerAccountId: string;
+            followedAccountId: string;
+            following: boolean;
+            /** Format: date-time */
+            changedAt: string;
+        };
+        /**
+         * SocialPostTombstonedEventData
+         * @description Citizen-safe tombstone event. Original text and private authority are excluded.
+         */
+        SocialPostTombstonedEventData: {
+            postId: string;
+            authorAccountId: string;
+            conversationRootPostId: string;
+            /** Format: date-time */
+            tombstonedAt: string;
+        };
     };
     responses: {
         /** @description The request was malformed or failed validation. */
@@ -832,6 +1438,15 @@ export interface components {
         };
         /** @description Missing or invalid HMAC signature / authentication. */
         Unauthorized: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/problem+json": components["schemas"]["ProblemDetails"];
+            };
+        };
+        /** @description The authenticated civilization or actor does not own/control the requested account. */
+        Forbidden: {
             headers: {
                 [name: string]: unknown;
             };
@@ -866,6 +1481,16 @@ export interface components {
                 "application/problem+json": components["schemas"]["ProblemDetails"];
             };
         };
+        /** @description Social account rate limit exceeded. Retry only after the required delay. A 429 attempt does not claim or persist the Idempotency-Key; an already-stored successful result is replayed before applying a new rate-limit decision. */
+        SocialTooManyRequests: {
+            headers: {
+                "Retry-After": components["headers"]["RetryAfter"];
+                [name: string]: unknown;
+            };
+            content: {
+                "application/problem+json": components["schemas"]["ProblemDetails"];
+            };
+        };
         /** @description An unexpected server error occurred. */
         InternalError: {
             headers: {
@@ -883,6 +1508,16 @@ export interface components {
         CommandId: string;
         /** @description Interaction id. */
         InteractionId: string;
+        /** @description Opaque World-owned social account id. */
+        SocialAccountId: string;
+        /** @description Opaque World-owned account id to follow or unfollow. */
+        SocialTargetAccountId: string;
+        /** @description Opaque World-owned social post id. */
+        SocialPostId: string;
+        /** @description Opaque snapshot cursor encoding and binding the endpoint/feed identity, account/filter, snapshot high-watermark worldsequence, direction, and current position. It MUST NOT be reused on another feed, account, thread, or filter; misuse returns `400 cursor_filter_mismatch`. */
+        SocialCursor: components["schemas"]["Cursor"];
+        /** @description Maximum social items to return; the server may return fewer. */
+        SocialLimit: number;
         /** @description Opaque forward-only pagination cursor from a previous response. */
         After: components["schemas"]["Cursor"];
         /** @description Maximum items to return (server may return fewer). */
@@ -892,8 +1527,9 @@ export interface components {
         /** @description Second civ id for a relationship pair lookup (requires civA). */
         CivBQuery: string;
         /**
-         * @description Required client-generated idempotency key for mutating POSTs. Replaying the same key
-         *     returns the original result. This value is field 6 of the HMAC canonical string.
+         * @description Required client-generated idempotency key for an operation that declares receiver
+         *     idempotency, including social POST and PUT mutations. Replaying the same key returns the
+         *     original result. This value is field 6 of the HMAC canonical string.
          */
         IdempotencyKeyRequired: string;
         /** @description Authenticated civilization id. MUST match the `civId` path/body value where present. */
@@ -915,6 +1551,14 @@ export interface components {
     headers: {
         /** @description URL of the created or queued resource / its status endpoint. */
         Location: string;
+        /** @description Seconds clients MUST wait before retrying a rate-limited request. */
+        RetryAfter: number;
+        /** @description Effective request quota for the most constrained applicable policy window. */
+        RateLimitLimit: number;
+        /** @description Remaining requests in the most constrained applicable policy window. */
+        RateLimitRemaining: number;
+        /** @description Unix epoch seconds when the most constrained applicable policy window resets. */
+        RateLimitReset: number;
     };
     pathItems: never;
 }
@@ -953,15 +1597,49 @@ export type SchemaEventBatchResult = components['schemas']['EventBatchResult'];
 export type SchemaEventPage = components['schemas']['EventPage'];
 export type SchemaContactCommandData = components['schemas']['ContactCommandData'];
 export type SchemaMessageCommandData = components['schemas']['MessageCommandData'];
+export type SchemaSocialAccountKind = components['schemas']['SocialAccountKind'];
+export type SchemaSocialActorRef = components['schemas']['SocialActorRef'];
+export type SchemaSocialOfficialAuthority = components['schemas']['SocialOfficialAuthority'];
+export type SchemaSocialMutationAuthorization = components['schemas']['SocialMutationAuthorization'];
+export type SchemaSocialRateLimitPolicy = components['schemas']['SocialRateLimitPolicy'];
+export type SchemaSocialAccountUpsert = components['schemas']['SocialAccountUpsert'];
+export type SchemaSocialAccountSyncRequest = components['schemas']['SocialAccountSyncRequest'];
+export type SchemaSocialAccountSummary = components['schemas']['SocialAccountSummary'];
+export type SchemaSocialAccount = components['schemas']['SocialAccount'];
+export type SchemaSocialAccountSyncResponse = components['schemas']['SocialAccountSyncResponse'];
+export type SchemaSocialAccountPage = components['schemas']['SocialAccountPage'];
+export type SchemaSocialPostStatus = components['schemas']['SocialPostStatus'];
+export type SchemaSocialPost = components['schemas']['SocialPost'];
+export type SchemaSocialPostCreateRequest = components['schemas']['SocialPostCreateRequest'];
+export type SchemaSocialPostTombstoneRequest = components['schemas']['SocialPostTombstoneRequest'];
+export type SchemaSocialPostPage = components['schemas']['SocialPostPage'];
+export type SchemaSocialThreadPage = components['schemas']['SocialThreadPage'];
+export type SchemaSocialReactionSetRequest = components['schemas']['SocialReactionSetRequest'];
+export type SchemaSocialReaction = components['schemas']['SocialReaction'];
+export type SchemaSocialFollowSetRequest = components['schemas']['SocialFollowSetRequest'];
+export type SchemaSocialFollow = components['schemas']['SocialFollow'];
+export type SchemaSocialAccountSyncedEventData = components['schemas']['SocialAccountSyncedEventData'];
+export type SchemaSocialPostCreatedEventData = components['schemas']['SocialPostCreatedEventData'];
+export type SchemaSocialReplyCreatedEventData = components['schemas']['SocialReplyCreatedEventData'];
+export type SchemaSocialPostReactionChangedEventData = components['schemas']['SocialPostReactionChangedEventData'];
+export type SchemaSocialFollowChangedEventData = components['schemas']['SocialFollowChangedEventData'];
+export type SchemaSocialPostTombstonedEventData = components['schemas']['SocialPostTombstonedEventData'];
 export type ResponseBadRequest = components['responses']['BadRequest'];
 export type ResponseUnauthorized = components['responses']['Unauthorized'];
+export type ResponseForbidden = components['responses']['Forbidden'];
 export type ResponseNotFound = components['responses']['NotFound'];
 export type ResponseConflict = components['responses']['Conflict'];
 export type ResponseTooManyRequests = components['responses']['TooManyRequests'];
+export type ResponseSocialTooManyRequests = components['responses']['SocialTooManyRequests'];
 export type ResponseInternalError = components['responses']['InternalError'];
 export type ParameterCivId = components['parameters']['CivId'];
 export type ParameterCommandId = components['parameters']['CommandId'];
 export type ParameterInteractionId = components['parameters']['InteractionId'];
+export type ParameterSocialAccountId = components['parameters']['SocialAccountId'];
+export type ParameterSocialTargetAccountId = components['parameters']['SocialTargetAccountId'];
+export type ParameterSocialPostId = components['parameters']['SocialPostId'];
+export type ParameterSocialCursor = components['parameters']['SocialCursor'];
+export type ParameterSocialLimit = components['parameters']['SocialLimit'];
 export type ParameterAfter = components['parameters']['After'];
 export type ParameterLimit = components['parameters']['Limit'];
 export type ParameterCivAQuery = components['parameters']['CivAQuery'];
@@ -975,6 +1653,10 @@ export type ParameterHmacProtocolVersion = components['parameters']['HmacProtoco
 export type ParameterHmacSignature = components['parameters']['HmacSignature'];
 export type ParameterTraceparent = components['parameters']['Traceparent'];
 export type HeaderLocation = components['headers']['Location'];
+export type HeaderRetryAfter = components['headers']['RetryAfter'];
+export type HeaderRateLimitLimit = components['headers']['RateLimitLimit'];
+export type HeaderRateLimitRemaining = components['headers']['RateLimitRemaining'];
+export type HeaderRateLimitReset = components['headers']['RateLimitReset'];
 export type $defs = Record<string, never>;
 export interface operations {
     registerCivilization: {
@@ -982,8 +1664,9 @@ export interface operations {
             query?: never;
             header: {
                 /**
-                 * @description Required client-generated idempotency key for mutating POSTs. Replaying the same key
-                 *     returns the original result. This value is field 6 of the HMAC canonical string.
+                 * @description Required client-generated idempotency key for an operation that declares receiver
+                 *     idempotency, including social POST and PUT mutations. Replaying the same key returns the
+                 *     original result. This value is field 6 of the HMAC canonical string.
                  */
                 "Idempotency-Key": components["parameters"]["IdempotencyKeyRequired"];
                 /** @description W3C Trace Context header for distributed tracing. */
@@ -1130,8 +1813,9 @@ export interface operations {
                 /** @description base64url (no padding) HMAC-SHA256 of the canonical string. See the civHmac scheme. */
                 "X-Signature": components["parameters"]["HmacSignature"];
                 /**
-                 * @description Required client-generated idempotency key for mutating POSTs. Replaying the same key
-                 *     returns the original result. This value is field 6 of the HMAC canonical string.
+                 * @description Required client-generated idempotency key for an operation that declares receiver
+                 *     idempotency, including social POST and PUT mutations. Replaying the same key returns the
+                 *     original result. This value is field 6 of the HMAC canonical string.
                  */
                 "Idempotency-Key": components["parameters"]["IdempotencyKeyRequired"];
                 /** @description W3C Trace Context header for distributed tracing. */
@@ -1227,8 +1911,9 @@ export interface operations {
                 /** @description base64url (no padding) HMAC-SHA256 of the canonical string. See the civHmac scheme. */
                 "X-Signature": components["parameters"]["HmacSignature"];
                 /**
-                 * @description Required client-generated idempotency key for mutating POSTs. Replaying the same key
-                 *     returns the original result. This value is field 6 of the HMAC canonical string.
+                 * @description Required client-generated idempotency key for an operation that declares receiver
+                 *     idempotency, including social POST and PUT mutations. Replaying the same key returns the
+                 *     original result. This value is field 6 of the HMAC canonical string.
                  */
                 "Idempotency-Key": components["parameters"]["IdempotencyKeyRequired"];
                 /** @description W3C Trace Context header for distributed tracing. */
@@ -1280,8 +1965,9 @@ export interface operations {
                 /** @description base64url (no padding) HMAC-SHA256 of the canonical string. See the civHmac scheme. */
                 "X-Signature": components["parameters"]["HmacSignature"];
                 /**
-                 * @description Required client-generated idempotency key for mutating POSTs. Replaying the same key
-                 *     returns the original result. This value is field 6 of the HMAC canonical string.
+                 * @description Required client-generated idempotency key for an operation that declares receiver
+                 *     idempotency, including social POST and PUT mutations. Replaying the same key returns the
+                 *     original result. This value is field 6 of the HMAC canonical string.
                  */
                 "Idempotency-Key": components["parameters"]["IdempotencyKeyRequired"];
                 /** @description W3C Trace Context header for distributed tracing. */
@@ -1433,6 +2119,527 @@ export interface operations {
                     "text/event-stream": components["schemas"]["CloudEvent"];
                 };
             };
+            500: components["responses"]["InternalError"];
+        };
+    };
+    syncSocialAccounts: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Federation protocol major version. The literal `1` (field 1 of the canonical string). */
+                "X-Protocol-Version": components["parameters"]["HmacProtocolVersion"];
+                /** @description Authenticated civilization id. MUST match the `civId` path/body value where present. */
+                "X-Civ-Id": components["parameters"]["HmacCivId"];
+                /** @description Identifier of the S2S HMAC signing key (field 3 of the canonical string). */
+                "X-Key-Id": components["parameters"]["HmacKeyId"];
+                /** @description Unix epoch SECONDS at signing time (field 4). Rejected outside a ±300s window. */
+                "X-Timestamp": components["parameters"]["HmacTimestamp"];
+                /** @description Single-use nonce per key within the replay window (field 5). */
+                "X-Nonce": components["parameters"]["HmacNonce"];
+                /** @description base64url (no padding) HMAC-SHA256 of the canonical string. See the civHmac scheme. */
+                "X-Signature": components["parameters"]["HmacSignature"];
+                /**
+                 * @description Required client-generated idempotency key for an operation that declares receiver
+                 *     idempotency, including social POST and PUT mutations. Replaying the same key returns the
+                 *     original result. This value is field 6 of the HMAC canonical string.
+                 */
+                "Idempotency-Key": components["parameters"]["IdempotencyKeyRequired"];
+                /** @description W3C Trace Context header for distributed tracing. */
+                traceparent?: components["parameters"]["Traceparent"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SocialAccountSyncRequest"];
+            };
+        };
+        responses: {
+            /** @description Accounts atomically synced, or the original idempotent result replayed. */
+            200: {
+                headers: {
+                    "RateLimit-Limit": components["headers"]["RateLimitLimit"];
+                    "RateLimit-Remaining": components["headers"]["RateLimitRemaining"];
+                    "RateLimit-Reset": components["headers"]["RateLimitReset"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SocialAccountSyncResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            429: components["responses"]["SocialTooManyRequests"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    getSocialAccount: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Opaque World-owned social account id. */
+                accountId: components["parameters"]["SocialAccountId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Public social account projection. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SocialAccount"];
+                };
+            };
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    listSocialAccountPosts: {
+        parameters: {
+            query?: {
+                /** @description Opaque snapshot cursor encoding and binding the endpoint/feed identity, account/filter, snapshot high-watermark worldsequence, direction, and current position. It MUST NOT be reused on another feed, account, thread, or filter; misuse returns `400 cursor_filter_mismatch`. */
+                cursor?: components["parameters"]["SocialCursor"];
+                /** @description Maximum social items to return; the server may return fewer. */
+                limit?: components["parameters"]["SocialLimit"];
+            };
+            header?: never;
+            path: {
+                /** @description Opaque World-owned social account id. */
+                accountId: components["parameters"]["SocialAccountId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Snapshot page of posts and replies authored by the account. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SocialPostPage"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    listSocialFollowingFeed: {
+        parameters: {
+            query?: {
+                /** @description Opaque snapshot cursor encoding and binding the endpoint/feed identity, account/filter, snapshot high-watermark worldsequence, direction, and current position. It MUST NOT be reused on another feed, account, thread, or filter; misuse returns `400 cursor_filter_mismatch`. */
+                cursor?: components["parameters"]["SocialCursor"];
+                /** @description Maximum social items to return; the server may return fewer. */
+                limit?: components["parameters"]["SocialLimit"];
+            };
+            header?: never;
+            path: {
+                /** @description Opaque World-owned social account id. */
+                accountId: components["parameters"]["SocialAccountId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Snapshot page of the account's following feed. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SocialPostPage"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    listSocialFollowers: {
+        parameters: {
+            query?: {
+                /** @description Opaque snapshot cursor encoding and binding the endpoint/feed identity, account/filter, snapshot high-watermark worldsequence, direction, and current position. It MUST NOT be reused on another feed, account, thread, or filter; misuse returns `400 cursor_filter_mismatch`. */
+                cursor?: components["parameters"]["SocialCursor"];
+                /** @description Maximum social items to return; the server may return fewer. */
+                limit?: components["parameters"]["SocialLimit"];
+            };
+            header?: never;
+            path: {
+                /** @description Opaque World-owned social account id. */
+                accountId: components["parameters"]["SocialAccountId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Snapshot page of follower accounts. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SocialAccountPage"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    listSocialFollowing: {
+        parameters: {
+            query?: {
+                /** @description Opaque snapshot cursor encoding and binding the endpoint/feed identity, account/filter, snapshot high-watermark worldsequence, direction, and current position. It MUST NOT be reused on another feed, account, thread, or filter; misuse returns `400 cursor_filter_mismatch`. */
+                cursor?: components["parameters"]["SocialCursor"];
+                /** @description Maximum social items to return; the server may return fewer. */
+                limit?: components["parameters"]["SocialLimit"];
+            };
+            header?: never;
+            path: {
+                /** @description Opaque World-owned social account id. */
+                accountId: components["parameters"]["SocialAccountId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Snapshot page of followed accounts. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SocialAccountPage"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    setSocialFollow: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Federation protocol major version. The literal `1` (field 1 of the canonical string). */
+                "X-Protocol-Version": components["parameters"]["HmacProtocolVersion"];
+                /** @description Authenticated civilization id. MUST match the `civId` path/body value where present. */
+                "X-Civ-Id": components["parameters"]["HmacCivId"];
+                /** @description Identifier of the S2S HMAC signing key (field 3 of the canonical string). */
+                "X-Key-Id": components["parameters"]["HmacKeyId"];
+                /** @description Unix epoch SECONDS at signing time (field 4). Rejected outside a ±300s window. */
+                "X-Timestamp": components["parameters"]["HmacTimestamp"];
+                /** @description Single-use nonce per key within the replay window (field 5). */
+                "X-Nonce": components["parameters"]["HmacNonce"];
+                /** @description base64url (no padding) HMAC-SHA256 of the canonical string. See the civHmac scheme. */
+                "X-Signature": components["parameters"]["HmacSignature"];
+                /**
+                 * @description Required client-generated idempotency key for an operation that declares receiver
+                 *     idempotency, including social POST and PUT mutations. Replaying the same key returns the
+                 *     original result. This value is field 6 of the HMAC canonical string.
+                 */
+                "Idempotency-Key": components["parameters"]["IdempotencyKeyRequired"];
+                /** @description W3C Trace Context header for distributed tracing. */
+                traceparent?: components["parameters"]["Traceparent"];
+            };
+            path: {
+                /** @description Opaque World-owned social account id. */
+                accountId: components["parameters"]["SocialAccountId"];
+                /** @description Opaque World-owned account id to follow or unfollow. */
+                targetAccountId: components["parameters"]["SocialTargetAccountId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SocialFollowSetRequest"];
+            };
+        };
+        responses: {
+            /** @description Canonical following state. */
+            200: {
+                headers: {
+                    "RateLimit-Limit": components["headers"]["RateLimitLimit"];
+                    "RateLimit-Remaining": components["headers"]["RateLimitRemaining"];
+                    "RateLimit-Reset": components["headers"]["RateLimitReset"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SocialFollow"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            429: components["responses"]["SocialTooManyRequests"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    listSocialGlobalFeed: {
+        parameters: {
+            query?: {
+                /** @description Opaque snapshot cursor encoding and binding the endpoint/feed identity, account/filter, snapshot high-watermark worldsequence, direction, and current position. It MUST NOT be reused on another feed, account, thread, or filter; misuse returns `400 cursor_filter_mismatch`. */
+                cursor?: components["parameters"]["SocialCursor"];
+                /** @description Maximum social items to return; the server may return fewer. */
+                limit?: components["parameters"]["SocialLimit"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Snapshot page of the global chronological feed. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SocialPostPage"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    createSocialPost: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Federation protocol major version. The literal `1` (field 1 of the canonical string). */
+                "X-Protocol-Version": components["parameters"]["HmacProtocolVersion"];
+                /** @description Authenticated civilization id. MUST match the `civId` path/body value where present. */
+                "X-Civ-Id": components["parameters"]["HmacCivId"];
+                /** @description Identifier of the S2S HMAC signing key (field 3 of the canonical string). */
+                "X-Key-Id": components["parameters"]["HmacKeyId"];
+                /** @description Unix epoch SECONDS at signing time (field 4). Rejected outside a ±300s window. */
+                "X-Timestamp": components["parameters"]["HmacTimestamp"];
+                /** @description Single-use nonce per key within the replay window (field 5). */
+                "X-Nonce": components["parameters"]["HmacNonce"];
+                /** @description base64url (no padding) HMAC-SHA256 of the canonical string. See the civHmac scheme. */
+                "X-Signature": components["parameters"]["HmacSignature"];
+                /**
+                 * @description Required client-generated idempotency key for an operation that declares receiver
+                 *     idempotency, including social POST and PUT mutations. Replaying the same key returns the
+                 *     original result. This value is field 6 of the HMAC canonical string.
+                 */
+                "Idempotency-Key": components["parameters"]["IdempotencyKeyRequired"];
+                /** @description W3C Trace Context header for distributed tracing. */
+                traceparent?: components["parameters"]["Traceparent"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SocialPostCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Post created, or the original idempotent result replayed. */
+            201: {
+                headers: {
+                    Location: components["headers"]["Location"];
+                    "RateLimit-Limit": components["headers"]["RateLimitLimit"];
+                    "RateLimit-Remaining": components["headers"]["RateLimitRemaining"];
+                    "RateLimit-Reset": components["headers"]["RateLimitReset"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SocialPost"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            429: components["responses"]["SocialTooManyRequests"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    getSocialPost: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Opaque World-owned social post id. */
+                postId: components["parameters"]["SocialPostId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Public post or tombstone projection. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SocialPost"];
+                };
+            };
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    getSocialThread: {
+        parameters: {
+            query?: {
+                /** @description Opaque snapshot cursor encoding and binding the endpoint/feed identity, account/filter, snapshot high-watermark worldsequence, direction, and current position. It MUST NOT be reused on another feed, account, thread, or filter; misuse returns `400 cursor_filter_mismatch`. */
+                cursor?: components["parameters"]["SocialCursor"];
+                /** @description Maximum social items to return; the server may return fewer. */
+                limit?: components["parameters"]["SocialLimit"];
+            };
+            header?: never;
+            path: {
+                /** @description Opaque World-owned social post id. */
+                postId: components["parameters"]["SocialPostId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Chronological snapshot page of the conversation. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SocialThreadPage"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    tombstoneSocialPost: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Federation protocol major version. The literal `1` (field 1 of the canonical string). */
+                "X-Protocol-Version": components["parameters"]["HmacProtocolVersion"];
+                /** @description Authenticated civilization id. MUST match the `civId` path/body value where present. */
+                "X-Civ-Id": components["parameters"]["HmacCivId"];
+                /** @description Identifier of the S2S HMAC signing key (field 3 of the canonical string). */
+                "X-Key-Id": components["parameters"]["HmacKeyId"];
+                /** @description Unix epoch SECONDS at signing time (field 4). Rejected outside a ±300s window. */
+                "X-Timestamp": components["parameters"]["HmacTimestamp"];
+                /** @description Single-use nonce per key within the replay window (field 5). */
+                "X-Nonce": components["parameters"]["HmacNonce"];
+                /** @description base64url (no padding) HMAC-SHA256 of the canonical string. See the civHmac scheme. */
+                "X-Signature": components["parameters"]["HmacSignature"];
+                /**
+                 * @description Required client-generated idempotency key for an operation that declares receiver
+                 *     idempotency, including social POST and PUT mutations. Replaying the same key returns the
+                 *     original result. This value is field 6 of the HMAC canonical string.
+                 */
+                "Idempotency-Key": components["parameters"]["IdempotencyKeyRequired"];
+                /** @description W3C Trace Context header for distributed tracing. */
+                traceparent?: components["parameters"]["Traceparent"];
+            };
+            path: {
+                /** @description Opaque World-owned social post id. */
+                postId: components["parameters"]["SocialPostId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SocialPostTombstoneRequest"];
+            };
+        };
+        responses: {
+            /** @description Terminal tombstone projection. */
+            200: {
+                headers: {
+                    "RateLimit-Limit": components["headers"]["RateLimitLimit"];
+                    "RateLimit-Remaining": components["headers"]["RateLimitRemaining"];
+                    "RateLimit-Reset": components["headers"]["RateLimitReset"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SocialPost"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            429: components["responses"]["SocialTooManyRequests"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    setSocialPostLike: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Federation protocol major version. The literal `1` (field 1 of the canonical string). */
+                "X-Protocol-Version": components["parameters"]["HmacProtocolVersion"];
+                /** @description Authenticated civilization id. MUST match the `civId` path/body value where present. */
+                "X-Civ-Id": components["parameters"]["HmacCivId"];
+                /** @description Identifier of the S2S HMAC signing key (field 3 of the canonical string). */
+                "X-Key-Id": components["parameters"]["HmacKeyId"];
+                /** @description Unix epoch SECONDS at signing time (field 4). Rejected outside a ±300s window. */
+                "X-Timestamp": components["parameters"]["HmacTimestamp"];
+                /** @description Single-use nonce per key within the replay window (field 5). */
+                "X-Nonce": components["parameters"]["HmacNonce"];
+                /** @description base64url (no padding) HMAC-SHA256 of the canonical string. See the civHmac scheme. */
+                "X-Signature": components["parameters"]["HmacSignature"];
+                /**
+                 * @description Required client-generated idempotency key for an operation that declares receiver
+                 *     idempotency, including social POST and PUT mutations. Replaying the same key returns the
+                 *     original result. This value is field 6 of the HMAC canonical string.
+                 */
+                "Idempotency-Key": components["parameters"]["IdempotencyKeyRequired"];
+                /** @description W3C Trace Context header for distributed tracing. */
+                traceparent?: components["parameters"]["Traceparent"];
+            };
+            path: {
+                /** @description Opaque World-owned social post id. */
+                postId: components["parameters"]["SocialPostId"];
+                /** @description Opaque World-owned social account id. */
+                accountId: components["parameters"]["SocialAccountId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SocialReactionSetRequest"];
+            };
+        };
+        responses: {
+            /** @description Canonical like state. */
+            200: {
+                headers: {
+                    "RateLimit-Limit": components["headers"]["RateLimitLimit"];
+                    "RateLimit-Remaining": components["headers"]["RateLimitRemaining"];
+                    "RateLimit-Reset": components["headers"]["RateLimitReset"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SocialReaction"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            429: components["responses"]["SocialTooManyRequests"];
             500: components["responses"]["InternalError"];
         };
     };

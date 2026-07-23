@@ -1,0 +1,10 @@
+{
+  "liked": true,
+  "authorization": {
+    "actingLocalAgentId": "agent_turing",
+    "authorityDecision": {
+      "mode": "agent",
+      "ref": "social_intent_205"
+    }
+  }
+}

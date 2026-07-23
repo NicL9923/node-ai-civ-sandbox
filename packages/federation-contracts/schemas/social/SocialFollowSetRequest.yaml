@@ -1,0 +1,12 @@
+type: object
+title: SocialFollowSetRequest
+description: Idempotently set a following relation; never toggle.
+additionalProperties: false
+required:
+  - following
+  - authorization
+properties:
+  following:
+    type: boolean
+  authorization:
+    $ref: ./SocialMutationAuthorization.yaml

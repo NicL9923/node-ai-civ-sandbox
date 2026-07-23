@@ -28,7 +28,7 @@ properties:
     description: >-
       Event/command type in reverse-DNS, versioned form. Open set. Examples:
       `world.civilization.contact.v1`, `world.civilization.message.v1`,
-      `civ.agent.acted.v1`.
+      `world.social.post.created.v1`, `civ.agent.acted.v1`.
     examples: ["world.civilization.message.v1"]
   source:
     type: string
@@ -50,13 +50,18 @@ properties:
     description: Identifies the schema that `data` adheres to (e.g. a payload $id).
   data:
     description: >-
-      Type-specific payload. Known command types use ContactCommandData or
-      MessageCommandData; other types (e.g. civ domain events) use the open
-      object form. The open `anyOf` branch preserves forward compatibility — a
-      new payload shape validates against it without breaking existing clients.
+      Type-specific payload. Known command and World Wire social event payloads
+      are typed; other types (e.g. civ domain events) use the open object form.
+      The open `anyOf` branch preserves forward compatibility.
     anyOf:
       - $ref: ./payloads/ContactCommandData.yaml
       - $ref: ./payloads/MessageCommandData.yaml
+      - $ref: ./payloads/social/SocialAccountSyncedEventData.yaml
+      - $ref: ./payloads/social/SocialPostCreatedEventData.yaml
+      - $ref: ./payloads/social/SocialReplyCreatedEventData.yaml
+      - $ref: ./payloads/social/SocialPostReactionChangedEventData.yaml
+      - $ref: ./payloads/social/SocialFollowChangedEventData.yaml
+      - $ref: ./payloads/social/SocialPostTombstonedEventData.yaml
       - type: object
         additionalProperties: true
   correlationid:
@@ -77,3 +82,108 @@ properties:
     oneOf:
       - $ref: ../common/WorldSequence.yaml
       - type: "null"
+allOf:
+  - if:
+      properties:
+        type:
+          const: world.social.account.synced.v1
+      required: [type]
+    then:
+      required: [data]
+      properties:
+        data:
+          $ref: ./payloads/social/SocialAccountSyncedEventData.yaml
+  - if:
+      properties:
+        type:
+          const: world.social.post.created.v1
+      required: [type]
+    then:
+      required: [data]
+      properties:
+        data:
+          $ref: ./payloads/social/SocialPostCreatedEventData.yaml
+  - if:
+      properties:
+        type:
+          const: world.social.reply.created.v1
+      required: [type]
+    then:
+      required: [data]
+      properties:
+        data:
+          $ref: ./payloads/social/SocialReplyCreatedEventData.yaml
+  - if:
+      properties:
+        type:
+          const: world.social.post.liked.v1
+      required: [type]
+    then:
+      required: [data]
+      properties:
+        data:
+          allOf:
+            - $ref: ./payloads/social/SocialPostReactionChangedEventData.yaml
+            - type: object
+              properties:
+                liked:
+                  const: true
+              required: [liked]
+  - if:
+      properties:
+        type:
+          const: world.social.post.unliked.v1
+      required: [type]
+    then:
+      required: [data]
+      properties:
+        data:
+          allOf:
+            - $ref: ./payloads/social/SocialPostReactionChangedEventData.yaml
+            - type: object
+              properties:
+                liked:
+                  const: false
+              required: [liked]
+  - if:
+      properties:
+        type:
+          const: world.social.account.followed.v1
+      required: [type]
+    then:
+      required: [data]
+      properties:
+        data:
+          allOf:
+            - $ref: ./payloads/social/SocialFollowChangedEventData.yaml
+            - type: object
+              properties:
+                following:
+                  const: true
+              required: [following]
+  - if:
+      properties:
+        type:
+          const: world.social.account.unfollowed.v1
+      required: [type]
+    then:
+      required: [data]
+      properties:
+        data:
+          allOf:
+            - $ref: ./payloads/social/SocialFollowChangedEventData.yaml
+            - type: object
+              properties:
+                following:
+                  const: false
+              required: [following]
+  - if:
+      properties:
+        type:
+          const: world.social.post.tombstoned.v1
+      required: [type]
+    then:
+      required: [data]
+      properties:
+        data:
+          $ref: ./payloads/social/SocialPostTombstonedEventData.yaml

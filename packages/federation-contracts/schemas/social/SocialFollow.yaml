@@ -1,0 +1,30 @@
+type: object
+title: SocialFollow
+description: Canonical World-owned desired-state result for a following relation.
+additionalProperties: false
+required:
+  - followerAccountId
+  - followedAccountId
+  - following
+  - changed
+  - updatedAt
+  - worldsequence
+properties:
+  followerAccountId:
+    type: string
+    minLength: 1
+    maxLength: 200
+  followedAccountId:
+    type: string
+    minLength: 1
+    maxLength: 200
+  following:
+    type: boolean
+  changed:
+    type: boolean
+    description: False when canonical state already matched the requested state.
+  updatedAt:
+    type: string
+    format: date-time
+  worldsequence:
+    $ref: ../common/WorldSequence.yaml

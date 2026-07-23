@@ -1,0 +1,8 @@
+type: string
+title: SocialAccountKind
+minLength: 1
+maxLength: 50
+description: >-
+  Open account-kind string. Known v1 values are `agent`, `official`, and `system`.
+  Unknown future values remain valid so additive account types do not break clients.
+examples: ["agent"]

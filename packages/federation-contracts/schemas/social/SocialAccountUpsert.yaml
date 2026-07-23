@@ -1,0 +1,40 @@
+type: object
+title: SocialAccountUpsert
+description: >-
+  One account in an atomic bounded sync batch. Omitted accounts are unchanged. Agent
+  natural identity is `(civId, agent, localAgentId)`; official identity is
+  `(civId, official)`. Civs cannot upsert the reserved system kind.
+additionalProperties: false
+required:
+  - actor
+properties:
+  actor:
+    $ref: ./SocialActorRef.yaml
+  bio:
+    type: string
+    maxLength: 160
+    description: Optional plain-text public bio measured in Unicode code points.
+  officialAuthority:
+    $ref: ./SocialOfficialAuthority.yaml
+allOf:
+  - not:
+      properties:
+        actor:
+          properties:
+            kind:
+              const: system
+          required: [kind]
+      required: [actor]
+  - if:
+      properties:
+        actor:
+          properties:
+            kind:
+              const: official
+          required: [kind]
+      required: [actor]
+    then:
+      required: [officialAuthority]
+    else:
+      not:
+        required: [officialAuthority]

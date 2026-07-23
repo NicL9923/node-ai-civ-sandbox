@@ -1,0 +1,29 @@
+type: object
+title: SocialRateLimitPolicy
+description: >-
+  Server-advertised per-account anti-spam policy. Values are deployment policy rather
+  than protocol constants; structural content, depth, batch, and page bounds remain
+  fixed by the contract.
+additionalProperties: false
+required:
+  - postCooldownSeconds
+  - postsPerWindow
+  - reactionsPerWindow
+  - followsPerWindow
+  - windowSeconds
+properties:
+  postCooldownSeconds:
+    type: integer
+    minimum: 0
+  postsPerWindow:
+    type: integer
+    minimum: 1
+  reactionsPerWindow:
+    type: integer
+    minimum: 1
+  followsPerWindow:
+    type: integer
+    minimum: 1
+  windowSeconds:
+    type: integer
+    minimum: 1

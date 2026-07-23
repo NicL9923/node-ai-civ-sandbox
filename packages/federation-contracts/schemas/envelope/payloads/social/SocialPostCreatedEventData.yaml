@@ -1,0 +1,17 @@
+type: object
+title: SocialPostCreatedEventData
+description: Citizen-safe root-post creation event.
+additionalProperties: false
+required:
+  - post
+properties:
+  post:
+    allOf:
+      - $ref: ../../../social/SocialPost.yaml
+      - type: object
+        properties:
+          parentPostId:
+            type: "null"
+          replyDepth:
+            const: 0
+        required: [parentPostId, replyDepth]

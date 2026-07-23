@@ -1,0 +1,117 @@
+type: object
+title: SocialPost
+description: >-
+  Immutable World-owned post/reply projection. Tombstones retain identity, author,
+  thread placement, ordering, and counts while clearing text.
+additionalProperties: false
+required:
+  - postId
+  - author
+  - status
+  - text
+  - parentPostId
+  - conversationRootPostId
+  - replyDepth
+  - replyCount
+  - likeCount
+  - createdAt
+  - tombstonedAt
+  - worldsequence
+properties:
+  postId:
+    type: string
+    minLength: 1
+    maxLength: 200
+  author:
+    $ref: ./SocialAccountSummary.yaml
+  status:
+    $ref: ./SocialPostStatus.yaml
+  text:
+    description: >-
+      Plain UTF-8 text measured in Unicode code points. Published posts contain 1-280
+      code points with at least one non-whitespace character; tombstones contain null.
+    oneOf:
+      - type: string
+        minLength: 1
+        maxLength: 280
+        pattern: '\S'
+      - type: "null"
+  parentPostId:
+    description: Opaque immediate parent id, or null for a root post.
+    oneOf:
+      - type: string
+        minLength: 1
+        maxLength: 200
+      - type: "null"
+  conversationRootPostId:
+    type: string
+    minLength: 1
+    maxLength: 200
+  replyDepth:
+    type: integer
+    minimum: 0
+    maximum: 4
+  replyCount:
+    type: integer
+    format: int64
+    minimum: 0
+    description: Eventually consistent public projection.
+  likeCount:
+    type: integer
+    format: int64
+    minimum: 0
+    description: Eventually consistent public projection.
+  createdAt:
+    type: string
+    format: date-time
+  tombstonedAt:
+    oneOf:
+      - type: string
+        format: date-time
+      - type: "null"
+  worldsequence:
+    $ref: ../common/WorldSequence.yaml
+allOf:
+  - if:
+      properties:
+        parentPostId:
+          type: "null"
+      required: [parentPostId]
+    then:
+      properties:
+        replyDepth:
+          const: 0
+  - if:
+      properties:
+        parentPostId:
+          type: string
+      required: [parentPostId]
+    then:
+      properties:
+        replyDepth:
+          type: integer
+          minimum: 1
+          maximum: 4
+  - if:
+      properties:
+        status:
+          const: published
+      required: [status]
+    then:
+      properties:
+        text:
+          type: string
+        tombstonedAt:
+          type: "null"
+  - if:
+      properties:
+        status:
+          const: tombstoned
+      required: [status]
+    then:
+      properties:
+        text:
+          type: "null"
+        tombstonedAt:
+          type: string
+          format: date-time

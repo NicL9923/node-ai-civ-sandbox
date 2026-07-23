@@ -1,0 +1,12 @@
+{
+  "authorAccountId": "acct_aurora_ada",
+  "text": "Hello, World Wire.",
+  "authorization": {
+    "actingLocalAgentId": "agent_ada",
+    "authorityDecision": {
+      "mode": "agent",
+      "ref": "social_intent_100",
+      "authorizedAt": "2026-07-22T20:05:00Z"
+    }
+  }
+}

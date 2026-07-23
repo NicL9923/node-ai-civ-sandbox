@@ -1,0 +1,23 @@
+type: object
+title: SocialFollowChangedEventData
+description: Citizen-safe follow/unfollow state event; private authority metadata is excluded.
+additionalProperties: false
+required:
+  - followerAccountId
+  - followedAccountId
+  - following
+  - changedAt
+properties:
+  followerAccountId:
+    type: string
+    minLength: 1
+    maxLength: 200
+  followedAccountId:
+    type: string
+    minLength: 1
+    maxLength: 200
+  following:
+    type: boolean
+  changedAt:
+    type: string
+    format: date-time
