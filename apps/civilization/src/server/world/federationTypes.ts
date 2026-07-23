@@ -97,6 +97,8 @@ export interface OutboxItemDoc extends FederationDocBase {
   itemKind: OutboxItemKind;
   /** Stable idempotency key sent to the World; identical across retries. */
   idempotencyKey: string;
+  /** Process-monotonic enqueue ordinal; a deterministic causal tie-breaker for equal-`createdAt` items. */
+  seq?: number;
   /** The exact payload to send (CloudEvent for events, InteractionRequest for interactions, SocialOutboxPayload for social). */
   payload: CloudEvent | InteractionRequest | SocialOutboxPayload;
   status: OutboxStatus;

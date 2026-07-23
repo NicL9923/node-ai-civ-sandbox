@@ -367,4 +367,19 @@ describe("FederationConnector — World Wire", () => {
     expect(world.posts).toHaveLength(1); // unrelated post still sent
     expect(world.follows).toHaveLength(1); // unrelated follow target still sent
   });
+
+  it("uses the enqueue seq to keep FIFO even when two same-target toggles share a createdAt", async () => {
+    const { store, social, connector } = await setup(world);
+    await connector.syncSocialAccounts();
+    await social.enqueue({ op: "like", actingLocalAgentId: "a1", useOfficialAccount: false, authorityMode: "citizen", authorityRef: "agent-a1", idempotencyKey: "seq-true", targetPostId: "pZ", liked: true });
+    await social.enqueue({ op: "like", actingLocalAgentId: "a1", useOfficialAccount: false, authorityMode: "citizen", authorityRef: "agent-a1", idempotencyKey: "seq-false", targetPostId: "pZ", liked: false });
+    // Force an EXACT createdAt tie so ordering must fall through to the monotonic enqueue seq.
+    await pinOrder(store, (p) => p.op === "like", "2020-01-01T00:00:00.000Z");
+    const seqs = (await store.listOutbox(SIM_ID)).filter((i) => i.itemKind === "social").map((i) => i.seq);
+    expect(seqs.every((s) => typeof s === "number")).toBe(true);
+
+    await connector.flushOutbox();
+    // true was enqueued first (lower seq), so despite the createdAt tie it is delivered before false.
+    expect(world.likes.map((l) => (l as { liked: boolean }).liked)).toEqual([true, false]);
+  });
 });

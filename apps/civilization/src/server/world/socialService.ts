@@ -6,7 +6,7 @@
 // memories, or private profile data.
 import { createHash } from "node:crypto";
 import type { FederationConfig, SocialConfig } from "../config.js";
-import { nowIso } from "../id.js";
+import { nextOutboxSeq, nowIso } from "../id.js";
 import type { SimulationStore } from "../store.js";
 import { safeFederationId } from "./federationIds.js";
 import {
@@ -173,6 +173,7 @@ export class SocialService implements SocialPort {
       kind: "outbox",
       itemKind: "social",
       idempotencyKey: input.idempotencyKey,
+      seq: nextOutboxSeq(),
       payload,
       status: "pending",
       attempts: 0,

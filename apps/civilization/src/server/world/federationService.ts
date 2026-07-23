@@ -6,7 +6,7 @@
 import type { ForeignAffairsSnapshot, KnownCivilization, SimulationEvent, SimulationEventType } from "../../shared/types.js";
 import type { FederationConfig } from "../config.js";
 import type { EventBus } from "../eventBus.js";
-import { newId, nowIso } from "../id.js";
+import { newId, nextOutboxSeq, nowIso } from "../id.js";
 import type { SimulationStore } from "../store.js";
 import { isExportableEvent, mapEventToCloudEvent } from "./eventMapping.js";
 import { safeFederationId } from "./federationIds.js";
@@ -158,6 +158,7 @@ export class FederationService implements FederationPort {
       kind: "outbox",
       itemKind: "event",
       idempotencyKey: cloudEvent.idempotencykey ?? event.id,
+      seq: nextOutboxSeq(),
       payload: cloudEvent,
       status: "pending",
       attempts: 0,
@@ -188,6 +189,7 @@ export class FederationService implements FederationPort {
       kind: "outbox",
       itemKind: "interaction",
       idempotencyKey: input.idempotencyKey,
+      seq: nextOutboxSeq(),
       payload: request,
       status: "pending",
       attempts: 0,

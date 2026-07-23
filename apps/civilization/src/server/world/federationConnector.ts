@@ -519,10 +519,18 @@ function parseRetryAfterMs(header: string | null | undefined): number | undefine
   return undefined;
 }
 
-/** Deterministic FIFO order for the outbox: oldest createdAt first, id as a stable tie-breaker. */
+/**
+ * Deterministic FIFO order for the outbox: oldest `createdAt` first, then the process-monotonic enqueue
+ * `seq` as a causal tie-breaker for items sharing a millisecond (falling back to `id` only when a legacy
+ * item predates `seq`). This guarantees a newer desired-state toggle never sorts ahead of an older one
+ * for the same target, even when both were enqueued within the same millisecond.
+ */
 function compareFifo(a: OutboxItemDoc, b: OutboxItemDoc): number {
   if (a.createdAt !== b.createdAt) {
     return a.createdAt < b.createdAt ? -1 : 1;
+  }
+  if (a.seq !== undefined && b.seq !== undefined && a.seq !== b.seq) {
+    return a.seq - b.seq;
   }
   return a.id.localeCompare(b.id);
 }
