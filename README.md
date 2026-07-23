@@ -62,6 +62,7 @@ are exactly-once even though transport is at-least-once.
 │   └── federation-contracts/  # P1 World<->Civilization protocol (OpenAPI 3.1 + generated TS/C#)
 ├── infra/
 │   ├── civilization/main.bicep  # Civilization Azure deployment (App Service + Cosmos + Foundry)
+│   ├── world/                   # World deployment (App Service + Cosmos worldmap DB + Key Vault + RBAC)
 │   └── README.md
 ├── test/
 │   ├── fake-civilization/     # P4 contract-driven fake civilization library + CLI + scenarios
@@ -203,7 +204,12 @@ catch-up). No real credentials, cloud, or Azure calls are involved.
 
 See [`infra/README.md`](infra/README.md). `infra/civilization/main.bicep` provisions the
 civilization deployment (App Service + Cosmos + Foundry) including the P3 `federation` container.
-CI validates that the Bicep **compiles** (`az bicep build`) but never logs in or deploys.
+`infra/world/` provisions the dedicated World deployment (Linux .NET 10 App Service, the `worldmap`
+Cosmos database + 11 containers inside the reused account with managed-identity auth, Application
+Insights, and a Key Vault for out-of-band HMAC secrets) — see
+[`docs/world-deployment-runbook.md`](docs/world-deployment-runbook.md). CI validates that all Bicep
+**compiles** (`az bicep build`) and that the World Cosmos schema stays in lockstep with the runtime
+(`npm run check:world-infra`), but never logs in or deploys.
 
 ## CI
 
@@ -218,9 +224,11 @@ the root workspace/.NET/`Justfile`/CI files:
 - **publish-smoke** — real `dotnet publish` bundles the SPA and the published host serves it correctly.
 - **fake-civilization-testkit** — Ubuntu **and** Windows: build, tests, and a CLI smoke check.
 - **federation-e2e** — Ubuntu: `npm ci`, install Chromium, `npm run test:federation-e2e`.
-- **infra** — `az bicep build` compile validation (no login, no deployment).
+- **infra** — `az bicep build` compile validation for the civilization + World templates, plus the
+  World Cosmos container parity / no-committed-secret check (no login, no deployment).
 
-No deployment workflow is included.
+Deployment is manual/operator-driven (see [`docs/world-deployment-runbook.md`](docs/world-deployment-runbook.md));
+no deployment workflow runs in CI.
 
 ## PR stack
 

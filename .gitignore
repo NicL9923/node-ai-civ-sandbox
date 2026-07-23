@@ -23,6 +23,8 @@ dist/
 # Bicep compiled output
 infra/*.json
 infra/**/*.json
+# ...but keep hand-authored data files that Bicep loads via loadJsonContent.
+!infra/world/containers.json
 
 # Misc
 .DS_Store
