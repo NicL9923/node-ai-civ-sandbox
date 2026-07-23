@@ -6,7 +6,7 @@
 import type { ForeignAffairsSnapshot, KnownCivilization, SimulationEvent, SimulationEventType } from "../../shared/types.js";
 import type { FederationConfig } from "../config.js";
 import type { EventBus } from "../eventBus.js";
-import { newId, nowIso } from "../id.js";
+import { newId, nextOutboxSeq, nowIso } from "../id.js";
 import type { SimulationStore } from "../store.js";
 import { isExportableEvent, mapEventToCloudEvent } from "./eventMapping.js";
 import { safeFederationId } from "./federationIds.js";
@@ -158,6 +158,7 @@ export class FederationService implements FederationPort {
       kind: "outbox",
       itemKind: "event",
       idempotencyKey: cloudEvent.idempotencykey ?? event.id,
+      seq: nextOutboxSeq(),
       payload: cloudEvent,
       status: "pending",
       attempts: 0,
@@ -188,6 +189,7 @@ export class FederationService implements FederationPort {
       kind: "outbox",
       itemKind: "interaction",
       idempotencyKey: input.idempotencyKey,
+      seq: nextOutboxSeq(),
       payload: request,
       status: "pending",
       attempts: 0,
@@ -328,6 +330,13 @@ export class FederationService implements FederationPort {
         decision: { status: "applied" },
         event: this.buildForeignEvent("foreignMessageReceived", `${from} sent a message${data.subject ? ` (${data.subject})` : ""}: ${data.body}`, rawKey, turn, data.fromCiv)
       };
+    }
+    // World Wire social activity may arrive as a typed command. We use it only to freshen the
+    // foreign-affairs briefing — never to duplicate posts into agent memories (the feed poll is the
+    // authoritative content source). The dedupe record is still written by the caller.
+    if (type.startsWith("world.social")) {
+      mutateAddWorldNote(state, "There's fresh activity on the World Wire.");
+      return { decision: { status: "applied" } };
     }
     // Unknown command types must never crash or stall the cursor: reject with a stable reason. State is
     // left untouched (no world note), but the inbox dedupe record is still written by the caller.

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Simulation } from "../../shared/types.js";
 import type { FederationConfig } from "../config.js";
+import { defaultSocialConfig } from "../config.js";
 import { EventBus } from "../eventBus.js";
 import { MemorySimulationStore } from "../store.js";
 import type { SimulationStore } from "../store.js";
@@ -19,7 +20,8 @@ function federationConfig(): FederationConfig {
     displayName: "Civ A",
     heartbeatIntervalMs: 30_000,
     pollIntervalMs: 10_000,
-    outboxIntervalMs: 5_000
+    outboxIntervalMs: 5_000,
+    social: defaultSocialConfig({ enabled: false })
   };
 }
 

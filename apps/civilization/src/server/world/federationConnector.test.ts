@@ -3,6 +3,7 @@ import type { AddressInfo } from "node:net";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { AppConfig, FederationConfig } from "../config.js";
 import { createAiProvider } from "../aiProvider.js";
+import { defaultSocialConfig } from "../config.js";
 import { EventBus } from "../eventBus.js";
 import { SimulationEngine } from "../simulation.js";
 import { MemorySimulationStore } from "../store.js";
@@ -158,6 +159,7 @@ function federationConfig(overrides: Partial<FederationConfig> = {}): Federation
     heartbeatIntervalMs: 60_000,
     pollIntervalMs: 60_000,
     outboxIntervalMs: 60_000,
+    social: defaultSocialConfig({ enabled: false }),
     ...overrides
   };
 }

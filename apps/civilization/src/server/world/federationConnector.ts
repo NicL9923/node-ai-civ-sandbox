@@ -4,18 +4,22 @@
 // stable across attempts. The command cursor is advanced ONLY after every command on a page is acked.
 import type { FederationConfig } from "../config.js";
 import type { FederationService, AckDecision } from "./federationService.js";
-import type { CloudEvent, Command, InteractionRequest, OutboxItemDoc, PublicProjection } from "./federationTypes.js";
+import type { SocialService } from "./socialService.js";
+import type { CloudEvent, Command, InteractionRequest, OutboxItemDoc, PublicProjection, SocialOutboxPayload } from "./federationTypes.js";
+import { compareOutboxFifo } from "./federationTypes.js";
 import { createWorldClient, type WorldClient, type WorldSigner } from "./worldClient.js";
 
 const BACKOFF_BASE_MS = 2_000;
 const BACKOFF_CAP_MS = 60_000;
 const PULL_PAGE_LIMIT = 50;
 
-type LoopName = "heartbeat" | "poll" | "flush";
+type LoopName = "heartbeat" | "poll" | "flush" | "socialSync" | "socialFeed";
 
 interface ClassifiedError extends Error {
   retryable: boolean;
   status?: number;
+  /** Parsed from a 429 Retry-After header (ms), bounded by the caller. */
+  retryAfterMs?: number;
 }
 
 export class FederationConnector {
@@ -25,14 +29,21 @@ export class FederationConnector {
 
   private client: WorldClient;
   private readonly timers: NodeJS.Timeout[] = [];
-  private readonly inFlight: Record<LoopName, boolean> = { heartbeat: false, poll: false, flush: false };
+  private readonly inFlight: Record<LoopName, boolean> = {
+    heartbeat: false,
+    poll: false,
+    flush: false,
+    socialSync: false,
+    socialFeed: false
+  };
   private stopped = false;
 
   constructor(
     private readonly service: FederationService,
     private readonly config: FederationConfig,
     private readonly log: (message: string, error?: unknown) => void = (message, error) =>
-      error ? console.error(`[federation] ${message}`, error) : console.log(`[federation] ${message}`)
+      error ? console.error(`[federation] ${message}`, error) : console.log(`[federation] ${message}`),
+    private readonly social?: SocialService
   ) {
     // Build a signed client immediately when credentials are pre-provisioned; the onboarding flow
     // rebuilds it after registration assigns civId/keyId (see rebuildClient).
@@ -62,6 +73,16 @@ export class FederationConnector {
       setInterval(() => void this.runLoop("poll", () => this.pollAndAck()), this.config.pollIntervalMs).unref(),
       setInterval(() => void this.runLoop("flush", () => this.flushOutbox()), this.config.outboxIntervalMs).unref()
     );
+
+    // World Wire (social) loops are additive and only run when the social sub-feature is enabled.
+    if (this.social && this.config.social.enabled) {
+      void this.runLoop("socialSync", () => this.syncSocialAccounts());
+      void this.runLoop("socialFeed", () => this.pollSocialFeed());
+      this.timers.push(
+        setInterval(() => void this.runLoop("socialSync", () => this.syncSocialAccounts()), this.config.social.syncIntervalMs).unref(),
+        setInterval(() => void this.runLoop("socialFeed", () => this.pollSocialFeed()), this.config.social.feedIntervalMs).unref()
+      );
+    }
   }
 
   stop(): void {
@@ -212,15 +233,36 @@ export class FederationConnector {
   }
 
   async flushOutbox(): Promise<void> {
-    const items = await this.service.listPendingOutbox();
+    // Process oldest-first with a deterministic tie-break so causal (FIFO) order is well-defined
+    // regardless of store ordering. Social like/follow are DESIRED-STATE PUTs: a newer intent for the
+    // same target must never overtake an older, not-yet-delivered one, or the final World state could
+    // regress to the older value (e.g. like=true 429s and backs off, like=false sends, then the true
+    // retry lands last ⇒ final=true, the opposite of the newest intent). We therefore preserve FIFO PER
+    // desired-state target key while letting posts and unrelated targets progress independently.
+    // listPendingOutbox already returns durable FIFO order (createdAt→seq→id); re-sort defensively so the
+    // guarantee holds even if a store returned items unordered.
+    const items = [...(await this.service.listPendingOutbox())].sort(compareOutboxFifo);
     const now = Date.now();
+    const blockedKeys = new Set<string>();
+
     for (const item of items) {
+      const key = desiredStateKey(item);
+      // A newer same-target intent is held behind an older one that has not yet been delivered.
+      if (key && blockedKeys.has(key)) {
+        continue;
+      }
       if (item.nextAttemptAt && new Date(item.nextAttemptAt).getTime() > now) {
+        // An older not-yet-due item owns this target; every newer same-key intent must wait.
+        if (key) {
+          blockedKeys.add(key);
+        }
         continue;
       }
       try {
         if (item.itemKind === "event") {
           await this.sendEvent(item);
+        } else if (item.itemKind === "social") {
+          await this.sendSocial(item);
         } else {
           await this.sendInteraction(item);
         }
@@ -228,14 +270,23 @@ export class FederationConnector {
         item.lastError = undefined;
         await this.service.saveOutboxItem(item);
         await this.service.markConnection(true);
+        // Success: the target is up to date, so a newer same-key intent may send later THIS cycle in
+        // FIFO order (the key is intentionally left unblocked).
       } catch (error) {
         item.attempts += 1;
         item.lastError = error instanceof Error ? error.message : String(error);
         if (this.isRetryable(error)) {
-          item.nextAttemptAt = this.backoffAt(item.attempts);
+          // Honor a bounded 429 Retry-After when the World advertised one; otherwise use normal backoff.
+          const retryAfterMs = this.retryAfterMsOf(error);
+          item.nextAttemptAt = retryAfterMs !== undefined ? this.retryAfterAt(retryAfterMs) : this.backoffAt(item.attempts);
+          // Retryable failure: the older intent is still live, so hold newer same-key intents this cycle.
+          if (key) {
+            blockedKeys.add(key);
+          }
         } else {
           item.status = "failed";
           this.log(`outbox item ${item.id} permanently failed`, error);
+          // Permanent failure: the old request can NEVER apply, so a newer same-key intent may proceed.
         }
         await this.service.saveOutboxItem(item);
       }
@@ -267,6 +318,88 @@ export class FederationConnector {
     if (data?.resourceId) {
       item.interactionId = data.resourceId;
     }
+  }
+
+  /** Flush one durable World Wire mutation. World is authoritative — social facts are NEVER re-exported. */
+  private async sendSocial(item: OutboxItemDoc): Promise<void> {
+    if (!this.social) {
+      throw this.permanentError("social item present but social sub-feature is disabled");
+    }
+    const payload = item.payload as SocialOutboxPayload;
+    if (payload.op === "post") {
+      const { error, response } = await this.client.POST("/social/posts", {
+        params: { header: this.idemHeader(item.idempotencyKey) },
+        body: {
+          authorAccountId: payload.authorAccountId,
+          text: payload.text,
+          parentPostId: payload.parentPostId,
+          authorization: payload.authorization
+        }
+      });
+      if (error) {
+        throw this.httpError(response, error);
+      }
+      return;
+    }
+    if (payload.op === "like") {
+      const { error, response } = await this.client.PUT("/social/posts/{postId}/likes/{accountId}", {
+        params: { path: { postId: payload.postId, accountId: payload.accountId }, header: this.idemHeader(item.idempotencyKey) },
+        body: { liked: payload.liked, authorization: payload.authorization }
+      });
+      if (error) {
+        throw this.httpError(response, error);
+      }
+      return;
+    }
+    // follow
+    const { error, response } = await this.client.PUT("/social/accounts/{accountId}/following/{targetAccountId}", {
+      params: {
+        path: { accountId: payload.followerAccountId, targetAccountId: payload.targetAccountId },
+        header: this.idemHeader(item.idempotencyKey)
+      },
+      body: { following: payload.following, authorization: payload.authorization }
+    });
+    if (error) {
+      throw this.httpError(response, error);
+    }
+    await this.social.recordFollowResult(payload.followerAccountId, payload.targetAccountId, payload.following);
+  }
+
+  /**
+   * Reconcile the civ's World Wire accounts. Debounced + fingerprint-gated in the service, so an
+   * unchanged desired set is a no-op. The ordered response is zipped back onto local identities.
+   */
+  async syncSocialAccounts(): Promise<void> {
+    if (!this.social) {
+      return;
+    }
+    const plan = await this.social.buildSyncPlan();
+    if (!plan || !(await this.social.shouldSync(plan.fingerprint))) {
+      return;
+    }
+    const { data, error, response } = await this.client.POST("/social/accounts/sync", {
+      params: { header: this.idemHeader(this.social.syncIdempotencyKey(plan.fingerprint)) },
+      body: plan.request
+    });
+    if (error || !data) {
+      throw this.httpError(response, error);
+    }
+    await this.social.applySyncResult(plan.slots, data.accounts, plan.fingerprint);
+    await this.service.markConnection(true);
+  }
+
+  /** Poll the public global feed (first-page snapshot) and compact-merge it into the bounded cache. */
+  async pollSocialFeed(): Promise<void> {
+    if (!this.social) {
+      return;
+    }
+    const { data, error, response } = await this.client.GET("/social/feed", {
+      params: { query: { limit: this.config.social.feedLimit } }
+    });
+    if (error || !data) {
+      throw this.httpError(response, error);
+    }
+    await this.social.applyFeedPage(data.items);
   }
 
   // --- helpers ---------------------------------------------------------------
@@ -324,6 +457,20 @@ export class FederationConnector {
     return new Date(Date.now() + jittered).toISOString();
   }
 
+  /** A bounded next-attempt time from a 429 Retry-After hint (clamped to the social maxRetryAfterMs). */
+  private retryAfterAt(retryAfterMs: number): string {
+    const bounded = Math.max(0, Math.min(retryAfterMs, this.config.social.maxRetryAfterMs));
+    return new Date(Date.now() + bounded).toISOString();
+  }
+
+  private retryAfterMsOf(error: unknown): number | undefined {
+    if (typeof error === "object" && error !== null && "retryAfterMs" in error) {
+      const value = (error as ClassifiedError).retryAfterMs;
+      return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+    }
+    return undefined;
+  }
+
   private isRetryable(error: unknown): boolean {
     return !(typeof error === "object" && error !== null && "retryable" in error && (error as ClassifiedError).retryable === false);
   }
@@ -341,6 +488,9 @@ export class FederationConnector {
     const err = new Error(`World call failed${status ? ` (HTTP ${status})` : ""}${detail ? `: ${detail}` : ""}`) as ClassifiedError;
     err.status = status;
     err.retryable = status === undefined || status === 429 || status >= 500;
+    if (status === 429) {
+      err.retryAfterMs = parseRetryAfterMs(response?.headers.get("Retry-After"));
+    }
     return err;
   }
 
@@ -354,4 +504,39 @@ export class FederationConnector {
     }
     return undefined;
   }
+}
+
+/** Parse an HTTP `Retry-After` header (delta-seconds or an HTTP-date) into milliseconds. */
+function parseRetryAfterMs(header: string | null | undefined): number | undefined {
+  if (!header) {
+    return undefined;
+  }
+  const seconds = Number(header);
+  if (Number.isFinite(seconds)) {
+    return Math.max(0, seconds * 1000);
+  }
+  const dateMs = Date.parse(header);
+  if (!Number.isNaN(dateMs)) {
+    return Math.max(0, dateMs - Date.now());
+  }
+  return undefined;
+}
+
+/**
+ * The desired-state target key for a social like/follow (whose final value depends on delivery order),
+ * or undefined for order-independent items (posts, events, interactions). FIFO is enforced only within a
+ * key so unrelated targets and posts still progress freely.
+ */
+function desiredStateKey(item: OutboxItemDoc): string | undefined {
+  if (item.itemKind !== "social") {
+    return undefined;
+  }
+  const payload = item.payload as SocialOutboxPayload;
+  if (payload.op === "like") {
+    return `like:${payload.accountId}:${payload.postId}`;
+  }
+  if (payload.op === "follow") {
+    return `follow:${payload.followerAccountId}:${payload.targetAccountId}`;
+  }
+  return undefined;
 }
