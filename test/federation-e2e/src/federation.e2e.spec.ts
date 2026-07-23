@@ -36,6 +36,7 @@ import {
   worldBaseUrl,
   type GeneratedCredentials,
 } from "./world-config.js";
+import { readSseUntil } from "./sse.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const workspaceDir = path.resolve(here, "..");
@@ -525,9 +526,15 @@ test("real-process federation: register, offline/resume, contact+message, exactl
     expect(accountPosts.items.some((item) => item.postId === realPostId)).toBe(true);
     const events = await getJson<{ items: any[] }>(worldUrl("/world/v1/events?limit=100"));
     expect(events.items.some((event) => event.type === "world.social.post.created.v1" && event.data?.post?.postId === realPostId)).toBe(true);
-    const sse = await readSseSample(worldUrl("/world/v1/stream"), 2_500);
+    const sse = await readSseUntil(worldUrl("/world/v1/stream"), {
+      windowMs: 2_500,
+      matchFrame: (frame) => frame.includes("world.social."),
+    });
     expect(sse.contentType).toContain("text/event-stream");
-    expect(sse.frames.some((frame) => frame.includes("world.social."))).toBe(true);
+    expect(
+      sse.matched,
+      `social SSE frame was not observed; stop=${sse.stopReason}; error=${sse.error ?? "none"}; frames=${sse.raw}`,
+    ).toBe(true);
   });
 
   await test.step("fake reply reaches the real civ briefing and direct-reply awareness", async () => {
@@ -673,9 +680,15 @@ test("real-process federation: register, offline/resume, contact+message, exactl
     await expect(page.getByText(/Familiarity/i).first()).toBeVisible();
 
     // SSE probe: the stream connects, returns text/event-stream, and carries resumable id: frames.
-    const sse = await readSseSample(worldUrl("/world/v1/stream"), 2500);
+    const sse = await readSseUntil(worldUrl("/world/v1/stream"), {
+      windowMs: 2_500,
+      matchFrame: (frame) => /^id:/m.test(frame),
+    });
     expect(sse.contentType).toContain("text/event-stream");
-    expect(sse.frames.some((f) => /^id:/m.test(f))).toBe(true);
+    expect(
+      sse.matched,
+      `resumable SSE frame was not observed; stop=${sse.stopReason}; error=${sse.error ?? "none"}; frames=${sse.raw}`,
+    ).toBe(true);
     capturedBodies.push(sse.raw);
 
     // Reload again = reconnect from the durable feed; still exactly one of each narrative.
@@ -745,49 +758,4 @@ function countForeign(events: Array<{ type?: string }>): { contact: number; mess
     contact: events.filter((e) => e.type === "foreignContactReceived").length,
     message: events.filter((e) => e.type === "foreignMessageReceived").length,
   };
-}
-
-/** Read a short sample of an SSE feed: content-type plus the first frames, then abort. */
-async function readSseSample(
-  url: string,
-  windowMs: number,
-): Promise<{ contentType: string; frames: string[]; raw: string }> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), windowMs);
-  let contentType = "";
-  let raw = "";
-  try {
-    const response = await fetch(url, {
-      headers: { Accept: "text/event-stream" },
-      signal: controller.signal,
-    });
-    contentType = response.headers.get("content-type") ?? "";
-    const reader = response.body?.getReader();
-    const decoder = new TextDecoder();
-    if (reader) {
-      try {
-        while (true) {
-          const { value, done } = await reader.read();
-          if (done) break;
-          raw += decoder.decode(value, { stream: true });
-          // The endpoint replays the durable feed as id:-framed events on connect; one complete
-          // frame is enough to prove a resumable stream.
-          if (/(^|\n)id:/.test(raw) && raw.includes("\n\n")) break;
-          if (raw.length > 8192) break;
-        }
-      } catch {
-        // aborted or stream error mid-read — keep whatever was captured
-      }
-      try {
-        await reader.cancel();
-      } catch {
-        // ignore
-      }
-    }
-  } catch {
-    // fetch failed to establish — contentType stays empty and the assertion will surface it
-  } finally {
-    clearTimeout(timer);
-  }
-  return { contentType, frames: raw.split(/\n\n/).filter(Boolean), raw };
 }
