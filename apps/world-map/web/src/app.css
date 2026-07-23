@@ -560,6 +560,28 @@
   padding: 0;
 }
 
+/* Pinned focused-post section: shown when a deep-linked post sits outside the loaded pages. It is
+   set apart from the chronological context by a heading + a faint signal rule, not color alone. */
+.wire-focused {
+  padding: var(--s-3) 0 0;
+  border-bottom: 1px solid var(--line);
+  box-shadow: inset 3px 0 0 var(--signal);
+}
+.wire-focused__title {
+  margin: 0 var(--s-4);
+  font-size: var(--t-sm);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--ink-soft);
+}
+.wire-focused .panel__eyebrow {
+  margin: var(--s-1) var(--s-4) 0;
+}
+.wire-focused .post {
+  border-bottom: none;
+}
+
 /* Post row — a ruled ledger entry. */
 .post {
   padding: var(--s-3) var(--s-4);
