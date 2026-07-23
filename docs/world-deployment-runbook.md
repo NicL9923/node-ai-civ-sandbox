@@ -11,7 +11,7 @@ a .NET 10 ASP.NET Core federation service with a bundled React observer SPA, bac
 Templates & tooling:
 
 - `infra/world/main.bicep` — plan + Web App + App Insights + Key Vault + Cosmos `worldmap` DB/containers + RBAC.
-- `infra/world/containers.json` — Cosmos container / PK / TTL / unique-key source of truth (lockstep with the runtime; `worldEvents` carries the `/payload/worldsequence` unique key backstop).
+- `infra/world/containers.json` — Cosmos container / PK / TTL / unique-key source of truth (lockstep with the runtime; `worldEvents` carries the `/payload/worldsequence` unique key backstop). The authoritative container list **and count** live in this file — do not hardcode the count in prose. <!-- world-container-count: 18 -->
 - `infra/world/civ-federation-container.bicep` — additive `federation` container for the existing civ DB.
 - `infra/world/civ-federation-secrets.bicep` — additive dedicated civ Key Vault + civ MI Secrets User role.
 - `infra/world/main.bicepparam` — example parameters (no secrets).
@@ -104,12 +104,24 @@ just world-infra-check      # parity + no-secret + onboarding-record + secret-ha
 
 ## 4. Preview (what-if)
 
+> **Fail-closed prerequisite — `worldEvents` unique key is immutable.** Cosmos unique-key policies
+> **cannot be changed after a container is created**. `worldEvents` **must** be created greenfield with the
+> unique key `/payload/worldsequence` (the structural duplicate-`worldsequence` backstop). The bootstrapper
+> sets this on first provisioning and **cannot retrofit it** onto a pre-existing container; if a
+> `worldEvents` container already exists **without** (or with the wrong) unique key, `/health/ready` will
+> **fail closed** and the runtime will not serve. In that case **stop** and safely recreate only the
+> **undeployed / empty** `worldEvents` container (or the not-yet-provisioned World database) — with the
+> unique key set at creation — **never delete a deployed or non-empty event ledger**. The World has **not
+> been deployed yet**, so this first rollout is greenfield and safe.
+
 ```powershell
 just world-infra-whatif bce49949-4505-4c57-9207-a84ce0f5c935 nicolas-node-ai-sandbox
 ```
 
-Confirm it creates only World resources (plan, site, App Insights, Key Vault, `worldmap` DB + 11
-containers, 2 role assignments) and shows **no changes** to civilization resources.
+Confirm it creates only World resources (plan, site, App Insights, Key Vault, the `worldmap` DB + its
+full container set defined in `infra/world/containers.json` — `worldEvents` with the
+`/payload/worldsequence` unique key — plus 2 role assignments) and shows **no changes** to civilization
+resources.
 
 ## 5. Provision World infrastructure (first pass, no onboarding records)
 

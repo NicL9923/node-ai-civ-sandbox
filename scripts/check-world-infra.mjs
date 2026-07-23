@@ -118,6 +118,29 @@ export function parseJsonUniqueKeys(spec) {
   }
   return result;
 }
+
+/** Parse the checked `<!-- world-container-count: N -->` marker from the runbook (null if absent). */
+export function parseContainerCountMarker(runbookText) {
+  const m = runbookText.match(/<!--\s*world-container-count:\s*(\d+)\s*-->/);
+  return m ? Number(m[1]) : null;
+}
+
+/** Find hardcoded "N container(s)" prose claims (the marker itself is not "N containers", so excluded). */
+export function findHardcodedContainerCounts(runbookText) {
+  return [...runbookText.matchAll(/(\d{1,4})\s+containers?\b/gi)].map((m) => Number(m[1]));
+}
+
+/** True when the runbook carries the immutable worldEvents unique-key fail-closed warning. */
+export function hasImmutableUniqueKeyWarning(runbookText) {
+  const lower = runbookText.toLowerCase();
+  return (
+    lower.includes('/payload/worldsequence') &&
+    lower.includes('immutable') &&
+    lower.includes('worldevents') &&
+    /fail[\s-]?closed/.test(lower)
+  );
+}
+
 export function scanContent(content, denyList) {
   const hits = [];
   content.split(/\r?\n/).forEach((line, idx) => {
@@ -520,8 +543,50 @@ function checkOnboardingFlow() {
   }
 }
 
+// --------------------------------------------------------------------------------------------------
+// (1c) Runbook schema drift: the docs must not carry a stale hardcoded container count, and must
+// carry the immutable worldEvents unique-key fail-closed warning. The authoritative count comes from
+// containers.json; a checked `<!-- world-container-count: N -->` marker keeps prose in lockstep.
+// --------------------------------------------------------------------------------------------------
+function checkRunbookSchemaDrift() {
+  const spec = JSON.parse(readFileSync(CONTAINERS_JSON, 'utf8'));
+  const count = spec.containers.length;
+  const text = readFileSync(RUNBOOK, 'utf8');
+  let ok = true;
+
+  const marker = parseContainerCountMarker(text);
+  if (marker === null) {
+    ok = false;
+    errors.push('runbook-schema: missing `<!-- world-container-count: N -->` marker in the runbook');
+  } else if (marker !== count) {
+    ok = false;
+    errors.push(`runbook-schema: runbook container-count marker ${marker} != containers.json count ${count}`);
+  }
+
+  for (const claimed of findHardcodedContainerCounts(text)) {
+    if (claimed !== count) {
+      ok = false;
+      errors.push(
+        `runbook-schema: stale hardcoded "${claimed} container(s)" in the runbook (schema has ${count}); point to containers.json instead of a literal count`,
+      );
+    }
+  }
+
+  if (!hasImmutableUniqueKeyWarning(text)) {
+    ok = false;
+    errors.push(
+      'runbook-schema: runbook is missing the immutable `worldEvents` `/payload/worldsequence` unique-key fail-closed warning',
+    );
+  }
+
+  if (ok) {
+    console.log(`runbook-schema: OK — container-count marker ${count} matches containers.json, no stale counts, immutable unique-key warning present`);
+  }
+}
+
 function runAll() {
   checkContainerParity();
+  checkRunbookSchemaDrift();
   checkNoSecrets();
   checkOnboardingRecords();
   checkOnboardingFlow();

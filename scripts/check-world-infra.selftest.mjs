@@ -9,7 +9,7 @@
 // Exit 0 = all assertions hold; 1 = a detector regressed.
 // =====================================================================================================
 
-import { RAW_VALUE_DENYLIST, SECRET_HANDLING_DENYLIST, scanContent, categorizeOnboardingInvocations, parseCsUniqueKeys, parseJsonUniqueKeys } from './check-world-infra.mjs';
+import { RAW_VALUE_DENYLIST, SECRET_HANDLING_DENYLIST, scanContent, categorizeOnboardingInvocations, parseCsUniqueKeys, parseJsonUniqueKeys, parseContainerCountMarker, findHardcodedContainerCounts, hasImmutableUniqueKeyWarning } from './check-world-infra.mjs';
 
 const failures = [];
 const hitNames = (content, denyList) => scanContent(content, denyList).map((h) => h.name);
@@ -139,9 +139,33 @@ if (parseCsUniqueKeys('// no dictionary here').size !== 0) {
   failures.push('unique-key: parseCsUniqueKeys should return empty when the dictionary is absent');
 }
 
+// --- Runbook schema-drift helpers (container-count marker + immutable unique-key warning) ---
+if (parseContainerCountMarker('intro <!-- world-container-count: 18 --> tail') !== 18) {
+  failures.push('runbook-schema: parseContainerCountMarker failed to read the 18 marker');
+}
+if (parseContainerCountMarker('no marker here') !== null) {
+  failures.push('runbook-schema: parseContainerCountMarker should be null when the marker is absent');
+}
+{
+  // A stale prose count is caught; the marker (no trailing "containers") is NOT a false positive.
+  const counts = findHardcodedContainerCounts('worldmap DB + 11 containers. <!-- world-container-count: 18 -->');
+  if (!counts.includes(11)) {
+    failures.push('runbook-schema: findHardcodedContainerCounts missed the stale "11 containers" prose');
+  }
+  if (counts.includes(18)) {
+    failures.push('runbook-schema: findHardcodedContainerCounts false-matched the count marker');
+  }
+}
+if (!hasImmutableUniqueKeyWarning('worldEvents unique key /payload/worldsequence is immutable and fail-closed')) {
+  failures.push('runbook-schema: hasImmutableUniqueKeyWarning missed a valid warning');
+}
+if (hasImmutableUniqueKeyWarning('worldEvents exists but no unique-key note')) {
+  failures.push('runbook-schema: hasImmutableUniqueKeyWarning false-positived on incomplete text');
+}
+
 if (failures.length > 0) {
   console.error('World infra guard SELF-TEST FAILED:');
   for (const f of failures) console.error(`  - ${f}`);
   process.exit(1);
 }
-console.log(`World infra guard self-test passed (raw-value + secret-handling + unique-key parity detectors verified).`);
+console.log(`World infra guard self-test passed (raw-value + secret-handling + unique-key parity + runbook schema-drift detectors verified).`);
