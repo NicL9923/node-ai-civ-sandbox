@@ -17,7 +17,7 @@ infra/
 ## Civilization
 
 `civilization/main.bicep` provisions the existing single-app deployment: a Linux App
-Service (`NODE|22-lts`, `appCommandLine: npm start`), Cosmos DB (SQL API) — including the
+Service (`NODE|24-lts`, `appCommandLine: npm start`), Cosmos DB (SQL API) — including the
 `federation` container the P3 World connector reads/writes when federation is enabled — Application
 Insights + Log Analytics, and a Microsoft Foundry account/project with model deployments. CI compiles
 this template with `az bicep build` (no login, no deployment).

@@ -6,7 +6,7 @@
   "description": "Deterministic contract-driven fake civilization client for World Federation tests.",
   "license": "MIT",
   "engines": {
-    "node": ">=22 <25"
+    "node": ">=24.22.2 <25"
   },
   "bin": {
     "fake-civ": "./dist/cli.js"
@@ -23,17 +23,18 @@
     "README.md"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "node ../../node_modules/typescript-native/bin/tsc -p tsconfig.json",
     "cli": "npm run build --silent && node dist/cli.js",
     "test": "npm run build && vitest run"
   },
   "dependencies": {
     "@ai-civ/federation-contracts": "0.1.0",
-    "openapi-fetch": "0.13.8"
+    "openapi-fetch": "0.17.0"
   },
   "devDependencies": {
-    "@types/node": "26.0.1",
+    "@types/node": "24.19.2",
     "typescript": "6.0.3",
-    "vitest": "4.1.9"
+    "vitest": "5.0.5",
+    "typescript-native": "npm:typescript@7.0.2"
   }
 }

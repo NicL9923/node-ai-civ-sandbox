@@ -11,7 +11,7 @@
     "test/federation-e2e"
   ],
   "engines": {
-    "node": ">=22 <25"
+    "node": ">=24.22.2 <25"
   },
   "scripts": {
     "build": "npm run build -w apps/civilization",
@@ -41,5 +41,11 @@
     "pretest:federation-e2e": "npm run build:civilization && npm run build:testkit && npm run publish:world-e2e",
     "test:federation-e2e": "npm run test -w @ai-civ/federation-e2e",
     "check:world-infra": "node scripts/check-world-infra.mjs"
+  },
+  "packageManager": "npm@12.2.1",
+  "allowScripts": {
+    "esbuild@0.28.1": true,
+    "protobufjs@7.6.6": true,
+    "fsevents@2.3.3": true
   }
 }
