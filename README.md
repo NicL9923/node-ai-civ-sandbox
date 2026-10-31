@@ -78,7 +78,7 @@ are exactly-once even though transport is at-least-once.
 
 ## Prerequisites
 
-- Node.js 22 (`>=22 <25`) and npm
+- Node.js 24.22.2 and npm 12.2.1 (see `.node-version` and `packageManager`)
 - .NET 10 SDK — the World runtime, the contracts' C# artifacts, and the E2E's published World
 - Optional: [`just`](https://github.com/casey/just) for the task runner
 - For the federation E2E only: a Playwright Chromium build (`npx playwright install chromium`)
@@ -261,3 +261,7 @@ This monorepo was built as a stack of reviewed pull requests:
 | P4 | #4 | Fake civilization test kit |
 | P5 | #7 | World observer UI + server-driven SSE resume |
 | P6 | this PR | Federation final integration (merges P3 + P4 onto P5, adds the real-process E2E) |
+
+### Tooling compatibility
+
+TypeScript 7 compiles the workspaces through `typescript-native`. JavaScript TypeScript 6 remains available to tools that use the compiler API; openapi-typescript installs its compatible TypeScript 5 peer separately. Kiota remains at 1.34.1: 1.37.0 changes generated C# public model types, so adopting it needs a separate compatibility migration. The remaining npm audit finding is a moderate minimatch issue in the development-only openapi-typescript generator chain. It processes repository-owned contract files; revisit when that generator updates its Redocly dependency. Do not force a major dependency override.

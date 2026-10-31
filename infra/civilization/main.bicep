@@ -180,7 +180,7 @@ resource app 'Microsoft.Web/sites@2024-04-01' = {
     serverFarmId: empty(existingAppServicePlanId) ? plan.id : existingAppServicePlanId
     httpsOnly: true
     siteConfig: {
-      linuxFxVersion: 'NODE|22-lts'
+      linuxFxVersion: 'NODE|24-lts'
       appCommandLine: 'npm start'
       alwaysOn: appServiceSkuName != 'F1'
       ftpsState: 'Disabled'
